@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "nodered": {
+      "command": "nodered-mcp",
+      "env": {
+        "NODERED_URL": "http://localhost:1880",
+        "NODERED_TOKEN": "your-admin-token-if-auth-is-enabled",
+        "MCP_LOG_LEVEL": "info"
+      }
+    }
+  }
+}

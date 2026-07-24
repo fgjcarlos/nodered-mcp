@@ -1,0 +1,53 @@
+{
+  "manifest_version": "0.3",
+  "name": "nodered-mcp",
+  "display_name": "Node-RED MCP",
+  "version": "0.4.0",
+  "description": "Control a Node-RED instance from your AI client: list/create/update/delete flows, trigger inject nodes, and manage the palette (install/uninstall/enable/disable nodes).",
+  "author": {
+    "name": "fgjcarlos",
+    "url": "https://github.com/fgjcarlos"
+  },
+  "homepage": "https://github.com/fgjcarlos/nodered-mcp",
+  "license": "MIT",
+  "keywords": ["node-red", "mcp", "automation", "iot"],
+  "server": {
+    "type": "binary",
+    "entry_point": "server/nodered-mcp",
+    "mcp_config": {
+      "command": "${__dirname}/server/nodered-mcp",
+      "args": [],
+      "env": {
+        "NODERED_URL": "${user_config.nodered_url}",
+        "NODERED_TOKEN": "${user_config.nodered_token}",
+        "NODERED_BACKUP_DIR": "${user_config.backup_dir}"
+      }
+    }
+  },
+  "user_config": {
+    "nodered_url": {
+      "type": "string",
+      "title": "Node-RED URL",
+      "description": "Base URL of your Node-RED instance, e.g. http://localhost:1880 (adjust the port if Node-RED runs in Docker).",
+      "default": "http://localhost:1880",
+      "required": true
+    },
+    "nodered_token": {
+      "type": "string",
+      "title": "Node-RED API token",
+      "description": "Bearer token if adminAuth is enabled. Leave empty for a Node-RED without admin auth.",
+      "sensitive": true,
+      "required": false
+    },
+    "backup_dir": {
+      "type": "directory",
+      "title": "Backups folder",
+      "description": "Where flow snapshots are written before every mutating operation.",
+      "default": "${HOME}/nodered-mcp-backups",
+      "required": false
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"]
+  }
+}

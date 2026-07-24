@@ -1,0 +1,32 @@
+# Binaries
+/nodered-mcp
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Runtime output
+backups/
+
+# AI tooling caches
+.atl/
+
+# mcpb bundle build artifacts
+mcpb/server/
+*.mcpb
+
+# Test artifacts
+*.test
+*.out
+coverage.txt
+
+# Env
+.env
+.env.local
+
+# Editor
+.vscode/
+.idea/
+*.swp
+.DS_Store

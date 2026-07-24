@@ -1,0 +1,6 @@
+# Whitelist only what the build needs — keeps the context tiny.
+*
+!go.mod
+!go.sum
+!cmd
+!internal

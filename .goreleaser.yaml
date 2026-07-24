@@ -1,0 +1,48 @@
+version: 2
+
+project_name: nodered-mcp
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: nodered-mcp
+    main: ./cmd/nodered-mcp
+    binary: nodered-mcp
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: default
+    # No version in the name so the `latest/download/<asset>` URL is stable
+    # across releases — that's what the install scripts rely on.
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+      - examples/**
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
