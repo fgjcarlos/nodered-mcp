@@ -37,10 +37,10 @@ A Spanish version of this document is available at [`README.es.md`](./README.es.
 | `search_flows` | `GET /flows` | read | Find nodes anywhere by free text or node type |
 | `get_flow` | `GET /flow/:id` | read | A single flow tab by ID |
 | `create_flow` | `POST /flow` | write | Create a new flow tab |
-| `update_flow` | `PUT /flow/:id` | write | Replace an existing flow tab |
+| `update_flow` | `PUT /flow/:id` | write | Replace an existing flow tab. Accepts both the nested `{id,label,nodes}` shape and the flat `GET /flows` array (the matching tab is picked out by `id`) |
 | `delete_flow` | `DELETE /flow/:id` | write | Delete a flow tab and its nodes |
 | `set_flows` | `POST /flows` | write | Full deployment — replaces the entire configuration |
-| `add_node` | `PUT /flow/:id` | write | Add one node without touching the rest |
+| `add_node` | `PUT /flow/:id` | write | Add one node without touching the rest. The `node` argument accepts a JSON object directly or a JSON-encoded string. Nodes without `x`/`y` are rejected — add them before calling (a typical inject carries `x:140,y:140`) |
 | `update_node` | `PUT /flow/:id` | write | Change one node's properties, merging not replacing |
 | `delete_node` | `PUT /flow/:id` | write | Remove one node and the wires pointing at it |
 | `connect_nodes` | `PUT /flow/:id` | write | Wire one node's output to another |
@@ -112,7 +112,7 @@ Context is read-only here because the admin API exposes no way to write it — t
 
 `update_flow` replaces an entire tab, which means a model has to reproduce every node exactly. Anything it fails to reproduce is destroyed — and Node-RED nodes carry type-specific fields no schema knows about.
 
-The granular tools avoid that. Each reads the tab, changes only what was asked for, and writes it back through the same guardrails: wires validated, backup taken.
+The granular tools avoid that. Each reads the tab, changes only what was asked for, and writes it back through the same guardrails: wires validated, backup taken. Concurrent calls against the same instance are serialized at the `Client` level so a second `add_node` always sees the first's write — no more silent lost-mutation races.
 
 ```
 add_node(flow_id, node)                      -> appends, leaves everything else byte-identical
@@ -123,7 +123,7 @@ connect_nodes(flow_id, from_id, to_id, port) -> appends to that output port
 
 `update_node` merges rather than replaces. Retuning an MQTT topic leaves the broker reference, QoS, and position untouched. Deleting a node also strips wires aimed at it, because Node-RED accepts wires pointing at nothing and simply never delivers to them — a flow that looks intact and quietly does less than it should. `connect_nodes` appends to the port you name and grows the wires array when that port does not exist yet, instead of rewriting the array by hand.
 
-Guarded: a duplicate node id is rejected, a node's id cannot be changed (the wires reference it), and wiring to a node that does not exist is refused.
+Guarded: a duplicate node id is rejected, a node's id cannot be changed (the wires reference it), wiring to a node that does not exist is refused, and `add_node` rejects a node without `x`/`y` or whose `z` does not resolve to the owning tab or another existing node — the runtime crashes on the next deploy with `Cannot read properties of undefined (reading 'wires')` if either slips through.
 
 One detail worth knowing when reading a tab: Node-RED splits its contents into `nodes` and `configs`, deciding by whether the object carries `x`/`y` canvas coordinates. A shared MQTT broker belongs to the tab but appears under `configs`. These tools honour that split, so config nodes can be edited too and never end up filed in the wrong place.
 
@@ -231,7 +231,7 @@ The wrapper lives at [`@fgjcarlos/nodered-mcp`](https://www.npmjs.com/package/@f
 
 ```bash
 npm install -g @fgjcarlos/nodered-mcp
-nodered-mcp version   # -> 0.5.11
+nodered-mcp version   # -> 0.5.12
 ```
 
 Works on Linux, macOS, and Windows (amd64 and arm64) without extra setup. The wrapper has zero npm dependencies — a hand-rolled POSIX tar parser in `bin/tar.js` extracts the binary, so `npm audit` sees only the wrapper itself.
@@ -302,7 +302,7 @@ Every setting can be supplied as an environment variable or a command-line flag.
 | `NODERED_INSECURE` | — | `false` | Skip TLS verification. Development only |
 | `NODERED_BACKUP_DIR` | — | `backups` | Where flow snapshots are written before each write |
 | `MCP_READ_ONLY` | `--read-only` | `false` | Expose only tools that cannot modify Node-RED |
-| `MCP_DEBUG_STREAM` | `--debug-stream` | `false` | Open the `/comms` WebSocket at startup to enable debug streaming. **Off by default** because some Node-RED versions crash during the handshake |
+| `MCP_DEBUG_STREAM` | `--debug-stream` | `false` | Open the `/comms` WebSocket at startup to enable debug streaming. **Off by default** because some Node-RED versions crash during the handshake. After enabling it, give `get_debug_messages` ~3 seconds to receive — the WebSocket is dialled at startup and the runtime publishes nothing until the editor-side filter is wired up. If the call still reports "still connecting", set `MCP_LOG_LEVEL=debug` and look for a `/comms` dial error in the server logs. |
 | `MCP_TRANSPORT` | `--transport` | `stdio` | `stdio` or `http` |
 | `MCP_HTTP_ADDR` | `--http-addr` | `:8090` | Listen address for the HTTP transport |
 | `MCP_HTTP_TOKEN` | `--http-token` | — | Bearer token for the HTTP transport. Required unless bound to loopback |

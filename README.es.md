@@ -37,10 +37,10 @@ La versión en inglés de este documento está en [`README.md`](./README.md).
 | `search_flows` | `GET /flows` | read | Localizar nodos en cualquier flow por texto libre o por tipo |
 | `get_flow` | `GET /flow/:id` | read | Una pestaña de flow por su ID |
 | `create_flow` | `POST /flow` | write | Crear una pestaña nueva |
-| `update_flow` | `PUT /flow/:id` | write | Reemplazar una pestaña existente |
+| `update_flow` | `PUT /flow/:id` | write | Reemplazar una pestaña existente. Acepta tanto la forma anidada `{id,label,nodes}` como el array plano de `GET /flows` (la pestaña correcta se selecciona por `id`) |
 | `delete_flow` | `DELETE /flow/:id` | write | Eliminar una pestaña y sus nodos |
 | `set_flows` | `POST /flows` | write | Despliegue completo: reemplaza toda la configuración |
-| `add_node` | `PUT /flow/:id` | write | Añadir un nodo sin tocar los demás |
+| `add_node` | `PUT /flow/:id` | write | Añadir un nodo sin tocar los demás. El argumento `node` acepta un objeto JSON directamente o una string codificada en JSON. Nodos sin `x`/`y` se rechazan — añádelos antes de llamar (un inject típico lleva `x:140,y:140`) |
 | `update_node` | `PUT /flow/:id` | write | Cambiar propiedades de un nodo, fusionando en vez de reemplazar |
 | `delete_node` | `PUT /flow/:id` | write | Eliminar un nodo y los wires que apuntan a él |
 | `connect_nodes` | `PUT /flow/:id` | write | Conectar la salida de un nodo con otro |
@@ -68,7 +68,7 @@ La versión en inglés de este documento está en [`README.md`](./README.md).
 | `get_context` | `GET /context/...` | read | Estado que los flows conservan entre mensajes |
 | `get_debug_messages` | WebSocket `/comms` | read | Lo que los flows produjeron realmente |
 | `list_plugins` | `GET /plugins` | read | Plugins de editor cargados por el runtime |
-| `set_flows_state` | `POST /flows/state` | write | Arrancar o detener el runtime |
+| `set_flows_state` | `POST /flows/state` | write | Arrancar o detener el runtime (requiere `runtimeState.enabled` en los settings de Node-RED) |
 | `list_backups` | local | read | Snapshots guardados, del más reciente al más antiguo |
 | `diff_flows` | local + `GET /flows` | read | Qué cambió entre un snapshot y ahora |
 | `restore_backup` | `POST /flows` | write | Revertir toda la configuración a un snapshot |
@@ -112,7 +112,7 @@ Aquí el contexto es de solo lectura porque la admin API no expone ninguna forma
 
 `update_flow` reemplaza una pestaña completa, lo que obliga al modelo a reproducir cada nodo exactamente. Todo lo que no reproduzca se destruye — y los nodos de Node-RED llevan campos propios de su tipo que ningún esquema conoce.
 
-Las tools granulares lo evitan. Cada una lee la pestaña, cambia solo lo pedido y la escribe de vuelta con las mismas salvaguardas: wires validados y backup previo.
+Las tools granulares lo evitan. Cada una lee la pestaña, cambia solo lo que se le pide y la reescribe con las mismas guardas: wires validados, snapshot previo. Las llamadas concurrentes contra la misma instancia se serializan a nivel de `Client` para que un segundo `add_node` vea siempre la escritura del primero — se acaban las carreras silenciosas que perdían mutaciones.
 
 ```
 add_node(flow_id, node)                      -> añade y deja el resto byte a byte igual
@@ -123,7 +123,7 @@ connect_nodes(flow_id, from_id, to_id, port) -> añade a ese puerto de salida
 
 `update_node` fusiona en lugar de reemplazar: cambiar un topic MQTT deja intactos la referencia al broker, el QoS y la posición. `delete_node` también quita los wires que apuntaban al nodo, porque Node-RED acepta wires hacia la nada y simplemente no entrega — una pestaña que parece intacta y en silencio hace menos de lo que debería. `connect_nodes` añade al puerto indicado y hace crecer el array cuando ese puerto aún no existe, en vez de reescribirlo a mano.
 
-Con guardas: se rechaza un id duplicado, no se puede cambiar el id de un nodo (los wires lo referencian) y se rehúsa conectar con un nodo inexistente.
+Protegido: se rechazan ids de nodo duplicados, no se puede cambiar el id de un nodo (los wires lo referencian), se rehúsa cablear a un nodo inexistente, y `add_node` rechaza nodos sin `x`/`y` o cuyo `z` no resuelve a la pestaña dueña o a otro nodo existente — el runtime crashea en el siguiente deploy con `Cannot read properties of undefined (reading 'wires')` si se cuela uno.
 
 Un detalle útil al leer una pestaña: Node-RED reparte su contenido entre `nodes` y `configs`, y decide según si el objeto lleva coordenadas `x`/`y`. Un broker MQTT compartido pertenece a la pestaña pero aparece en `configs`. Estas tools respetan ese reparto, así que los nodos de configuración también se pueden editar y nunca acaban archivados en el sitio equivocado.
 
@@ -216,7 +216,7 @@ El wrapper está publicado como [`@fgjcarlos/nodered-mcp`](https://www.npmjs.com
 
 ```bash
 npm install -g @fgjcarlos/nodered-mcp
-nodered-mcp version   # -> 0.5.11
+nodered-mcp version   # -> 0.5.12
 ```
 
 Funciona en Linux, macOS y Windows (amd64 y arm64) sin configuración adicional. El wrapper no tiene dependencias npm — un parser POSIX de tar implementado a mano en `bin/tar.js` extrae el binario, así que `npm audit` solo ve el wrapper en sí.
@@ -287,7 +287,7 @@ Cada ajuste puede indicarse como variable de entorno o como flag de línea de co
 | `NODERED_INSECURE` | — | `false` | Omitir la verificación TLS. Solo para desarrollo |
 | `NODERED_BACKUP_DIR` | — | `backups` | Dónde se escriben los snapshots antes de cada escritura |
 | `MCP_READ_ONLY` | `--read-only` | `false` | Exponer solo las tools que no pueden modificar Node-RED |
-| `MCP_DEBUG_STREAM` | `--debug-stream` | `false` | Abrir el WebSocket de `/comms` al arrancar para activar el stream de debug. **Desactivado por defecto** porque algunas versiones de Node-RED crashean durante el handshake |
+| `MCP_DEBUG_STREAM` | `--debug-stream` | `false` | Abrir el WebSocket de `/comms` al arrancar para activar el stream de debug. **Desactivado por defecto** porque algunas versiones de Node-RED crashean durante el handshake. Tras activarlo, dale a `get_debug_messages` ~3 segundos para empezar a recibir — el WebSocket se conecta al arrancar y el runtime no publica nada hasta que el filtro del editor está cableado. Si la llamada sigue reportando "still connecting", pon `MCP_LOG_LEVEL=debug` y busca un error de dial `/comms` en los logs del servidor. |
 | `MCP_TRANSPORT` | `--transport` | `stdio` | `stdio` o `http` |
 | `MCP_HTTP_ADDR` | `--http-addr` | `:8090` | Dirección de escucha del transporte HTTP |
 | `MCP_HTTP_TOKEN` | `--http-token` | — | Bearer token del transporte HTTP. Obligatorio salvo con bind a loopback |
