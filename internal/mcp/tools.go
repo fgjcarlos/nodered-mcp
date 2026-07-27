@@ -114,8 +114,10 @@ func (s *Server) registerTools() {
 		),
 		mcp.WithString("flow_id", mcp.Required(),
 			mcp.Description("The flow tab to add the node to (from list_flows or search_flows).")),
-		mcp.WithString("node", mcp.Required(),
-			mcp.Description(`The node as a JSON object, e.g. {"id":"n7","type":"debug","z":"tabA","wires":[]}.`)),
+		mcp.WithObject("node", mcp.Required(),
+			mcp.Description(`The node as a JSON object, e.g. {"id":"n7","type":"debug","z":"tabA","wires":[]}. A JSON-encoded string is also accepted.`),
+			mcp.AdditionalProperties(true),
+		),
 	)
 	s.addWriteTool(addNode, s.handleAddNode)
 
@@ -557,7 +559,7 @@ func (s *Server) handleCreateFlow(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	flow, err := normalizeFlowDoc(raw, true)
+	flow, err := normalizeFlowDoc(raw, "", true)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -582,7 +584,7 @@ func (s *Server) handleUpdateFlow(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	flow, err := normalizeFlowDoc(raw, false)
+	flow, err := normalizeFlowDoc(raw, id, false)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -595,19 +597,20 @@ func (s *Server) handleUpdateFlow(ctx context.Context, req mcp.CallToolRequest) 
 	return mcp.NewToolResultText(fmt.Sprintf("Flow %q updated (a backup was taken first).", id)), nil
 }
 
-// handleAddNode appends one node to a flow tab.
+// handleAddNode appends one node to a flow tab. The node argument accepts
+// either a JSON-encoded string or a node object directly.
 func (s *Server) handleAddNode(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	flowID, err := req.RequireString("flow_id")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	node, err := req.RequireString("node")
+	node, err := nodeParam(req, "node")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	slog.Debug("tool: add_node", "flow_id", flowID)
 
-	if err := s.nrClient.AddNode(ctx, flowID, json.RawMessage(node)); err != nil {
+	if err := s.nrClient.AddNode(ctx, flowID, node); err != nil {
 		slog.Error("add_node failed", "error", err, "flow_id", flowID)
 		return mcp.NewToolResultError(fmt.Sprintf("adding node: %v", err)), nil
 	}
@@ -1010,25 +1013,173 @@ func flowsParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) {
 	}
 }
 
+// nodeParam reads a "node" argument as either a JSON-encoded string or a
+// node object. Mirrors flowParam for symmetry with the rest of the surface.
+func nodeParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) {
+	args := req.GetArguments()
+	v, ok := args[key]
+	if !ok {
+		return nil, fmt.Errorf("required argument %q not found", key)
+	}
+	switch x := v.(type) {
+	case string:
+		raw := json.RawMessage(x)
+		if !json.Valid(raw) {
+			return nil, fmt.Errorf("%q must be a JSON-encoded node object or a node object passed directly", key)
+		}
+		return raw, nil
+	case map[string]any:
+		raw, err := json.Marshal(x)
+		if err != nil {
+			return nil, fmt.Errorf("encoding %q: %v", key, err)
+		}
+		return raw, nil
+	default:
+		return nil, fmt.Errorf("%q must be a JSON-encoded node object or a node object passed directly", key)
+	}
+}
+
 // normalizeFlowDoc turns a raw flow payload into a Node-RED admin-API
 // document. If fillNodes is true and the document is a tab object missing
 // its "nodes" array, an empty one is added so a POST /flow does not bounce
 // with the unhelpful "missing nodes property" 400 from the runtime.
-func normalizeFlowDoc(raw json.RawMessage, fillNodes bool) (nodered.RawFlow, error) {
+//
+// The payload is accepted in any of the three shapes Node-RED hands back:
+//
+//   - nested tab object:  {"id":"abc","label":"x","nodes":[...]}
+//   - flat array element: [{"type":"tab","id":"abc","label":"x"},
+//     {"type":"inject","id":"n1","z":"abc"}, ...]
+//
+// The flat shape comes from GET /flows, so update_flow can take the same
+// document back without forcing the caller to re-shape it. If the payload is
+// a flat array, the tab id to match is taken from flowID (when supplied);
+// a nested payload is accepted as-is.
+func normalizeFlowDoc(raw json.RawMessage, flowID string, fillNodes bool) (nodered.RawFlow, error) {
+	// Try a nested tab object first. A nested doc has either "nodes" or
+	// "configs" — the two arrays Node-RED splits a tab into. A flat-array
+	// element carries "type":"tab" and never both "nodes" and the rest of a
+	// tab object, so the absence of those keys is the disambiguation.
 	var doc map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("flow document is not a JSON object: %v", err)
-	}
-	if fillNodes {
-		if _, ok := doc["nodes"]; !ok {
-			doc["nodes"] = json.RawMessage(`[]`)
+	if err := json.Unmarshal(raw, &doc); err == nil {
+		_, hasNodes := doc["nodes"]
+		_, hasConfigs := doc["configs"]
+		if hasNodes || hasConfigs || !looksLikeFlatArrayElement(doc) {
+			if fillNodes && !hasNodes {
+				doc["nodes"] = json.RawMessage(`[]`)
+			}
+			out, err := json.Marshal(doc)
+			if err != nil {
+				return nil, fmt.Errorf("re-encoding flow document: %v", err)
+			}
+			return nodered.RawFlow(out), nil
 		}
 	}
-	out, err := json.Marshal(doc)
+
+	// Flat array shape: pick the tab whose id matches flowID, then collect
+	// every node whose z references it.
+	var flat []json.RawMessage
+	if err := json.Unmarshal(raw, &flat); err != nil {
+		return nil, fmt.Errorf("flow document is not a JSON object or flow array: %v", err)
+	}
+	if flowID == "" {
+		return nil, fmt.Errorf(
+			"flow document is a flat array; pass the flow id so the right tab can be picked out")
+	}
+	tab, nodes, configs := splitFlatFlow(flat, flowID)
+	if tab == nil {
+		return nil, fmt.Errorf("no tab with id %q in the supplied flat flow array", flowID)
+	}
+
+	// Project into the nested doc shape.
+	out := make(map[string]json.RawMessage, len(tab)+2)
+	for k, v := range tab {
+		// The flat shape includes "type":"tab" and "id":"<flow>" — drop those,
+		// the nested shape uses id at the top level and "tab" is implied.
+		if k == "type" {
+			continue
+		}
+		if k == "id" {
+			continue
+		}
+		out[k] = v
+	}
+	if fillNodes && len(nodes) == 0 {
+		nodes = []json.RawMessage{}
+	}
+	encodedNodes, err := json.Marshal(nodes)
+	if err != nil {
+		return nil, fmt.Errorf("re-encoding nodes: %v", err)
+	}
+	out["nodes"] = encodedNodes
+	if len(configs) > 0 {
+		encodedConfigs, err := json.Marshal(configs)
+		if err != nil {
+			return nil, fmt.Errorf("re-encoding configs: %v", err)
+		}
+		out["configs"] = encodedConfigs
+	}
+	out["id"] = json.RawMessage(fmt.Sprintf("%q", flowID))
+
+	encoded, err := json.Marshal(out)
 	if err != nil {
 		return nil, fmt.Errorf("re-encoding flow document: %v", err)
 	}
-	return nodered.RawFlow(out), nil
+	return nodered.RawFlow(encoded), nil
+}
+
+// splitFlatFlow partitions a flat /flows array into the tab, its nodes, and
+// its config nodes, all indexed by id. Returns nil for tab when no match.
+func splitFlatFlow(flat []json.RawMessage, flowID string) (tab map[string]json.RawMessage, nodes, configs []json.RawMessage) {
+	for _, item := range flat {
+		var meta struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+			Z    string `json:"z"`
+		}
+		if err := json.Unmarshal(item, &meta); err != nil {
+			continue
+		}
+		switch {
+		case meta.Type == "tab" && meta.ID == flowID:
+			var m map[string]json.RawMessage
+			if err := json.Unmarshal(item, &m); err == nil {
+				tab = m
+			}
+		case meta.Z == flowID && meta.Type != "subflow":
+			// Anything referring to the tab that is not a tab itself is a
+			// child node. Config nodes (no x/y) are routed to configs so
+			// the same rule Node-RED uses applies to a re-encoded flow.
+			if hasXY(item) {
+				nodes = append(nodes, item)
+			} else {
+				configs = append(configs, item)
+			}
+		}
+	}
+	return tab, nodes, configs
+}
+
+// hasXY reports whether the raw node carries x and y canvas coordinates.
+func hasXY(raw json.RawMessage) bool {
+	var probe struct {
+		X json.RawMessage `json:"x"`
+		Y json.RawMessage `json:"y"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return false
+	}
+	return len(probe.X) > 0 && len(probe.Y) > 0
+}
+
+// looksLikeFlatArrayElement reports whether a parsed JSON object has the
+// shape of one entry inside a flat GET /flows array: an id, a type, and
+// no nested-array fields that would mean a full tab doc.
+func looksLikeFlatArrayElement(doc map[string]json.RawMessage) bool {
+	_, hasID := doc["id"]
+	_, hasType := doc["type"]
+	_, hasNodes := doc["nodes"]
+	_, hasConfigs := doc["configs"]
+	return hasID && hasType && !hasNodes && !hasConfigs
 }
 
 // normalizeFlowsArray splits a raw flows payload into the per-flow entries
