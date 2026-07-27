@@ -1,0 +1,68 @@
+name: docker
+
+# Mirror of release.yml's trigger — every pushed tag produces a fresh
+# image, so a release that publishes a binary also publishes a runnable
+# container. Two artefacts for the same SHA, discoverable from GitHub
+# (ghcr.io/fgjcarlos/nodered-mcp) and from the releases page.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Multi-arch needs QEMU under buildx; without it the runner only
+      # builds linux/amd64.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      # Login to GHCR with the workflow's default GITHUB_TOKEN. Public
+      # repos get push rights to packages for free; no extra secrets
+      # needed.
+      - name: log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          # The default tag set covers the typical "I want the latest"
+          # case (`:latest`), the "I want the latest 0.5" case
+          # (`:0.5`), the "I want this exact version" case (`:0.5.0`),
+          # and the SHA-pinned case (`:v0.5.0`). One image, four
+          # references.
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # GHA cache is free for public repos and shaves a minute off
+          # the cold-build case. Layer cache between tag builds is the
+          # difference between 30s and 90s on Go projects.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ github.ref_name }}
