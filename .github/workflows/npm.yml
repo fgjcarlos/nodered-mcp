@@ -22,7 +22,9 @@ jobs:
 
       - name: read package.json version
         id: pkg
-        run: node -e "console.log(require('./package.json').version)" >> "$GITHUB_OUTPUT"
+        # jq keeps the output as a string and avoids the GitHub Actions
+        # "Invalid format 'X.Y.Z'" trap when an output looks numeric.
+        run: jq -r .version package.json >> "$GITHUB_OUTPUT"
 
       - name: verify package.json version matches the tag
         run: |
