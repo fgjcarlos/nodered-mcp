@@ -55,6 +55,7 @@ func (c *Client) GetFlowsState(ctx context.Context) (FlowsState, error) {
 // MUTATES the runtime. A backup of the current flow config is taken first
 // so the change can be rolled back.
 func (c *Client) SetFlowsState(ctx context.Context, state string) error {
+	defer c.writeGuard()()
 	switch state {
 	case "start", "stop":
 		// ok
@@ -76,6 +77,7 @@ func (c *Client) SetFlowsState(ctx context.Context, state string) error {
 // the change can be rolled back, and the {rev,...} envelope (if any) is
 // stripped so the deploy never carries a stale rev.
 func (c *Client) SetFlows(ctx context.Context, flows []json.RawMessage) error {
+	defer c.writeGuard()()
 	if len(flows) == 0 {
 		return errors.New("flows: at least one element is required")
 	}

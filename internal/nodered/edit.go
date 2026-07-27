@@ -28,6 +28,7 @@ import (
 // still race — the loser's change is overwritten — but the window is one round
 // trip rather than however long a model takes to rewrite a whole tab.
 func (c *Client) editFlow(ctx context.Context, flowID string, edit func(RawFlow) (RawFlow, error)) error {
+	defer c.writeGuard()()
 	if flowID == "" {
 		return errors.New("flow id is required")
 	}
@@ -39,7 +40,10 @@ func (c *Client) editFlow(ctx context.Context, flowID string, edit func(RawFlow)
 	if err != nil {
 		return err
 	}
-	return c.UpdateFlow(ctx, flowID, next)
+	// updateFlowLocked is the no-mutex twin of UpdateFlow; we already hold
+	// writeMu here and a public call would deadlock on the non-reentrant
+	// sync.Mutex.
+	return c.updateFlowLocked(ctx, flowID, next)
 }
 
 // AddNode appends a node to a flow tab.
@@ -186,7 +190,8 @@ func (d *flowDoc) exists(id string) bool {
 }
 
 // AddNodeToFlow appends a node to a tab. The node is stored as supplied; only
-// its id is inspected, to reject a collision.
+// its id and references are inspected, to reject a collision or a write that
+// would leave the runtime with dangling config-node references.
 func AddNodeToFlow(flow RawFlow, node json.RawMessage) (RawFlow, error) {
 	doc, err := decodeFlow(flow)
 	if err != nil {
@@ -207,14 +212,56 @@ func AddNodeToFlow(flow RawFlow, node json.RawMessage) (RawFlow, error) {
 	if doc.exists(id) {
 		return nil, fmt.Errorf("a node with id %q already exists in this flow", id)
 	}
-
-	// File it the way Node-RED itself would, by canvas coordinates.
-	if hasCanvasPosition(decoded) {
-		doc.Nodes = append(doc.Nodes, decoded)
-	} else {
-		doc.Configs = append(doc.Configs, decoded)
+	// A node without x/y lands in the "configs" collection, where Node-RED
+	// never indexes it as a deployable canvas node — inject nodes placed
+	// there never fire, and wires pointing at them look correct yet route
+	// nowhere. Reject explicitly so the caller fixes the payload rather
+	// than chasing a flow that "looks fine but does nothing".
+	if !hasCanvasPosition(decoded) {
+		return nil, fmt.Errorf(
+			"node %q (%s) is missing x/y canvas coordinates; add them before calling add_node "+
+				"(a typical inject node carries x:140,y:140 — Node-RED files anything without "+
+				"coords into the configs collection and the runtime will not deploy it)",
+			id, nodeType(decoded),
+		)
 	}
+	// The runtime crashes with `Cannot read properties of undefined (reading
+	// 'wires')` if a node references a z that does not resolve — a config
+	// node referenced from a canvas node, or a canvas node pointing at an
+	// unknown tab. Verify the z either is the owning tab or names an existing
+	// node in this doc.
+	if z := stringField(decoded, "z"); z != "" {
+		tabID := stringField(doc.Extra, "id")
+		if z != tabID && !doc.exists(z) {
+			return nil, fmt.Errorf(
+				"node %q (%s) references z=%q which is neither the owning tab nor an existing "+
+					"node in this flow: Node-RED's runtime will crash on deploy with "+
+					"'Cannot read properties of undefined (reading wires)' if this is written",
+				id, nodeType(decoded), z,
+			)
+		}
+	}
+
+	doc.Nodes = append(doc.Nodes, decoded)
 	return doc.encode()
+}
+
+// nodeType reads a node's type field, returning "" when absent or unreadable.
+func nodeType(node map[string]json.RawMessage) string {
+	var t string
+	if err := json.Unmarshal(node["type"], &t); err != nil {
+		return ""
+	}
+	return t
+}
+
+// stringField reads a top-level string field, returning "" when absent.
+func stringField(m map[string]json.RawMessage, key string) string {
+	var s string
+	if err := json.Unmarshal(m[key], &s); err != nil {
+		return ""
+	}
+	return s
 }
 
 // UpdateNodeInFlow merges patch into one node's properties. Keys present in
