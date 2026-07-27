@@ -136,4 +136,3 @@ func TestFetchDiscoveryIncludesStatusInError(t *testing.T) {
 		t.Errorf("error must mention status, got %q", err.Error())
 	}
 }
-

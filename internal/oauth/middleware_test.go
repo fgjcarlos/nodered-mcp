@@ -1,55 +1,12 @@
 package oauth
 
 import (
-	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 )
-
-// ctxKey is unexported so only this package can put Claims on a context.
-// Other packages read it via FromContext and cannot collide.
-type ctxKey struct{}
-
-var claimsKey = ctxKey{}
-
-// WithClaims returns a context carrying the supplied Claims. Used by
-// RequireOAuth so downstream handlers can identify the caller.
-func WithClaims(ctx context.Context, c *Claims) context.Context {
-	return context.WithValue(ctx, claimsKey, c)
-}
-
-// FromContext extracts the Claims previously stashed by WithClaims, if
-// any. Returns nil when the context has none, which is the right signal
-// for "this request was not authenticated".
-func FromContext(ctx context.Context) *Claims {
-	if ctx == nil {
-		return nil
-	}
-	if c, ok := ctx.Value(claimsKey).(*Claims); ok {
-		return c
-	}
-	return nil
-}
-
-// ErrNoClaims is returned by FromContextError when no Claims are present.
-// Handlers that require authentication can use errors.Is to detect the
-// "should not happen" case.
-var ErrNoClaims = errors.New("oauth: no claims on context")
-
-// FromContextError is FromContext but returns an error when no Claims
-// are present. Prefer FromContext when a missing-Claims path is a
-// legitimate "anonymous" code path; use this when it is a bug.
-func FromContextError(ctx context.Context) (*Claims, error) {
-	c := FromContext(ctx)
-	if c == nil {
-		return nil, ErrNoClaims
-	}
-	return c, nil
-}
 
 func okHandler() (http.Handler, *bool) {
 	reached := false

@@ -1,10 +1,36 @@
 package oauth
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"strings"
 )
+
+// ctxKey is unexported so only this package can put Claims on a context.
+// Other packages read it via FromContext and cannot collide.
+type ctxKey struct{}
+
+var claimsKey = ctxKey{}
+
+// WithClaims returns a context carrying the supplied Claims. Used by
+// RequireOAuth so downstream handlers can identify the caller.
+func WithClaims(ctx context.Context, c *Claims) context.Context {
+	return context.WithValue(ctx, claimsKey, c)
+}
+
+// FromContext extracts the Claims previously stashed by WithClaims, if
+// any. Returns nil when the context has none, which is the right signal
+// for "this request was not authenticated".
+func FromContext(ctx context.Context) *Claims {
+	if ctx == nil {
+		return nil
+	}
+	if c, ok := ctx.Value(claimsKey).(*Claims); ok {
+		return c
+	}
+	return nil
+}
 
 // RequireOAuth wraps an HTTP handler behind JWT-bearer authentication.
 //
