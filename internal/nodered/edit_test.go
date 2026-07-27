@@ -65,8 +65,12 @@ func nodeCount(t *testing.T, flow RawFlow) int {
 }
 
 // Node-RED classifies by the presence of x/y, so this code must too: a node
-// filed into the wrong collection disappears from the canvas or stops being
-// treated as a config node.
+// AddNode once routed anything without x/y into the "configs" collection,
+// mirroring Node-RED's split. Issue #26/#27 changed that: a node without
+// coords (typically a broker or credential holder) is now rejected with
+// an actionable error rather than silently filed into configs and left
+// un-deployed by the runtime. The split still exists in Node-RED itself —
+// the MCP just refuses to write a payload the runtime would not honour.
 func TestAddNodeFilesByCanvasCoordinates(t *testing.T) {
 	withXY, err := AddNodeToFlow(RawFlow(sampleTab), json.RawMessage(`{"id":"n4","type":"debug","z":"tabA","x":580,"y":80,"wires":[]}`))
 	if err != nil {
@@ -76,12 +80,31 @@ func TestAddNodeFilesByCanvasCoordinates(t *testing.T) {
 		t.Errorf("a node with coordinates belongs in nodes: got %d nodes, %d configs", n, c)
 	}
 
-	withoutXY, err := AddNodeToFlow(RawFlow(sampleTab), json.RawMessage(`{"id":"b2","type":"mqtt-broker","z":"tabA","name":"other"}`))
-	if err != nil {
-		t.Fatalf("AddNodeToFlow: %v", err)
+	// Without x/y the node must be rejected with the actionable message that
+	// names the symptom (un-deployed by the runtime) and the cure (add x/y).
+	_, err = AddNodeToFlow(RawFlow(sampleTab), json.RawMessage(`{"id":"b2","type":"mqtt-broker","z":"tabA","name":"other"}`))
+	if err == nil {
+		t.Fatal("expected AddNodeToFlow to reject a node without x/y canvas coordinates")
 	}
-	if n, c := collectionCounts(t, withoutXY); n != 3 || c != 2 {
-		t.Errorf("a node without coordinates belongs in configs: got %d nodes, %d configs", n, c)
+	if !strings.Contains(err.Error(), "x/y canvas coordinates") {
+		t.Errorf("expected the actionable x/y message, got %q", err.Error())
+	}
+}
+
+// TestAddNodeRejectsDanglingZ covers issue #27: a node whose z references
+// something that does not exist (the owning tab or another node) makes the
+// runtime crash with `Cannot read properties of undefined (reading wires')`
+// at the next deploy and refuses to start. Refuse it before the write.
+func TestAddNodeRejectsDanglingZ(t *testing.T) {
+	_, err := AddNodeToFlow(RawFlow(sampleTab), json.RawMessage(`{"id":"x1","type":"inject","z":"ghost","x":1,"y":1,"wires":[]}`))
+	if err == nil {
+		t.Fatal("expected AddNodeToFlow to reject a node whose z does not resolve")
+	}
+	if !strings.Contains(err.Error(), "z=\"ghost\"") {
+		t.Errorf("expected the error to name the dangling z, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "Cannot read properties of undefined") {
+		t.Errorf("expected the error to name the runtime crash, got %q", err.Error())
 	}
 }
 

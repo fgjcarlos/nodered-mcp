@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -28,6 +29,13 @@ type Client struct {
 	// httpClient and needs the same TLS decision.
 	insecure      bool
 	searchBaseURL string
+	// writeMu serializes the mutating endpoints (POST /flows, PUT /flow/:id,
+	// DELETE /flow/:id, POST /flows/state, the palette mutations).
+	// Multiple tools/call requests on the same MCP session were racing:
+	// each handler read the flow, mutated its in-memory copy, and wrote it
+	// back; the last writer won and earlier mutations were silently lost.
+	// ponytail: global lock, per-flow locks if throughput matters.
+	writeMu sync.Mutex
 }
 
 // authStrategy encapsulates how Authorization headers are produced.
@@ -138,6 +146,18 @@ func (e *APIError) Error() string {
 // defaultTimeout bounds a request when the caller's context carries no
 // deadline of its own. Long operations (npm installs) pass a longer deadline.
 const defaultTimeout = 30 * time.Second
+
+// writeGuard returns a release function the caller defers, so every
+// mutating endpoint takes writeMu under the same pattern and the lock is
+// always released on every path (error or success).
+//
+// Reads (GET endpoints, /context, /settings, etc.) deliberately do NOT
+// take this lock — concurrency between a read and a write is fine and
+// protects the path from a deadlock against the runtime's own reads.
+func (c *Client) writeGuard() func() {
+	c.writeMu.Lock()
+	return c.writeMu.Unlock
+}
 
 // do performs an HTTP request and decodes the JSON response into out (if
 // non-nil). It returns an *APIError on non-2xx responses.

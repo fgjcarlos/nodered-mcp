@@ -134,6 +134,7 @@ func hasCanvasCoords(raw json.RawMessage) bool {
 // validated first, then a backup of the current config is taken (fail-closed:
 // no write if backup fails).
 func (c *Client) CreateFlow(ctx context.Context, flow RawFlow) (RawFlow, error) {
+	defer c.writeGuard()()
 	if err := validateFlowWires(flow); err != nil {
 		return nil, err
 	}
@@ -150,7 +151,18 @@ func (c *Client) CreateFlow(ctx context.Context, flow RawFlow) (RawFlow, error) 
 // UpdateFlow replaces the contents of an existing flow tab. The flow document
 // is opaque JSON, sent verbatim (PUT replaces the whole document). Wires are
 // validated first, then a backup of the current config is taken (fail-closed).
+//
+// Takes writeMu so concurrent mutations on the same client do not race.
+// Callers that already hold the lock (e.g. editFlow) must call
+// updateFlowLocked instead.
 func (c *Client) UpdateFlow(ctx context.Context, id string, flow RawFlow) error {
+	defer c.writeGuard()()
+	return c.updateFlowLocked(ctx, id, flow)
+}
+
+// updateFlowLocked is UpdateFlow without taking writeMu. Internal helpers
+// that already hold the lock call this; external callers use UpdateFlow.
+func (c *Client) updateFlowLocked(ctx context.Context, id string, flow RawFlow) error {
 	if id == "" {
 		return errors.New("flow id is required")
 	}
@@ -166,6 +178,7 @@ func (c *Client) UpdateFlow(ctx context.Context, id string, flow RawFlow) error 
 // DeleteFlow removes a flow tab and all its nodes. A backup of the current
 // config is taken first (fail-closed) so the delete can be rolled back.
 func (c *Client) DeleteFlow(ctx context.Context, id string) error {
+	defer c.writeGuard()()
 	if id == "" {
 		return errors.New("flow id is required")
 	}
@@ -184,6 +197,7 @@ func (c *Client) DeleteFlow(ctx context.Context, id string) error {
 // {rev,flows} envelope); we extract just the flow array and POST it as a bare
 // array so the stale rev never triggers a 409 conflict.
 func (c *Client) RestoreFlows(ctx context.Context, backup RawFlow) error {
+	defer c.writeGuard()()
 	arr := extractFlowArray(backup)
 	if arr == nil {
 		return errors.New("backup does not contain a recognizable flow array")
