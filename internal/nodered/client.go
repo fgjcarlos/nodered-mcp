@@ -20,10 +20,13 @@ import (
 // It is safe for concurrent use: each call uses its own request and the
 // underlying *http.Client is concurrency-safe.
 type Client struct {
-	baseURL       string
-	httpClient    *http.Client
-	auth          authStrategy
-	backupDir     string
+	baseURL    string
+	httpClient *http.Client
+	auth       authStrategy
+	backupDir  string
+	// insecure is retained because the /comms WebSocket dials separately from
+	// httpClient and needs the same TLS decision.
+	insecure      bool
 	searchBaseURL string
 }
 
@@ -104,6 +107,7 @@ func NewClient(opts Options) (*Client, error) {
 		httpClient:    httpClient,
 		auth:          auth,
 		backupDir:     opts.BackupDir,
+		insecure:      opts.Insecure,
 		searchBaseURL: opts.SearchBaseURL,
 	}, nil
 }

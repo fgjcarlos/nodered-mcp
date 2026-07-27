@@ -12,6 +12,12 @@ backups/
 # AI tooling caches
 .atl/
 
+# Internal working documents. The READMEs stay: they are the repo's public
+# documentation. These two are planning material and a local issue tracker,
+# both superseded by GitHub Issues once the project moves there.
+PLAN.md
+issues/
+
 # mcpb bundle build artifacts
 mcpb/server/
 *.mcpb

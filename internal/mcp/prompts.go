@@ -7,15 +7,8 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// prompts is the registry of MCP prompt templates exposed by the server.
-var prompts []mcp.Prompt
-
-// registerPrompts wires up the prompt templates declared in PLAN.md.
-//
-// Hello-world scope: prompts are registered as stubs returning a
-// useful, ready-to-fill template. The implementation can grow into
-// fetching live data (e.g. include the current flows in the prompt)
-// once the LLM consumers are happy with the shape.
+// registerPrompts wires up the prompt templates. Prompts are inert text —
+// they suggest a workflow, they cannot act — so read-only mode keeps them.
 func (s *Server) registerPrompts() {
 	explain := mcp.NewPrompt("explain_flow",
 		mcp.WithPromptDescription("Explain what a Node-RED flow does in natural language."),
@@ -25,7 +18,7 @@ func (s *Server) registerPrompts() {
 		),
 	)
 	s.mcpServer.AddPrompt(explain, s.handleExplainFlowPrompt)
-	prompts = append(prompts, explain)
+	s.prompts = append(s.prompts, explain)
 
 	generate := mcp.NewPrompt("generate_flow",
 		mcp.WithPromptDescription("Generate a Node-RED flow from a high-level description."),
@@ -35,7 +28,7 @@ func (s *Server) registerPrompts() {
 		),
 	)
 	s.mcpServer.AddPrompt(generate, s.handleGenerateFlowPrompt)
-	prompts = append(prompts, generate)
+	s.prompts = append(s.prompts, generate)
 }
 
 func (s *Server) handleExplainFlowPrompt(_ context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {

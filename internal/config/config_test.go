@@ -34,6 +34,9 @@ func TestLoad_RejectsInvalidTransport(t *testing.T) {
 
 func TestLoad_HTTPTransport(t *testing.T) {
 	t.Setenv("MCP_TRANSPORT", "http")
+	// The default address binds every interface, which now requires a token.
+	// See httpauth_test.go for that rule on its own.
+	t.Setenv("MCP_HTTP_TOKEN", "test-token")
 
 	cfg, err := Load()
 	if err != nil {
@@ -52,6 +55,37 @@ func TestLoad_RejectsInvalidLogLevel(t *testing.T) {
 	_, err := Load()
 	if err == nil {
 		t.Fatal("expected error for invalid log level")
+	}
+}
+
+func TestLoad_ReadOnlyDefaultsOff(t *testing.T) {
+	t.Setenv("MCP_READ_ONLY", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MCPReadOnly {
+		t.Error("expected MCPReadOnly=false by default")
+	}
+}
+
+func TestLoad_ParsesReadOnly(t *testing.T) {
+	t.Setenv("MCP_READ_ONLY", "true")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.MCPReadOnly {
+		t.Error("expected MCPReadOnly=true")
+	}
+}
+
+// A misspelled value must abort startup, not quietly fall back to false: that
+// fallback would hand write tools to someone who asked for read-only.
+func TestLoad_RejectsUnparseableReadOnly(t *testing.T) {
+	t.Setenv("MCP_READ_ONLY", "yes")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected error for unparseable MCP_READ_ONLY, got nil")
 	}
 }
 

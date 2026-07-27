@@ -29,6 +29,14 @@ type Config struct {
 	// MCPHTTPAddr is the listen address for the "http" transport
 	// (host:port). Ignored when MCPTransport is "stdio".
 	MCPHTTPAddr string
+	// MCPHTTPToken is the shared bearer token required on every request to
+	// the HTTP transport. Mandatory when the listen address is reachable from
+	// outside this machine; optional for a loopback bind.
+	MCPHTTPToken string
+	// MCPReadOnly withholds every tool that mutates the Node-RED instance.
+	// Point the server at a production instance with this set and the model
+	// can inspect and diagnose, but not deploy, install, or inject.
+	MCPReadOnly bool
 }
 
 // Load reads configuration from the environment. If a .env file exists in
@@ -49,6 +57,7 @@ func Load() (*Config, error) {
 		MCPLogLevel:      strings.ToLower(getEnv("MCP_LOG_LEVEL", "info")),
 		MCPTransport:     strings.ToLower(getEnv("MCP_TRANSPORT", "stdio")),
 		MCPHTTPAddr:      getEnv("MCP_HTTP_ADDR", ":8090"),
+		MCPHTTPToken:     os.Getenv("MCP_HTTP_TOKEN"),
 	}
 
 	insecure, err := strconv.ParseBool(getEnv("NODERED_INSECURE", "false"))
@@ -56,6 +65,12 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("parsing NODERED_INSECURE: %w", err)
 	}
 	cfg.NodeRedInsecure = insecure
+
+	readOnly, err := strconv.ParseBool(getEnv("MCP_READ_ONLY", "false"))
+	if err != nil {
+		return nil, fmt.Errorf("parsing MCP_READ_ONLY: %w", err)
+	}
+	cfg.MCPReadOnly = readOnly
 
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -66,6 +81,8 @@ func Load() (*Config, error) {
 		"auth_token", cfg.NodeRedToken != "",
 		"auth_basic", cfg.NodeRedUsername != "",
 		"transport", cfg.MCPTransport,
+		"http_auth", cfg.MCPHTTPToken != "",
+		"read_only", cfg.MCPReadOnly,
 	)
 
 	return cfg, nil
@@ -81,6 +98,18 @@ func (c *Config) validate() error {
 	case "http":
 		if c.MCPHTTPAddr == "" {
 			return errors.New("MCP_HTTP_ADDR is required when MCP_TRANSPORT is \"http\"")
+		}
+		// The HTTP transport exposes every tool, including deploying flows and
+		// installing modules. Binding a network interface without a token
+		// publishes that to anyone who can reach the port, so refuse to start
+		// rather than come up quietly insecure.
+		if c.MCPHTTPToken == "" && !isLoopbackAddr(c.MCPHTTPAddr) {
+			return fmt.Errorf(
+				"MCP_HTTP_TOKEN is required: %q is reachable from outside this machine, "+
+					"and the http transport would otherwise expose full write access to "+
+					"Node-RED. Set a token, or bind to 127.0.0.1 for local-only use",
+				c.MCPHTTPAddr,
+			)
 		}
 	default:
 		return fmt.Errorf("unsupported MCP_TRANSPORT %q (must be stdio|http)", c.MCPTransport)
