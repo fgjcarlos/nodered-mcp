@@ -4,34 +4,64 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"sort"
+	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/fgjcarlos/nodered-mcp/internal/nodered"
 )
 
-// tools is the registry of MCP tool descriptors. The slice exists so the
-// server initialization can log how many tools were registered.
-var tools []mcp.Tool
-
 // registerTools wires every MCP tool to its handler.
 //
-// Hello-world scope: only list_flows is fully implemented. The other
-// tools from PLAN.md will be added in subsequent PRs to keep this
-// first cut reviewable.
+// Each tool is registered through addReadTool or addWriteTool. That choice is
+// the single classification point for read-only mode: a tool registered as a
+// write tool is withheld when the server runs read-only, so the decision is
+// made here, once, next to the tool's description — not at call time.
 func (s *Server) registerTools() {
 	// ---- list_flows ----------------------------------------------------
 	listFlows := mcp.NewTool("list_flows",
 		mcp.WithDescription(
-			"List every flow (tab) in the connected Node-RED instance, "+
-				"including all the nodes that belong to each flow. "+
-				"Use this as the entry point when you don't know the layout of the runtime.",
+			"Map the connected Node-RED instance: its flow tabs, subflows, how many "+
+				"nodes each one owns, and which node types they contain. Use this as "+
+				"the entry point when you don't know the layout of the runtime.\n\n"+
+				"Returns a compact summary by default, without node bodies. To act on "+
+				"specific nodes, follow up with search_flows (find nodes anywhere) or "+
+				"get_flow (fetch one tab in full). Pass detail=\"full\" only when you "+
+				"genuinely need every node of every tab at once — on a real instance "+
+				"that response is very large.",
+		),
+		mcp.WithString("detail",
+			mcp.Description("\"summary\" (default) for the compact map, or \"full\" for the entire raw flow config."),
+			mcp.Enum("summary", "full"),
 		),
 	)
-	s.mcpServer.AddTool(listFlows, s.handleListFlows)
-	tools = append(tools, listFlows)
+	s.addReadTool(listFlows, s.handleListFlows)
+
+	// ---- search_flows --------------------------------------------------
+	searchFlows := mcp.NewTool("search_flows",
+		mcp.WithDescription(
+			"Find nodes across every flow without downloading the whole configuration. "+
+				"Filter by free text, by node type, or both.\n\n"+
+				"The text query is matched case-insensitively against each node's full "+
+				"JSON, so it finds values that live in node-specific fields: an MQTT "+
+				"topic, an HTTP url, a node name, even a line inside a function body. "+
+				"Each hit reports the node verbatim plus the tab it belongs to, which "+
+				"is what you need to then call get_flow or update_flow. Read-only.",
+		),
+		mcp.WithString("query",
+			mcp.Description("Free text to look for, e.g. \"home/temp\", \"api.example.com\", \"parseTemperature\".")),
+		mcp.WithString("type",
+			mcp.Description("Exact node type to filter by, e.g. \"mqtt in\", \"function\", \"http request\", \"mqtt-broker\".")),
+		mcp.WithNumber("limit",
+			mcp.Description("Maximum nodes to return (1-100, default 20). The response always reports the true total.")),
+	)
+	s.addReadTool(searchFlows, s.handleSearchFlows)
 
 	// ---- get_flow ------------------------------------------------------
 	getFlow := mcp.NewTool("get_flow",
@@ -42,8 +72,7 @@ func (s *Server) registerTools() {
 		mcp.WithString("id", mcp.Required(),
 			mcp.Description("The flow tab ID (as shown by list_flows).")),
 	)
-	s.mcpServer.AddTool(getFlow, s.handleGetFlow)
-	tools = append(tools, getFlow)
+	s.addReadTool(getFlow, s.handleGetFlow)
 
 	// ---- create_flow ---------------------------------------------------
 	createFlow := mcp.NewTool("create_flow",
@@ -55,8 +84,7 @@ func (s *Server) registerTools() {
 		mcp.WithString("flow", mcp.Required(),
 			mcp.Description("The flow document as a JSON string.")),
 	)
-	s.mcpServer.AddTool(createFlow, s.handleCreateFlow)
-	tools = append(tools, createFlow)
+	s.addWriteTool(createFlow, s.handleCreateFlow)
 
 	// ---- update_flow ---------------------------------------------------
 	updateFlow := mcp.NewTool("update_flow",
@@ -71,8 +99,83 @@ func (s *Server) registerTools() {
 		mcp.WithString("flow", mcp.Required(),
 			mcp.Description("The complete new flow document as a JSON string.")),
 	)
-	s.mcpServer.AddTool(updateFlow, s.handleUpdateFlow)
-	tools = append(tools, updateFlow)
+	s.addWriteTool(updateFlow, s.handleUpdateFlow)
+
+	// ---- add_node -------------------------------------------------------
+	addNode := mcp.NewTool("add_node",
+		mcp.WithDescription(
+			"Add one node to an existing flow tab, without touching any other node.\n\n"+
+				"Prefer this over update_flow: rewriting a whole tab means reproducing "+
+				"every node exactly, and any field not reproduced is destroyed. This "+
+				"appends and leaves the rest of the tab byte-for-byte identical. A backup "+
+				"is taken and the wires are validated before the write.\n\n"+
+				"The node needs at least an id and a type. Wire it up afterwards with "+
+				"connect_nodes rather than hand-writing the wires array.",
+		),
+		mcp.WithString("flow_id", mcp.Required(),
+			mcp.Description("The flow tab to add the node to (from list_flows or search_flows).")),
+		mcp.WithString("node", mcp.Required(),
+			mcp.Description(`The node as a JSON object, e.g. {"id":"n7","type":"debug","z":"tabA","wires":[]}.`)),
+	)
+	s.addWriteTool(addNode, s.handleAddNode)
+
+	// ---- update_node ----------------------------------------------------
+	updateNode := mcp.NewTool("update_node",
+		mcp.WithDescription(
+			"Change specific properties of one node, leaving everything else alone.\n\n"+
+				"Only the keys you supply are replaced. Every other property survives "+
+				"untouched, including ones specific to that node type. This is the safe "+
+				"way to retune a node: change an MQTT topic, an HTTP url, a function "+
+				"body, or a name without risking the rest of the flow.\n\n"+
+				"A node's id cannot be changed, because the wires reference it. A backup "+
+				"is taken and the wires are validated before the write.",
+		),
+		mcp.WithString("flow_id", mcp.Required(),
+			mcp.Description("The flow tab that owns the node.")),
+		mcp.WithString("node_id", mcp.Required(),
+			mcp.Description("The node to change (from search_flows or get_flow).")),
+		mcp.WithString("properties", mcp.Required(),
+			mcp.Description(`A JSON object of properties to merge, e.g. {"topic":"home/new","qos":"2"}.`)),
+	)
+	s.addWriteTool(updateNode, s.handleUpdateNode)
+
+	// ---- delete_node ----------------------------------------------------
+	deleteNode := mcp.NewTool("delete_node",
+		mcp.WithDescription(
+			"Remove one node from a flow tab, and every wire pointing at it.\n\n"+
+				"Cleaning up the incoming wires matters: Node-RED accepts wires aimed at "+
+				"a node that no longer exists and simply never delivers to them, leaving "+
+				"a flow that looks intact and quietly does less than it should. A backup "+
+				"is taken before the write.",
+		),
+		mcp.WithString("flow_id", mcp.Required(),
+			mcp.Description("The flow tab that owns the node.")),
+		mcp.WithString("node_id", mcp.Required(),
+			mcp.Description("The node to remove.")),
+	)
+	s.addWriteTool(deleteNode, s.handleDeleteNode)
+
+	// ---- connect_nodes --------------------------------------------------
+	connectNodes := mcp.NewTool("connect_nodes",
+		mcp.WithDescription(
+			"Wire one node's output to another node's input.\n\n"+
+				"Node-RED stores connections as an array of arrays indexed by output "+
+				"port, which is easy to get wrong by hand — replacing a port instead of "+
+				"adding to it silently drops existing connections. This appends to the "+
+				"port you name, grows the array if that port does not exist yet (a switch "+
+				"node's later outputs), and does nothing if the connection already exists.\n\n"+
+				"Both nodes must be in the same tab. A backup is taken before the write.",
+		),
+		mcp.WithString("flow_id", mcp.Required(),
+			mcp.Description("The flow tab holding both nodes.")),
+		mcp.WithString("from_id", mcp.Required(),
+			mcp.Description("The source node, whose output is being wired.")),
+		mcp.WithString("to_id", mcp.Required(),
+			mcp.Description("The target node, which will receive the messages.")),
+		mcp.WithNumber("port",
+			mcp.Description("Output port index on the source, counting from 0. Default 0, which is the only port most nodes have.")),
+	)
+	s.addWriteTool(connectNodes, s.handleConnectNodes)
 
 	// ---- delete_flow ---------------------------------------------------
 	deleteFlow := mcp.NewTool("delete_flow",
@@ -83,8 +186,7 @@ func (s *Server) registerTools() {
 		mcp.WithString("id", mcp.Required(),
 			mcp.Description("The flow tab ID to delete.")),
 	)
-	s.mcpServer.AddTool(deleteFlow, s.handleDeleteFlow)
-	tools = append(tools, deleteFlow)
+	s.addWriteTool(deleteFlow, s.handleDeleteFlow)
 
 	// ---- inject_node ---------------------------------------------------
 	injectNode := mcp.NewTool("inject_node",
@@ -95,8 +197,7 @@ func (s *Server) registerTools() {
 		mcp.WithString("id", mcp.Required(),
 			mcp.Description("The ID of the inject node to trigger.")),
 	)
-	s.mcpServer.AddTool(injectNode, s.handleInjectNode)
-	tools = append(tools, injectNode)
+	s.addWriteTool(injectNode, s.handleInjectNode)
 
 	// ---- list_nodes ----------------------------------------------------
 	listNodes := mcp.NewTool("list_nodes",
@@ -105,8 +206,7 @@ func (s *Server) registerTools() {
 				"(the palette), with their versions and enabled state.",
 		),
 	)
-	s.mcpServer.AddTool(listNodes, s.handleListNodes)
-	tools = append(tools, listNodes)
+	s.addReadTool(listNodes, s.handleListNodes)
 
 	// ---- get_node_info -------------------------------------------------
 	getNodeInfo := mcp.NewTool("get_node_info",
@@ -117,8 +217,7 @@ func (s *Server) registerTools() {
 		mcp.WithString("module", mcp.Required(),
 			mcp.Description("The node module name (as shown by list_nodes).")),
 	)
-	s.mcpServer.AddTool(getNodeInfo, s.handleGetNodeInfo)
-	tools = append(tools, getNodeInfo)
+	s.addReadTool(getNodeInfo, s.handleGetNodeInfo)
 
 	// ---- install_node --------------------------------------------------
 	installNode := mcp.NewTool("install_node",
@@ -132,8 +231,7 @@ func (s *Server) registerTools() {
 		mcp.WithString("version",
 			mcp.Description("Optional exact version to install. Latest if omitted.")),
 	)
-	s.mcpServer.AddTool(installNode, s.handleInstallNode)
-	tools = append(tools, installNode)
+	s.addWriteTool(installNode, s.handleInstallNode)
 
 	// ---- uninstall_node ------------------------------------------------
 	uninstallNode := mcp.NewTool("uninstall_node",
@@ -145,8 +243,7 @@ func (s *Server) registerTools() {
 		mcp.WithString("module", mcp.Required(),
 			mcp.Description("The module name to remove (as shown by list_nodes).")),
 	)
-	s.mcpServer.AddTool(uninstallNode, s.handleUninstallNode)
-	tools = append(tools, uninstallNode)
+	s.addWriteTool(uninstallNode, s.handleUninstallNode)
 
 	// ---- enable_node ---------------------------------------------------
 	enableNode := mcp.NewTool("enable_node",
@@ -160,8 +257,7 @@ func (s *Server) registerTools() {
 		mcp.WithString("set",
 			mcp.Description("Optional node set within the module. Whole module if omitted.")),
 	)
-	s.mcpServer.AddTool(enableNode, s.handleEnableNode)
-	tools = append(tools, enableNode)
+	s.addWriteTool(enableNode, s.handleEnableNode)
 
 	// ---- disable_node --------------------------------------------------
 	disableNode := mcp.NewTool("disable_node",
@@ -175,8 +271,7 @@ func (s *Server) registerTools() {
 		mcp.WithString("set",
 			mcp.Description("Optional node set within the module. Whole module if omitted.")),
 	)
-	s.mcpServer.AddTool(disableNode, s.handleDisableNode)
-	tools = append(tools, disableNode)
+	s.addWriteTool(disableNode, s.handleDisableNode)
 
 	// ---- list_backups --------------------------------------------------
 	listBackups := mcp.NewTool("list_backups",
@@ -185,8 +280,26 @@ func (s *Server) registerTools() {
 				"Every create/update/delete/restore takes one automatically.",
 		),
 	)
-	s.mcpServer.AddTool(listBackups, s.handleListBackups)
-	tools = append(tools, listBackups)
+	s.addReadTool(listBackups, s.handleListBackups)
+
+	// ---- diff_flows -----------------------------------------------------
+	diffFlows := mcp.NewTool("diff_flows",
+		mcp.WithDescription(
+			"Compare two flow configurations and report what differs: which nodes were "+
+				"added, removed, or changed.\n\n"+
+				"Since a backup is taken before every write, this answers \"what did that "+
+				"last change actually do\" without reading two full configurations. Use "+
+				"\"current\" for the live configuration and a backup name from list_backups "+
+				"for a snapshot; \"latest\" resolves to the most recent backup.\n\n"+
+				"Comparison is by node id and semantic, so a document whose keys were "+
+				"reordered is not reported as a change. Read-only.",
+		),
+		mcp.WithString("from", mcp.Required(),
+			mcp.Description("Baseline: a backup filename, \"latest\", or \"current\".")),
+		mcp.WithString("to",
+			mcp.Description("What to compare against. Defaults to \"current\", the live configuration.")),
+	)
+	s.addReadTool(diffFlows, s.handleDiffFlows)
 
 	// ---- restore_backup ------------------------------------------------
 	restoreBackup := mcp.NewTool("restore_backup",
@@ -199,8 +312,7 @@ func (s *Server) registerTools() {
 		mcp.WithString("backup", mcp.Required(),
 			mcp.Description("Backup filename (from list_backups), or \"latest\".")),
 	)
-	s.mcpServer.AddTool(restoreBackup, s.handleRestoreBackup)
-	tools = append(tools, restoreBackup)
+	s.addWriteTool(restoreBackup, s.handleRestoreBackup)
 
 	// ---- get_settings --------------------------------------------------
 	getSettings := mcp.NewTool("get_settings",
@@ -210,8 +322,76 @@ func (s *Server) registerTools() {
 				"and configuration issues without opening the editor. Read-only.",
 		),
 	)
-	s.mcpServer.AddTool(getSettings, s.handleGetSettings)
-	tools = append(tools, getSettings)
+	s.addReadTool(getSettings, s.handleGetSettings)
+
+	// ---- get_diagnostics -----------------------------------------------
+	getDiagnostics := mcp.NewTool("get_diagnostics",
+		mcp.WithDescription(
+			"Read the Node-RED runtime diagnostics report: Node.js version and memory "+
+				"usage, operating system, whether it runs in a container, locale and "+
+				"timezone, and the effective settings. This is the fastest way to answer "+
+				"\"what is this instance actually running on\" when diagnosing a problem. "+
+				"Requires Node-RED 3.1 or later; older versions return a 404. Read-only.",
+		),
+	)
+	s.addReadTool(getDiagnostics, s.handleGetDiagnostics)
+
+	// ---- list_plugins ---------------------------------------------------
+	listPlugins := mcp.NewTool("list_plugins",
+		mcp.WithDescription(
+			"List the editor plugins loaded by the runtime. Plugins extend the editor "+
+				"rather than adding nodes, so they do not appear in list_nodes — this "+
+				"completes the picture of what is installed. Read-only.",
+		),
+	)
+	s.addReadTool(listPlugins, s.handleListPlugins)
+
+	// ---- get_debug_messages ---------------------------------------------
+	getDebugMessages := mcp.NewTool("get_debug_messages",
+		mcp.WithDescription(
+			"Read what the flows actually produced: the output of debug nodes, as it "+
+				"appears in the editor's debug sidebar.\n\n"+
+				"This closes the loop. After create_flow or update_flow, trigger the flow "+
+				"with inject_node, then call this to see whether it did what you intended "+
+				"and to read any errors it raised. Without it you can deploy a flow but "+
+				"never observe it.\n\n"+
+				"Collection starts with the server and runs continuously, so messages "+
+				"produced before you asked are already captured. Pass since (an RFC 3339 "+
+				"timestamp) to see only what arrived after a given moment — typically the "+
+				"receivedAt of the last message you saw, or the time just before you "+
+				"injected. The response reports the connection state and whether the "+
+				"buffer overflowed, so silence is never ambiguous. Read-only.",
+		),
+		mcp.WithNumber("limit",
+			mcp.Description("Maximum messages to return, newest last (1-200, default 50).")),
+		mcp.WithString("since",
+			mcp.Description("RFC 3339 timestamp, e.g. \"2026-07-27T08:15:00Z\". Only messages received after it are returned.")),
+	)
+	s.addReadTool(getDebugMessages, s.handleGetDebugMessages)
+
+	// ---- get_context ----------------------------------------------------
+	getContext := mcp.NewTool("get_context",
+		mcp.WithDescription(
+			"Read Node-RED context: the state flows keep between messages.\n\n"+
+				"Context does not appear anywhere in the flow JSON, so a flow can look "+
+				"completely correct and still misbehave because of a value it stored "+
+				"earlier. Use this when a flow's logic reads right but its behaviour is "+
+				"wrong.\n\n"+
+				"Scope \"global\" is instance-wide. Scope \"flow\" needs the tab id, and "+
+				"\"node\" needs the node id. Omit key to read the whole store. Values come "+
+				"back keyed by store name, each with its value and type. Read-only: the "+
+				"Node-RED admin API exposes no way to write context.",
+		),
+		mcp.WithString("scope", mcp.Required(),
+			mcp.Description("\"global\", \"flow\", or \"node\"."),
+			mcp.Enum("global", "flow", "node"),
+		),
+		mcp.WithString("id",
+			mcp.Description("Flow tab id or node id. Required for scope \"flow\" and \"node\", ignored for \"global\".")),
+		mcp.WithString("key",
+			mcp.Description("A single context key to read. Omit to return the whole store.")),
+	)
+	s.addReadTool(getContext, s.handleGetContext)
 
 	// ---- get_flows_state ----------------------------------------------
 	getFlowsState := mcp.NewTool("get_flows_state",
@@ -220,8 +400,7 @@ func (s *Server) registerTools() {
 				"started or stopped, plus a per-flow breakdown. Read-only.",
 		),
 	)
-	s.mcpServer.AddTool(getFlowsState, s.handleGetFlowsState)
-	tools = append(tools, getFlowsState)
+	s.addReadTool(getFlowsState, s.handleGetFlowsState)
 
 	// ---- set_flows_state ----------------------------------------------
 	setFlowsState := mcp.NewTool("set_flows_state",
@@ -233,8 +412,7 @@ func (s *Server) registerTools() {
 		mcp.WithString("state", mcp.Required(),
 			mcp.Description("Either \"start\" or \"stop\".")),
 	)
-	s.mcpServer.AddTool(setFlowsState, s.handleSetFlowsState)
-	tools = append(tools, setFlowsState)
+	s.addWriteTool(setFlowsState, s.handleSetFlowsState)
 
 	// ---- set_flows -----------------------------------------------------
 	// ponytail: full-deploy tool. Kept for parity with the admin API; in practice
@@ -250,8 +428,7 @@ func (s *Server) registerTools() {
 		mcp.WithString("flows", mcp.Required(),
 			mcp.Description("A JSON array of flow objects (the same shape returned by list_flows).")),
 	)
-	s.mcpServer.AddTool(setFlows, s.handleSetFlows)
-	tools = append(tools, setFlows)
+	s.addWriteTool(setFlows, s.handleSetFlows)
 
 	// ---- search_nodes --------------------------------------------------
 	searchNodes := mcp.NewTool("search_nodes",
@@ -266,13 +443,20 @@ func (s *Server) registerTools() {
 		mcp.WithNumber("limit",
 			mcp.Description("Maximum hits to return (1-50, default 10).")),
 	)
-	s.mcpServer.AddTool(searchNodes, s.handleSearchNodes)
-	tools = append(tools, searchNodes)
+	s.addReadTool(searchNodes, s.handleSearchNodes)
 }
 
-// handleListFlows returns the current flows as a JSON document.
-func (s *Server) handleListFlows(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	slog.Debug("tool: list_flows")
+// handleListFlows returns a map of the instance, compact by default.
+//
+// The full flow config of a real instance runs to tens of thousands of tokens,
+// so dumping it on every call would spend the context before any work starts.
+// Summary is therefore the default and "full" is opt-in.
+func (s *Server) handleListFlows(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	detail := req.GetString("detail", "summary")
+	if detail != "summary" && detail != "full" {
+		return mcp.NewToolResultError(fmt.Sprintf("detail must be \"summary\" or \"full\", got %q", detail)), nil
+	}
+	slog.Debug("tool: list_flows", "detail", detail)
 
 	raw, err := s.nrClient.ListFlows(ctx)
 	if err != nil {
@@ -283,11 +467,69 @@ func (s *Server) handleListFlows(ctx context.Context, _ mcp.CallToolRequest) (*m
 		raw = []byte("[]")
 	}
 
-	summary := fmt.Sprintf(
-		"Found %d flow tab(s) in Node-RED.\n\n```json\n%s\n```",
-		nodered.FlowTabCount(raw), prettyJSON(raw),
-	)
-	return mcp.NewToolResultText(summary), nil
+	if detail == "full" {
+		return mcp.NewToolResultText(fmt.Sprintf(
+			"Found %d flow tab(s) in Node-RED (full configuration).\n\n```json\n%s\n```",
+			nodered.FlowTabCount(raw), prettyJSON(raw),
+		)), nil
+	}
+
+	overview := nodered.SummarizeFlows(raw)
+	out, err := json.MarshalIndent(overview, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("encoding summary: %v", err)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf(
+		"%d flow tab(s), %d subflow(s), %d node(s) total.\n\n```json\n%s\n```\n\n"+
+			"This is a summary: node bodies are omitted. Use search_flows to locate "+
+			"specific nodes, get_flow to fetch one tab in full, or list_flows with "+
+			"detail=\"full\" for the entire configuration.",
+		len(overview.Tabs), len(overview.Subflows), overview.TotalNodes, string(out),
+	)), nil
+}
+
+// handleSearchFlows finds nodes across every flow without returning them all.
+func (s *Server) handleSearchFlows(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	query := req.GetString("query", "")
+	nodeType := req.GetString("type", "")
+	// mcp-go hands number arguments over as float64.
+	limit := int(req.GetFloat("limit", 20))
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	slog.Debug("tool: search_flows", "query", query, "type", nodeType, "limit", limit)
+
+	raw, err := s.nrClient.ListFlows(ctx)
+	if err != nil {
+		slog.Error("search_flows failed", "error", err)
+		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+	}
+
+	matches, total := nodered.SearchFlows(raw, query, nodeType, limit)
+	if total == 0 {
+		return mcp.NewToolResultText(fmt.Sprintf(
+			"No nodes matched (query=%q, type=%q). Try a broader query, or list_flows "+
+				"to see which node types exist.", query, nodeType,
+		)), nil
+	}
+	out, err := json.MarshalIndent(matches, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("encoding matches: %v", err)), nil
+	}
+
+	// Say so when the list was cut short: a bare list of 20 reads as "there are
+	// exactly 20" and the model would stop looking.
+	header := fmt.Sprintf("%d node(s) matched.", total)
+	if total > len(matches) {
+		header = fmt.Sprintf(
+			"%d node(s) matched; showing the first %d. Raise limit or narrow the query to see the rest.",
+			total, len(matches),
+		)
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("%s\n\n```json\n%s\n```", header, string(out))), nil
 }
 
 // handleGetFlow returns a single flow tab as JSON.
@@ -339,6 +581,115 @@ func (s *Server) handleUpdateFlow(ctx context.Context, req mcp.CallToolRequest) 
 		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Flow %q updated (a backup was taken first).", id)), nil
+}
+
+// handleAddNode appends one node to a flow tab.
+func (s *Server) handleAddNode(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	flowID, err := req.RequireString("flow_id")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	node, err := req.RequireString("node")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	slog.Debug("tool: add_node", "flow_id", flowID)
+
+	if err := s.nrClient.AddNode(ctx, flowID, json.RawMessage(node)); err != nil {
+		slog.Error("add_node failed", "error", err, "flow_id", flowID)
+		return mcp.NewToolResultError(fmt.Sprintf("adding node: %v", err)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf(
+		"Node added to flow %q (a backup was taken first). Wire it up with connect_nodes.", flowID,
+	)), nil
+}
+
+// handleUpdateNode merges properties into one node.
+func (s *Server) handleUpdateNode(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	flowID, err := req.RequireString("flow_id")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	nodeID, err := req.RequireString("node_id")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	props, err := req.RequireString("properties")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	slog.Debug("tool: update_node", "flow_id", flowID, "node_id", nodeID)
+
+	// Decoding into raw messages keeps each value exactly as supplied — an
+	// integer stays an integer, a nested object keeps its own shape.
+	var patch map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(props), &patch); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf(
+			"properties must be a JSON object, e.g. {\"topic\":\"home/new\"}: %v", err,
+		)), nil
+	}
+
+	if err := s.nrClient.UpdateNode(ctx, flowID, nodeID, patch); err != nil {
+		slog.Error("update_node failed", "error", err, "flow_id", flowID, "node_id", nodeID)
+		return mcp.NewToolResultError(fmt.Sprintf("updating node: %v", err)), nil
+	}
+	keys := make([]string, 0, len(patch))
+	for k := range patch {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return mcp.NewToolResultText(fmt.Sprintf(
+		"Node %q updated: %s. Every other property was left untouched (a backup was taken first).",
+		nodeID, strings.Join(keys, ", "),
+	)), nil
+}
+
+// handleDeleteNode removes one node and the wires pointing at it.
+func (s *Server) handleDeleteNode(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	flowID, err := req.RequireString("flow_id")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	nodeID, err := req.RequireString("node_id")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	slog.Debug("tool: delete_node", "flow_id", flowID, "node_id", nodeID)
+
+	if err := s.nrClient.DeleteNode(ctx, flowID, nodeID); err != nil {
+		slog.Error("delete_node failed", "error", err, "flow_id", flowID, "node_id", nodeID)
+		return mcp.NewToolResultError(fmt.Sprintf("deleting node: %v", err)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf(
+		"Node %q deleted from flow %q, along with any wires pointing at it (a backup was taken first).",
+		nodeID, flowID,
+	)), nil
+}
+
+// handleConnectNodes wires one node's output port to another node.
+func (s *Server) handleConnectNodes(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	flowID, err := req.RequireString("flow_id")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	fromID, err := req.RequireString("from_id")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	toID, err := req.RequireString("to_id")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	port := int(req.GetFloat("port", 0))
+	slog.Debug("tool: connect_nodes", "flow_id", flowID, "from", fromID, "port", port, "to", toID)
+
+	if err := s.nrClient.ConnectNodes(ctx, flowID, fromID, port, toID); err != nil {
+		slog.Error("connect_nodes failed", "error", err, "flow_id", flowID)
+		return mcp.NewToolResultError(fmt.Sprintf("connecting nodes: %v", err)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf(
+		"Wired %q output %d to %q (a backup was taken first).", fromID, port, toID,
+	)), nil
 }
 
 // handleDeleteFlow deletes a flow tab and all its nodes.
@@ -499,6 +850,58 @@ func (s *Server) handleListBackups(_ context.Context, _ mcp.CallToolRequest) (*m
 	return mcp.NewToolResultText(summary), nil
 }
 
+// handleDiffFlows compares two flow configurations.
+func (s *Server) handleDiffFlows(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	from, err := req.RequireString("from")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	to := req.GetString("to", "current")
+	slog.Debug("tool: diff_flows", "from", from, "to", to)
+
+	before, err := s.resolveFlowSource(ctx, from)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("reading %q: %v", from, err)), nil
+	}
+	after, err := s.resolveFlowSource(ctx, to)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("reading %q: %v", to, err)), nil
+	}
+
+	diff := nodered.DiffFlows(before, after)
+	if diff.Empty() {
+		return mcp.NewToolResultText(fmt.Sprintf("%q and %q are identical.", from, to)), nil
+	}
+	out, err := json.MarshalIndent(diff, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("encoding diff: %v", err)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf(
+		"%d difference(s) between %q and %q: %d added, %d removed, %d changed.\n\n```json\n%s\n```",
+		diff.Total(), from, to, len(diff.Added), len(diff.Removed), len(diff.Changed), string(out),
+	)), nil
+}
+
+// resolveFlowSource turns a diff operand into a flow configuration. "current"
+// reads the live instance; anything else names a backup, with "latest" meaning
+// the most recent one.
+func (s *Server) resolveFlowSource(ctx context.Context, name string) (nodered.RawFlow, error) {
+	if name == "current" {
+		return s.nrClient.ListFlows(ctx)
+	}
+	if name == "latest" {
+		backups, err := s.nrClient.ListBackups()
+		if err != nil {
+			return nil, err
+		}
+		if len(backups) == 0 {
+			return nil, errors.New("no backups have been saved yet")
+		}
+		name = backups[0].Name
+	}
+	return s.nrClient.ReadBackup(name)
+}
+
 // handleRestoreBackup restores the full flow config from a saved backup.
 func (s *Server) handleRestoreBackup(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	name, err := req.RequireString("backup")
@@ -553,6 +956,158 @@ func (s *Server) handleGetSettings(ctx context.Context, _ mcp.CallToolRequest) (
 		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("```json\n%s\n```", prettyJSON(raw))), nil
+}
+
+// handleGetDiagnostics returns the runtime diagnostics report.
+func (s *Server) handleGetDiagnostics(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	slog.Debug("tool: get_diagnostics")
+
+	raw, err := s.nrClient.GetDiagnostics(ctx)
+	if err != nil {
+		slog.Error("get_diagnostics failed", "error", err)
+		// A 404 here almost always means an older Node-RED rather than a real
+		// fault, and that is worth saying rather than leaving the model to guess.
+		var apiErr *nodered.APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+			return mcp.NewToolResultError(
+				"this Node-RED does not expose /diagnostics (added in 3.1). " +
+					"Use get_settings for what configuration is available instead.",
+			), nil
+		}
+		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("```json\n%s\n```", prettyJSON(raw))), nil
+}
+
+// handleListPlugins returns the editor plugins loaded by the runtime.
+func (s *Server) handleListPlugins(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	slog.Debug("tool: list_plugins")
+
+	raw, err := s.nrClient.ListPlugins(ctx)
+	if err != nil {
+		slog.Error("list_plugins failed", "error", err)
+		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+	}
+	if len(raw) == 0 || string(raw) == "[]" {
+		return mcp.NewToolResultText("No editor plugins are loaded."), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("```json\n%s\n```", prettyJSON(raw))), nil
+}
+
+// handleGetDebugMessages returns recent debug-node output from the tail.
+func (s *Server) handleGetDebugMessages(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if s.debugTail == nil {
+		return mcp.NewToolResultError(
+			"debug streaming is not available: the /comms WebSocket endpoint could not " +
+				"be derived from the configured Node-RED URL.",
+		), nil
+	}
+
+	limit := int(req.GetFloat("limit", 50))
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	var since time.Time
+	if raw := req.GetString("since", ""); raw != "" {
+		parsed, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf(
+				"since must be an RFC 3339 timestamp (e.g. 2026-07-27T08:15:00Z), got %q", raw,
+			)), nil
+		}
+		since = parsed
+	}
+	slog.Debug("tool: get_debug_messages", "limit", limit, "since", since)
+
+	snap := s.debugTail.Snapshot(limit, since)
+
+	// An empty result has several very different causes, and guessing wrong
+	// sends the model off debugging the wrong thing. Name the actual one.
+	if len(snap.Messages) == 0 {
+		switch {
+		case !snap.Connected && snap.LastError != "":
+			return mcp.NewToolResultText(fmt.Sprintf(
+				"Not connected to Node-RED's debug stream, so nothing has been captured.\n"+
+					"Last error: %s", snap.LastError,
+			)), nil
+		case !snap.Connected:
+			return mcp.NewToolResultText(
+				"The debug stream is still connecting; nothing captured yet. Try again in a moment.",
+			), nil
+		case snap.Received == 0:
+			return mcp.NewToolResultText(
+				"Connected to the debug stream, but no debug messages have arrived yet.\n" +
+					"Node-RED only emits these from debug nodes that are enabled and wired " +
+					"into a path the messages actually take — check the flow has one, then " +
+					"trigger it with inject_node.",
+			), nil
+		default:
+			return mcp.NewToolResultText(fmt.Sprintf(
+				"No debug messages match that filter (%d buffered, %d received in total).",
+				snap.Buffered, snap.Received,
+			)), nil
+		}
+	}
+
+	out, err := json.MarshalIndent(snap.Messages, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("encoding debug messages: %v", err)), nil
+	}
+
+	header := fmt.Sprintf("%d debug message(s), oldest first.", len(snap.Messages))
+	if snap.Dropped > 0 {
+		header += fmt.Sprintf(
+			" %d older message(s) were discarded: the buffer holds the most recent %d.",
+			snap.Dropped, snap.Buffered,
+		)
+	}
+	if !snap.Connected {
+		header += " Warning: the debug stream is currently disconnected, so this may be stale."
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("%s\n\n```json\n%s\n```", header, string(out))), nil
+}
+
+// handleGetContext reads a context store, or one key within it.
+func (s *Server) handleGetContext(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	scope, err := req.RequireString("scope")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	id := req.GetString("id", "")
+	key := req.GetString("key", "")
+	slog.Debug("tool: get_context", "scope", scope, "id", id, "key", key)
+
+	raw, err := s.nrClient.GetContext(ctx, scope, id, key)
+	if err != nil {
+		slog.Error("get_context failed", "error", err, "scope", scope, "id", id)
+		return mcp.NewToolResultError(fmt.Sprintf("reading context: %v", err)), nil
+	}
+	// An empty store is a legitimate answer and a common one. Saying so beats
+	// returning "{}" and letting the model read it as a failure.
+	if s := strings.TrimSpace(string(raw)); s == "" || s == "{}" || s == `{"memory":{}}` {
+		return mcp.NewToolResultText(fmt.Sprintf(
+			"No context values are set for scope %q%s.", scope, describeContextTarget(id, key),
+		)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("```json\n%s\n```", prettyJSON(raw))), nil
+}
+
+// describeContextTarget renders the id/key part of a context message, so the
+// empty-store reply names exactly what was looked up.
+func describeContextTarget(id, key string) string {
+	switch {
+	case id != "" && key != "":
+		return fmt.Sprintf(" (id %q, key %q)", id, key)
+	case id != "":
+		return fmt.Sprintf(" (id %q)", id)
+	case key != "":
+		return fmt.Sprintf(" (key %q)", key)
+	}
+	return ""
 }
 
 // handleGetFlowsState returns the current runtime state of Node-RED.

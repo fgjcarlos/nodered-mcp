@@ -7,14 +7,9 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// resources is the registry of MCP resources exposed by the server.
-var resources []mcp.Resource
-
-// registerResources wires up the resources declared in PLAN.md.
-//
-// Hello-world scope: the resource handlers are registered as placeholders
-// returning the data via the tool counterpart. We keep them here so the
-// server is shaped like the full v0.1 spec from day one.
+// registerResources wires up the read-only resource views of the connected
+// instance. Every resource here is side-effect free, so read-only mode keeps
+// all of them.
 func (s *Server) registerResources() {
 	flowsRes := mcp.NewResource(
 		"nodered://flows/current",
@@ -23,7 +18,7 @@ func (s *Server) registerResources() {
 		mcp.WithMIMEType("application/json"),
 	)
 	s.mcpServer.AddResource(flowsRes, s.handleFlowsResource)
-	resources = append(resources, flowsRes)
+	s.resources = append(s.resources, flowsRes)
 
 	settingsRes := mcp.NewResource(
 		"nodered://settings",
@@ -32,7 +27,7 @@ func (s *Server) registerResources() {
 		mcp.WithMIMEType("application/json"),
 	)
 	s.mcpServer.AddResource(settingsRes, s.handleSettingsResource)
-	resources = append(resources, settingsRes)
+	s.resources = append(s.resources, settingsRes)
 
 	stateRes := mcp.NewResource(
 		"nodered://flows/state",
@@ -41,7 +36,7 @@ func (s *Server) registerResources() {
 		mcp.WithMIMEType("application/json"),
 	)
 	s.mcpServer.AddResource(stateRes, s.handleFlowsStateResource)
-	resources = append(resources, stateRes)
+	s.resources = append(s.resources, stateRes)
 }
 
 func (s *Server) handleFlowsResource(ctx context.Context, _ mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
