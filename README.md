@@ -68,7 +68,7 @@ A Spanish version of this document is available at [`README.es.md`](./README.es.
 | `get_context` | `GET /context/...` | read | State the flows keep between messages |
 | `get_debug_messages` | `/comms` WebSocket | read | Output the flows actually produced |
 | `list_plugins` | `GET /plugins` | read | Editor plugins loaded by the runtime |
-| `set_flows_state` | `POST /flows/state` | write | Start or stop the runtime |
+| `set_flows_state` | `POST /flows/state` | write | Start or stop the runtime (requires `runtimeState.enabled` in Node-RED settings) |
 | `list_backups` | local | read | Saved flow snapshots, newest first |
 | `diff_flows` | local + `GET /flows` | read | What changed between a snapshot and now |
 | `restore_backup` | `POST /flows` | write | Roll the entire configuration back to a snapshot |
@@ -128,6 +128,21 @@ Guarded: a duplicate node id is rejected, a node's id cannot be changed (the wir
 One detail worth knowing when reading a tab: Node-RED splits its contents into `nodes` and `configs`, deciding by whether the object carries `x`/`y` canvas coordinates. A shared MQTT broker belongs to the tab but appears under `configs`. These tools honour that split, so config nodes can be edited too and never end up filed in the wrong place.
 
 `diff_flows` compares any two configurations — a backup against the live instance, or two backups — and reports what was added, removed, or changed. Since a backup is taken before every write, `diff_flows(from: "latest")` answers "what did that last change actually do".
+
+Both arguments take a backup name exactly as `list_backups` returns it, or the literal `"current"` for the live configuration:
+
+```
+diff_flows(from: "latest",                 to: "current")   # what did the last change do
+diff_flows(from: "flows-20260727-200446.359.json", to: "current")
+diff_flows(from: "flows-20260727-200446.359.json", to: "flows-20260727-193012.044.json")
+```
+
+`restore_backup` takes the same shape, plus the shorthand `"latest"`:
+
+```
+restore_backup(backup: "latest")
+restore_backup(backup: "flows-20260727-200446.359.json")
+```
 
 ### Closing the loop: seeing what a flow did
 

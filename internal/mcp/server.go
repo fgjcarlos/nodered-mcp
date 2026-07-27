@@ -182,7 +182,12 @@ func (s *Server) RunHTTP(addr, token string, verifier *oauth.Verifier) error {
 		authMW = func(next http.Handler) http.Handler { return requireBearer(token, next) }
 	case verifier != nil:
 		authMW = func(next http.Handler) http.Handler { return oauth.RequireOAuth(verifier, next) }
-	case !config.IsLoopbackAddr(addr):
+	case config.IsLoopbackAddr(addr):
+		// Loopback bind: no auth, but the mux must still be reached --
+		// use a pass-through middleware rather than nil so the
+		// handler below can wrap unconditionally.
+		authMW = func(next http.Handler) http.Handler { return next }
+	default:
 		// config.validate should have caught this. Fail loudly rather
 		// than come up without authentication.
 		return errors.New("mcp: RunHTTP called without token or OAuth verifier")
