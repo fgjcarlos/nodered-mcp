@@ -27,8 +27,8 @@ func TestIsLoopbackAddr(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.addr, func(t *testing.T) {
-			if got := isLoopbackAddr(tc.addr); got != tc.want {
-				t.Errorf("isLoopbackAddr(%q) = %v, want %v", tc.addr, got, tc.want)
+			if got := IsLoopbackAddr(tc.addr); got != tc.want {
+				t.Errorf("IsLoopbackAddr(%q) = %v, want %v", tc.addr, got, tc.want)
 			}
 		})
 	}

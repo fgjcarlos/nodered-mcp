@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -176,5 +177,52 @@ func TestHandleGetDebugMessages_OnButUnavailable(t *testing.T) {
 	}
 	if strings.Contains(tc.Text, "debug streaming is disabled") {
 		t.Errorf("on-but-broken should not use the opt-in message, got %q", tc.Text)
+	}
+}
+
+// TestNormalizeFlowDoc covers the auto-fill guard reported in Mavis's
+// 2026-07-27 testing pass: a tab object without "nodes" must round-trip
+// with an empty array rather than bouncing off the runtime as
+// "missing nodes property".
+func TestNormalizeFlowDoc(t *testing.T) {
+	tests := []struct {
+		name     string
+		in       string
+		fill     bool
+		wantKeys []string
+		wantHas  string
+	}{
+		{"tab without nodes, fill on", `{"type":"tab","label":"t"}`, true, []string{"type", "label", "nodes"}, `"nodes":[]`},
+		{"tab with nodes, fill on", `{"type":"tab","nodes":[{"id":"a"}]}`, true, []string{"type", "nodes"}, `"id":"a"`},
+		{"update path, fill off", `{"type":"tab","label":"t"}`, false, []string{"type", "label"}, ""},
+		{"non-object rejected", `[{"id":"a"}]`, true, nil, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := normalizeFlowDoc(json.RawMessage(tc.in), tc.fill)
+			if tc.wantKeys == nil {
+				if err == nil {
+					t.Fatalf("expected error for %q", tc.in)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			// ponytail: round-trip via map keeps the test independent of key
+			// ordering, which json.Marshal does not guarantee.
+			var m map[string]json.RawMessage
+			if err := json.Unmarshal(got, &m); err != nil {
+				t.Fatalf("result not a JSON object: %v", err)
+			}
+			for _, k := range tc.wantKeys {
+				if _, ok := m[k]; !ok {
+					t.Errorf("expected key %q in normalized flow, got %s", k, got)
+				}
+			}
+			if tc.wantHas != "" && !strings.Contains(string(got), tc.wantHas) {
+				t.Errorf("expected %q in normalized flow, got %s", tc.wantHas, got)
+			}
+		})
 	}
 }
