@@ -1,6 +1,6 @@
 {
   "name": "@fgjcarlos/nodered-mcp",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "description": "MCP server for Node-RED — installable via npm",
   "license": "MIT",
   "repository": "github:fgjcarlos/nodered-mcp",
