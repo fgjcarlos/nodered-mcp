@@ -47,6 +47,10 @@ type Config struct {
 	// Point the server at a production instance with this set and the model
 	// can inspect and diagnose, but not deploy, install, or inject.
 	MCPReadOnly bool
+	// MCPDebugStream opts in to opening the /comms WebSocket tail at
+	// server start. Defaults to false because the tail crashes some
+	// Node-RED versions (see #17). Set true to enable debug streaming.
+	MCPDebugStream bool
 }
 
 // Load reads configuration from the environment. If a .env file exists in
@@ -84,6 +88,12 @@ func Load() (*Config, error) {
 	}
 	cfg.MCPReadOnly = readOnly
 
+	debugStream, err := strconv.ParseBool(getEnv("MCP_DEBUG_STREAM", "false"))
+	if err != nil {
+		return nil, fmt.Errorf("parsing MCP_DEBUG_STREAM: %w", err)
+	}
+	cfg.MCPDebugStream = debugStream
+
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -96,6 +106,7 @@ func Load() (*Config, error) {
 		"http_auth", cfg.MCPHTTPToken != "",
 		"oauth_issuer", cfg.OAuthIssuer != "",
 		"read_only", cfg.MCPReadOnly,
+		"debug_stream", cfg.MCPDebugStream,
 	)
 
 	return cfg, nil

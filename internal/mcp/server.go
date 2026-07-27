@@ -32,6 +32,11 @@ type Server struct {
 	nrClient  *nodered.Client
 	// readOnly withholds every tool that mutates the Node-RED instance.
 	readOnly bool
+	// debugStream remembers whether the operator opted in to opening the
+	// /comms WebSocket. When false, debugTail stays nil and
+	// startDebugTail is a no-op. The field is stored on the Server so a
+	// future code path can report it without poking into debugTail.
+	debugStream bool
 	// debugTail streams debug output in the background. Nil when the tail
 	// could not be constructed, in which case get_debug_messages says so
 	// rather than the server refusing to start.
@@ -52,7 +57,14 @@ type Server struct {
 // mutating ones are never advertised to the client, so a model cannot call
 // what it cannot see. Resources and prompts are read-only surfaces and are
 // always registered.
-func New(nrClient *nodered.Client, version string, readOnly bool) *Server {
+//
+// When debugStream is false, the WebSocket tail to /comms is not started
+// at all — neither constructed nor registered with the server. This is the
+// default and the safe one: starting a /comms dial on some Node-RED
+// versions (notably :latest) crashes the runtime via a bug in
+// @node-red/editor-api/auth/tokens.js. Operators who need debug streaming
+// opt in explicitly via MCP_DEBUG_STREAM=on.
+func New(nrClient *nodered.Client, version string, readOnly, debugStream bool) *Server {
 	if version == "" {
 		version = "dev"
 	}
@@ -65,14 +77,19 @@ func New(nrClient *nodered.Client, version string, readOnly bool) *Server {
 	)
 
 	srv := &Server{
-		mcpServer: s,
-		nrClient:  nrClient,
-		readOnly:  readOnly,
+		mcpServer:   s,
+		nrClient:    nrClient,
+		readOnly:    readOnly,
+		debugStream: debugStream,
 	}
 
-	// The debug tail is best-effort. A Node-RED that is unreachable, or an
-	// unusable base URL, must not stop the other 23 tools from working.
-	if tail, err := nodered.NewDebugTail(nrClient, nodered.DefaultDebugBufferSize); err != nil {
+	// The debug tail is best-effort and opt-in. A Node-RED that is
+	// unreachable, or one that crashes on the /comms handshake (Node-RED
+	// :latest as of writing), must not stop the other 23 tools from working
+	// and must not bring the runtime down by triggering the upstream bug.
+	if !debugStream {
+		slog.Info("debug stream disabled; set MCP_DEBUG_STREAM=on to enable")
+	} else if tail, err := nodered.NewDebugTail(nrClient, nodered.DefaultDebugBufferSize); err != nil {
 		slog.Warn("debug tail unavailable", "error", err)
 	} else {
 		srv.debugTail = tail
@@ -112,8 +129,13 @@ func (s *Server) addWriteTool(tool mcp.Tool, handler server.ToolHandlerFunc) {
 // startDebugTail begins streaming debug output in the background. It is
 // deliberately started with the server rather than on first use: the point of
 // a tail is to already hold what happened before you thought to ask.
+//
+// The tail is opt-in via MCP_DEBUG_STREAM. When that flag is off,
+// debugTail is nil and Run is never started — opening the WebSocket on
+// some Node-RED versions (notably :latest as of writing) crashes the
+// runtime via @node-red/editor-api/auth/tokens.js.
 func (s *Server) startDebugTail(ctx context.Context) {
-	if s.debugTail == nil {
+	if s.debugTail == nil || !s.debugStream {
 		return
 	}
 	go s.debugTail.Run(ctx)

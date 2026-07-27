@@ -277,3 +277,69 @@ func TestTailStopsWhenContextIsCancelled(t *testing.T) {
 		t.Fatal("Run did not return after its context was cancelled")
 	}
 }
+
+// Node-RED 3.x multiplexes the auth reply onto the same envelope format
+// as data frames: it arrives as [{"auth":"ok"}] rather than {"auth":"ok"}.
+// The tail must accept both shapes.
+func TestTailAuthenticatesWhenReplyIsAnEnvelope(t *testing.T) {
+	// Build a fake that replies with the array shape.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/comms" {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.CloseNow()
+		ctx := r.Context()
+		_, _, err = conn.Read(ctx)
+		if err != nil {
+			return
+		}
+		if err := conn.Write(ctx, websocket.MessageText, []byte(`[{"auth":"ok"}]`)); err != nil {
+			return
+		}
+		// Drain the subscribe frame so the test exits cleanly.
+		_, _, _ = conn.Read(ctx)
+		<-ctx.Done()
+	}))
+	t.Cleanup(srv.Close)
+
+	tail := newDebugTail(strings.Replace(srv.URL, "http://", "ws://", 1)+"/comms", "tok", false, 10)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go tail.Run(ctx)
+
+	if !waitFor(t, func() bool { return tail.Snapshot(10, time.Time{}).Connected }) {
+		t.Fatalf("tail did not connect; last error: %s", tail.Snapshot(10, time.Time{}).LastError)
+	}
+}
+
+// consume must accept both array and single-object frames so a late
+// auth reply (sent as a single object after the array channel is open)
+// does not crash the tail.
+func TestConsumeAcceptsSingleObjectFrame(t *testing.T) {
+	tail := newDebugTail("ws://x/comms", "", false, 10)
+	tail.consume([]byte(`{"topic":"debug","data":{"msg":"single"}}`))
+
+	snap := tail.Snapshot(10, time.Time{})
+	if len(snap.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(snap.Messages))
+	}
+	if string(snap.Messages[0].Data) != `{"msg":"single"}` {
+		t.Errorf("payload lost: %s", snap.Messages[0].Data)
+	}
+}
+
+func TestConsumeRejectsNonJSONFrame(t *testing.T) {
+	tail := newDebugTail("ws://x/comms", "", false, 10)
+	// Plain text or a number — neither an array nor an object.
+	tail.consume([]byte(`"hello"`))
+	tail.consume([]byte(`42`))
+
+	snap := tail.Snapshot(10, time.Time{})
+	if len(snap.Messages) != 0 {
+		t.Errorf("non-JSON frame should be dropped silently, got %d messages", len(snap.Messages))
+	}
+}

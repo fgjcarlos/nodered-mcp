@@ -371,6 +371,7 @@ Fuera de etapa, por necesidad detectada durante el trabajo:
 | `MCP_HTTP_ADDR` | `:8090` | `--http-addr` | Dirección de escucha del transporte http |
 | `MCP_HTTP_TOKEN` | *(vacío)* | `--http-token` | Bearer token del transporte http. **Obligatorio** si la dirección no es loopback |
 | `MCP_READ_ONLY` | `false` | `--read-only` | Registrar solo las 14 tools sin efectos secundarios |
+| `MCP_DEBUG_STREAM` | `false` | `--debug-stream` | Abrir el WebSocket de `/comms` al arrancar para activar el stream de debug. **Desactivado por defecto** porque algunas versiones de Node-RED crashean durante el handshake (#17) |
 | `MCP_OAUTH_ISSUER` | *(vacío)* | `--oauth-issuer` | Habilita OAuth 2.1 / OIDC en el transporte HTTP |
 | `MCP_OAUTH_AUDIENCE` | *(vacío)* | `--oauth-aud` | Audience claim obligatorio cuando hay issuer |
 

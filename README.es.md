@@ -287,6 +287,7 @@ Cada ajuste puede indicarse como variable de entorno o como flag de línea de co
 | `NODERED_INSECURE` | — | `false` | Omitir la verificación TLS. Solo para desarrollo |
 | `NODERED_BACKUP_DIR` | — | `backups` | Dónde se escriben los snapshots antes de cada escritura |
 | `MCP_READ_ONLY` | `--read-only` | `false` | Exponer solo las tools que no pueden modificar Node-RED |
+| `MCP_DEBUG_STREAM` | `--debug-stream` | `false` | Abrir el WebSocket de `/comms` al arrancar para activar el stream de debug. **Desactivado por defecto** porque algunas versiones de Node-RED crashean durante el handshake |
 | `MCP_TRANSPORT` | `--transport` | `stdio` | `stdio` o `http` |
 | `MCP_HTTP_ADDR` | `--http-addr` | `:8090` | Dirección de escucha del transporte HTTP |
 | `MCP_HTTP_TOKEN` | `--http-token` | — | Bearer token del transporte HTTP. Obligatorio salvo con bind a loopback |

@@ -72,6 +72,7 @@ var flagEnv = map[string]string{
 	"oauth-aud":    "MCP_OAUTH_AUDIENCE",
 	"log-level":    "MCP_LOG_LEVEL",
 	"read-only":    "MCP_READ_ONLY",
+	"debug-stream": "MCP_DEBUG_STREAM",
 }
 
 func main() {
@@ -114,6 +115,7 @@ func serve(args []string) error {
 	fs.String("oauth-aud", "", "audience claim the JWT must include; required when oauth-issuer is set (env MCP_OAUTH_AUDIENCE)")
 	fs.String("log-level", "", "log level: debug|info|warn|error (env MCP_LOG_LEVEL)")
 	fs.Bool("read-only", false, "expose only tools that cannot modify Node-RED (env MCP_READ_ONLY)")
+	fs.Bool("debug-stream", false, "open the /comms WebSocket tail at startup to enable debug streaming (env MCP_DEBUG_STREAM). Off by default; some Node-RED versions crash on the handshake.")
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return nil
@@ -148,7 +150,7 @@ func serve(args []string) error {
 		return fmt.Errorf("creating nodered client: %w", err)
 	}
 
-	srv := mcpserver.New(nrClient, resolveVersion(), cfg.MCPReadOnly)
+	srv := mcpserver.New(nrClient, resolveVersion(), cfg.MCPReadOnly, cfg.MCPDebugStream)
 	if cfg.MCPTransport == "http" {
 		verifier, err := buildOAuthVerifier(cfg)
 		if err != nil {
