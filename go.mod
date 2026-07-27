@@ -3,6 +3,7 @@ module github.com/fgjcarlos/nodered-mcp
 go 1.25.5
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/joho/godotenv v1.5.1
 	github.com/mark3labs/mcp-go v0.57.0
 )
