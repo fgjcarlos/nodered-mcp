@@ -18,6 +18,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/fgjcarlos/nodered-mcp/internal/config"
 	"github.com/fgjcarlos/nodered-mcp/internal/nodered"
 	"github.com/fgjcarlos/nodered-mcp/internal/oauth"
 )
@@ -162,7 +163,11 @@ func (s *Server) Run() error {
 //   - verifier != nil: require a JWT Bearer, verified against the pinned
 //     issuer and audience, signed by a key in verifier's keyset.
 //
-// Exactly one is required. config.validate rejects both or neither.
+// Exactly one is required UNLESS addr is loopback-only, in which case
+// config.validate already cleared the "no auth on a public bind" rule and
+// the server can come up without credentials. config.validate is the single
+// gate that decides whether the listen address is reachable from outside —
+// RunHTTP trusts it and never re-decides.
 func (s *Server) RunHTTP(addr, token string, verifier *oauth.Verifier) error {
 	// The http.Server is created first and handed to mcp-go, so the MCP
 	// handler can be wrapped in auth while mcp-go keeps owning the listener
@@ -177,7 +182,7 @@ func (s *Server) RunHTTP(addr, token string, verifier *oauth.Verifier) error {
 		authMW = func(next http.Handler) http.Handler { return requireBearer(token, next) }
 	case verifier != nil:
 		authMW = func(next http.Handler) http.Handler { return oauth.RequireOAuth(verifier, next) }
-	default:
+	case !config.IsLoopbackAddr(addr):
 		// config.validate should have caught this. Fail loudly rather
 		// than come up without authentication.
 		return errors.New("mcp: RunHTTP called without token or OAuth verifier")

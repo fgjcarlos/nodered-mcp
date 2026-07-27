@@ -132,7 +132,7 @@ func (c *Config) validate() error {
 		// for the HTTP transport: when configured, it satisfies the same
 		// "must not come up unauthenticated" rule without requiring a shared
 		// static secret.
-		if c.MCPHTTPToken == "" && c.OAuthIssuer == "" && !isLoopbackAddr(c.MCPHTTPAddr) {
+		if c.MCPHTTPToken == "" && c.OAuthIssuer == "" && !IsLoopbackAddr(c.MCPHTTPAddr) {
 			return fmt.Errorf(
 				"MCP_HTTP_TOKEN or MCP_OAUTH_ISSUER is required: %q is reachable from outside "+
 					"this machine, and the http transport would otherwise expose full write "+

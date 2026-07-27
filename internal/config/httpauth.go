@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// isLoopbackAddr reports whether a listen address reaches only this machine.
+// IsLoopbackAddr reports whether a listen address reaches only this machine.
 //
 // It drives the rule that an exposed HTTP transport must carry a token. The
 // distinction people get wrong is ":8090" — it reads as local but binds every
@@ -14,7 +14,13 @@ import (
 // Anything unparseable is reported as not loopback. Treating an address we do
 // not understand as safe would disable the guard precisely where the operator's
 // intent is least clear.
-func isLoopbackAddr(addr string) bool {
+// IsLoopbackAddr reports whether addr binds only to the local machine. It
+// is the gate that lets the HTTP transport come up without a token: a
+// loopback-only bind is reachable only from this host, so the absence of
+// auth is acceptable. Exported because the MCP runtime (in
+// internal/mcp.RunHTTP) needs to apply the same rule rather than
+// re-deciding it, which would risk a logic drift from config.validate.
+func IsLoopbackAddr(addr string) bool {
 	if addr == "" {
 		return false
 	}
