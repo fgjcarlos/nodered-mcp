@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -186,4 +187,71 @@ func containsJSON(body []byte, needle string) bool {
 		return bytes.Contains(body, []byte(needle))
 	}
 	return bytes.Contains(compact.Bytes(), []byte(needle))
+}
+
+// TestGetFlow_FallsBackToFlowsList covers issue #32: a tab that exists in
+// /flows but the runtime has not yet indexed under /flow/:id must still be
+// reachable, synthesized from the flat array into the nested tab shape.
+func TestGetFlow_FallsBackToFlowsList(t *testing.T) {
+	flowsList := []byte(`[
+		{"type":"tab","id":"fresh","label":"Fresh"},
+		{"type":"inject","id":"i1","z":"fresh","x":140,"y":140,"wires":[["d1"]]},
+		{"type":"debug","id":"d1","z":"fresh","x":300,"y":140,"wires":[]},
+		{"type":"tab","id":"other","label":"Other"}
+	]`)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flow/fresh":
+			http.Error(w, `{"code":"not_found","message":"Error"}`, http.StatusNotFound)
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			_, _ = w.Write(flowsList)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := clientWithBackup(t, srv.URL)
+	got, err := c.GetFlow(context.Background(), "fresh")
+	if err != nil {
+		t.Fatalf("GetFlow: %v", err)
+	}
+
+	// Synthesized shape: top-level label, id, nodes[].id=i1, debug present.
+	for _, want := range []string{`"label":"Fresh"`, `"id":"fresh"`, `"id":"i1"`, `"id":"d1"`} {
+		if !containsJSON(got, want) {
+			t.Errorf("expected %q in synthesized flow, got %s", want, got)
+		}
+	}
+	// The "type":"tab" marker belongs to the flat shape, not the nested one.
+	if containsJSON(got, `"type":"tab"`) {
+		t.Errorf("expected the type:tab marker to be stripped, got %s", got)
+	}
+}
+
+// TestGetFlow_404WhenBothEndpointsMiss: when /flow/:id and /flows both
+// lack the id, the original 404 must surface so callers can tell a missing
+// flow from a transient indexing delay.
+func TestGetFlow_404WhenBothEndpointsMiss(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flow/missing":
+			http.Error(w, `not found`, http.StatusNotFound)
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			_, _ = w.Write([]byte(`[{"type":"tab","id":"other","label":"Other"}]`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := clientWithBackup(t, srv.URL)
+	_, err := c.GetFlow(context.Background(), "missing")
+	if err == nil {
+		t.Fatal("expected GetFlow to surface 404 when neither endpoint has the flow")
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
+		t.Errorf("expected *APIError with 404, got %T %v", err, err)
+	}
 }

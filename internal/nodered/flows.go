@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 )
 
 // ListFlows returns the full active flow configuration exactly as the admin
@@ -22,15 +23,110 @@ func (c *Client) ListFlows(ctx context.Context) (RawFlow, error) {
 }
 
 // GetFlow returns a single flow tab by ID as opaque JSON.
+//
+// Node-RED only serves GET /flow/:id once the runtime has indexed the tab,
+// which it does lazily when the editor opens it. Newly deployed tabs 404
+// here even though they are present in GET /flows. When that happens we
+// fall back to /flows and synthesize the nested shape ({id, label, nodes,
+// configs}) from the flat array — the same shape the indexed endpoint
+// returns — so the caller does not have to special-case the freshly-deployed
+// state. If the id is not in /flows either, the original 404 is returned.
 func (c *Client) GetFlow(ctx context.Context, id string) (RawFlow, error) {
 	if id == "" {
 		return nil, errors.New("flow id is required")
 	}
 	var raw RawFlow
-	if err := c.do(ctx, "GET", "/flow/"+id, nil, &raw); err != nil {
+	err := c.do(ctx, "GET", "/flow/"+id, nil, &raw)
+	if err == nil {
+		return raw, nil
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
 		return nil, err
 	}
-	return raw, nil
+	// ponytail: single-tab fallback path; not worth a dedicated method.
+	// Add one when /flows grows large enough that the filter is noticeable.
+	flat, listErr := c.ListFlows(ctx)
+	if listErr != nil {
+		return nil, err
+	}
+	synth, ok := synthesizeFlowFromFlat(flat, id)
+	if !ok {
+		return nil, err
+	}
+	return synth, nil
+}
+
+// synthesizeFlowFromFlat rebuilds the nested tab doc ({id, label, nodes,
+// configs}) for the tab with the given id out of a GET /flows array.
+// Returns (nil, false) when no such tab exists in the array.
+func synthesizeFlowFromFlat(flat RawFlow, id string) (RawFlow, bool) {
+	items := extractFlowArray(flat)
+	var tabRaw, nodeRaws, configRaws []json.RawMessage
+	for _, item := range items {
+		var meta struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+			Z    string `json:"z"`
+		}
+		if err := json.Unmarshal(item, &meta); err != nil {
+			continue
+		}
+		switch {
+		case meta.Type == "tab" && meta.ID == id:
+			tabRaw = append(tabRaw, item)
+		case meta.Z == id && meta.Type != "subflow":
+			if hasCanvasCoords(item) {
+				nodeRaws = append(nodeRaws, item)
+			} else {
+				configRaws = append(configRaws, item)
+			}
+		}
+	}
+	if len(tabRaw) == 0 {
+		return nil, false
+	}
+	var tab map[string]json.RawMessage
+	if err := json.Unmarshal(tabRaw[0], &tab); err != nil {
+		return nil, false
+	}
+	// Drop the markers that belong to the flat shape, not the nested one.
+	delete(tab, "type")
+	delete(tab, "id")
+	if nodeRaws == nil {
+		nodeRaws = []json.RawMessage{}
+	}
+	nodesBytes, err := json.Marshal(nodeRaws)
+	if err != nil {
+		return nil, false
+	}
+	tab["nodes"] = nodesBytes
+	if len(configRaws) > 0 {
+		configsBytes, err := json.Marshal(configRaws)
+		if err != nil {
+			return nil, false
+		}
+		tab["configs"] = configsBytes
+	}
+	tab["id"] = json.RawMessage(strconv.Quote(id))
+	out, err := json.Marshal(tab)
+	if err != nil {
+		return nil, false
+	}
+	return RawFlow(out), true
+}
+
+// hasCanvasCoords reports whether the raw node carries x and y coordinates.
+// Mirrors the split edit.go uses to file nodes into the right collection.
+func hasCanvasCoords(raw json.RawMessage) bool {
+	var probe struct {
+		X json.RawMessage `json:"x"`
+		Y json.RawMessage `json:"y"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return false
+	}
+	return len(probe.X) > 0 && len(probe.Y) > 0
 }
 
 // CreateFlow creates a new flow tab. The flow document is opaque JSON, sent

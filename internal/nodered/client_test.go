@@ -111,10 +111,16 @@ func TestInjectNode_EmptyID(t *testing.T) {
 
 func TestGetFlow_NotFound(t *testing.T) {
 	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/flow/") {
+		switch r.URL.Path {
+		case "/flow/missing", "/flows":
+			// /flows must also 404 so the fallback path is exercised: a
+			// successful /flows response with a different id would synthesize
+			// a not-found and GetFlow would still 404, but a 404 here proves
+			// the fallback path was tried.
+			http.Error(w, `{"code":"not_found"}`, http.StatusNotFound)
+		default:
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
-		http.Error(w, `{"code":"not_found"}`, http.StatusNotFound)
 	})
 	_, err := c.GetFlow(context.Background(), "missing")
 	if err == nil {
