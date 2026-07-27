@@ -6,7 +6,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server, writt
 MCP client  ──stdio | HTTP──▶  nodered-mcp  ──HTTP──▶  Node-RED :1880
 ```
 
-`nodered-mcp` is provider-agnostic. The same binary works with any MCP-capable client — Claude Desktop, Claude Code, Cursor, VS Code, Gemini CLI, OpenCode, Cline — regardless of the underlying model.
+`nodered-mcp` is provider-agnostic. The same binary works with any MCP-capable client — Claude Desktop, Claude Code, Cursor, VS Code, Gemini CLI, OpenCode, Pi, Cline — regardless of the underlying model.
 
 A Spanish version of this document is available at [`README.es.md`](./README.es.md).
 
@@ -459,6 +459,50 @@ For the HTTP transport variant, use `type: "remote"` with `url` and `headers`:
 ```
 
 Restart OpenCode after editing. All 29 tools should appear under the `nodered` server.
+
+### Pi (pi-mono)
+
+Pi ships MCP support through a third-party adapter (`pi-mcp-adapter` / `pi-mcp-extension`), not in the core. Install both, then write the config:
+
+```bash
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+pi install mcp-adapter
+```
+
+Then write `~/.pi/agent/mcp.json` (global) or `./.pi/mcp.json` (project-local). See [`examples/pi_mcp_config.json`](./examples/pi_mcp_config.json).
+
+```json
+{
+  "mcpServers": {
+    "nodered": {
+      "command": "nodered-mcp",
+      "env": {
+        "NODERED_URL": "http://localhost:1880",
+        "NODERED_TOKEN": "your-token-if-you-have-one"
+      },
+      "lifecycle": "keep-alive"
+    }
+  }
+}
+```
+
+`lifecycle: "keep-alive"` is recommended for nodered-mcp: it reconnects automatically after a Node-RED restart, which matters because Node-RED bounces during flow deployments. The default `lazy` only connects on the first tool call and disconnects after idle, which can mask connection issues.
+
+Inside Pi, run `/reload` to pick up the config, then `mcp({ connect: "nodered" })` to verify the connection and `mcp({ server: "nodered" })` to list the 29 tools.
+
+For the HTTP transport variant:
+
+```json
+{
+  "mcpServers": {
+    "nodered": {
+      "url": "http://localhost:8090/mcp",
+      "auth": "bearer",
+      "bearerToken": "your-token"
+    }
+  }
+}
+
 
 ### HTTP variant
 

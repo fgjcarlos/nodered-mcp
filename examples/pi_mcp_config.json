@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "nodered": {
+      "command": "nodered-mcp",
+      "env": {
+        "NODERED_URL": "http://localhost:1880",
+        "NODERED_TOKEN": "your-token-if-you-have-one"
+      },
+      "lifecycle": "keep-alive"
+    }
+  }
+}
