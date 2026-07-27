@@ -6,7 +6,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server, writt
 MCP client  ──stdio | HTTP──▶  nodered-mcp  ──HTTP──▶  Node-RED :1880
 ```
 
-`nodered-mcp` is provider-agnostic. The same binary works with any MCP-capable client — Claude Desktop, Claude Code, Cursor, VS Code, Gemini CLI, Cline — regardless of the underlying model.
+`nodered-mcp` is provider-agnostic. The same binary works with any MCP-capable client — Claude Desktop, Claude Code, Cursor, VS Code, Gemini CLI, OpenCode, Cline — regardless of the underlying model.
 
 A Spanish version of this document is available at [`README.es.md`](./README.es.md).
 
@@ -418,6 +418,47 @@ claude mcp add nodered \
 ### Gemini CLI
 
 `~/.gemini/settings.json`. Same shape as the Claude Desktop snippet. See [`examples/gemini_settings.json`](./examples/gemini_settings.json).
+
+### OpenCode
+
+OpenCode uses a top-level `mcp` key (not `mcpServers`) and declares each server as `local` (spawned command) or `remote` (HTTP endpoint). Place the snippet in `~/.config/opencode/opencode.json` (user-global) or `./opencode.json` (project-local). See [`examples/opencode_config.json`](./examples/opencode_config.json).
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "nodered": {
+      "type": "local",
+      "command": ["nodered-mcp"],
+      "enabled": true,
+      "environment": {
+        "NODERED_URL": "http://localhost:1880",
+        "NODERED_TOKEN": "your-token-if-you-have-one"
+      }
+    }
+  }
+}
+```
+
+For the HTTP transport variant, use `type: "remote"` with `url` and `headers`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "nodered": {
+      "type": "remote",
+      "url": "http://localhost:8090/mcp",
+      "enabled": true,
+      "headers": {
+        "Authorization": "Bearer your-token"
+      }
+    }
+  }
+}
+```
+
+Restart OpenCode after editing. All 29 tools should appear under the `nodered` server.
 
 ### HTTP variant
 

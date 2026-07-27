@@ -6,7 +6,7 @@ Un servidor [MCP (Model Context Protocol)](https://modelcontextprotocol.io) escr
 Cliente MCP  ──stdio | HTTP──▶  nodered-mcp  ──HTTP──▶  Node-RED :1880
 ```
 
-`nodered-mcp` es independiente del proveedor. El mismo binario funciona con cualquier cliente compatible con MCP — Claude Desktop, Claude Code, Cursor, VS Code, Gemini CLI, Cline — sea cual sea el modelo subyacente.
+`nodered-mcp` es independiente del proveedor. El mismo binario funciona con cualquier cliente compatible con MCP — Claude Desktop, Claude Code, Cursor, VS Code, Gemini CLI, OpenCode, Cline — sea cual sea el modelo subyacente.
 
 La versión en inglés de este documento está en [`README.md`](./README.md).
 
@@ -418,6 +418,47 @@ claude mcp add nodered \
 ### Gemini CLI
 
 `~/.gemini/settings.json`. Mismo formato que el snippet de Claude Desktop. Ver [`examples/gemini_settings.json`](./examples/gemini_settings.json).
+
+### OpenCode
+
+OpenCode usa una clave raíz `mcp` (no `mcpServers`) y declara cada servidor como `local` (comando lanzado) o `remote` (endpoint HTTP). Coloca el snippet en `~/.config/opencode/opencode.json` (global del usuario) o `./opencode.json` (local del proyecto). Ver [`examples/opencode_config.json`](./examples/opencode_config.json).
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "nodered": {
+      "type": "local",
+      "command": ["nodered-mcp"],
+      "enabled": true,
+      "environment": {
+        "NODERED_URL": "http://localhost:1880",
+        "NODERED_TOKEN": "tu-token-si-lo-tienes"
+      }
+    }
+  }
+}
+```
+
+Para la variante de transporte HTTP, usa `type: "remote"` con `url` y `headers`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "nodered": {
+      "type": "remote",
+      "url": "http://localhost:8090/mcp",
+      "enabled": true,
+      "headers": {
+        "Authorization": "Bearer tu-token"
+      }
+    }
+  }
+}
+```
+
+Reinicia OpenCode tras editar. Las 29 tools deberían aparecer bajo el servidor `nodered`.
 
 ### Variante HTTP
 
