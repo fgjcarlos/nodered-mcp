@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "nodered": {
+      "type": "local",
+      "command": ["nodered-mcp"],
+      "enabled": true,
+      "environment": {
+        "NODERED_URL": "http://localhost:1880",
+        "NODERED_TOKEN": "your-token-if-you-have-one"
+      }
+    }
+  }
+}
