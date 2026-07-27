@@ -208,13 +208,22 @@ Runs on Linux, macOS, and Windows (amd64 and arm64).
 
 ## Installation
 
-Pick one method, then [connect your client](#client-integration).
+Pick one method, then [connect your client](#client-integration). All five options install the same binary; the difference is who manages platform/arch.
 
-> **Availability.** Options B, C, and D work today. Option A needs a tagged release: the repository is public, but no `vX.Y.Z` tag has been pushed yet, so the Releases page is empty — see [`issues/301`](./issues/301-publish-repo.md).
+### Option A — npm
 
-### Option A — Prebuilt binary
+The wrapper lives at [`@fgjcarlos/nodered-mcp`](https://www.npmjs.com/package/@fgjcarlos/nodered-mcp). On `npm install`, a postinstall step downloads the platform-appropriate binary from the matching GitHub release and a shim re-execs it.
 
-Download the archive for your platform from [Releases](https://github.com/fgjcarlos/nodered-mcp/releases) and place the binary on your `PATH`.
+```bash
+npm install -g @fgjcarlos/nodered-mcp
+nodered-mcp version   # -> 0.5.8
+```
+
+Works on Linux, macOS, and Windows (amd64 and arm64) without extra setup. The wrapper has zero npm dependencies — a hand-rolled POSIX tar parser in `bin/tar.js` extracts the binary, so `npm audit` sees only the wrapper itself.
+
+### Option B — Prebuilt binary
+
+Download the archive for your platform from [Releases](https://github.com/fgjcarlos/nodered-mcp/releases/latest) and place the binary on your `PATH`.
 
 ```bash
 # adjust the filename to your OS and architecture
@@ -225,7 +234,7 @@ nodered-mcp version
 
 On Windows, download the `.zip`, extract it, and move `nodered-mcp.exe` into a directory on the `PATH`.
 
-### Option B — go install
+### Option C — go install
 
 ```bash
 go install github.com/fgjcarlos/nodered-mcp/cmd/nodered-mcp@latest
@@ -233,21 +242,31 @@ go install github.com/fgjcarlos/nodered-mcp/cmd/nodered-mcp@latest
 
 The binary lands in `$(go env GOPATH)/bin`; make sure that directory is on your `PATH`.
 
-`@latest` resolves to the newest tag, or to a pseudo-version of the default branch while no tag exists. Either way `nodered-mcp version` reports what was actually installed: `go install` applies no linker flags, so the version is recovered from the module information the toolchain embeds.
+`@latest` resolves to the newest tag. `nodered-mcp version` reports what was actually installed: `go install` applies no linker flags, so the version is recovered from the module information the toolchain embeds.
 
-### Option C — Docker
+### Option D — Docker
+
+The image is published automatically to GitHub Container Registry on every tagged release.
 
 ```bash
-docker build -t nodered-mcp .
+docker pull ghcr.io/fgjcarlos/nodered-mcp:latest
 docker run --rm -p 8090:8090 \
   -e NODERED_URL=http://host.docker.internal:1880 \
   -e NODERED_TOKEN=your-token \
-  nodered-mcp
+  ghcr.io/fgjcarlos/nodered-mcp:latest
 ```
 
 The MCP endpoint is then `http://localhost:8090/mcp`. The image defaults to the HTTP transport, since stdio is meaningless inside a container. On Linux, if Node-RED runs on the host, add `--add-host=host.docker.internal:host-gateway`.
 
-### Option D — From source
+To build the image yourself from source instead:
+
+```bash
+git clone https://github.com/fgjcarlos/nodered-mcp
+cd nodered-mcp
+docker build -t nodered-mcp .
+```
+
+### Option E — From source
 
 ```bash
 git clone https://github.com/fgjcarlos/nodered-mcp
@@ -497,9 +516,9 @@ Work items are tracked in [`issues/`](./issues/README.md) until the repository m
 | v0.2 | Streamable HTTP transport, CLI with flags and subcommands | Released |
 | v0.3 | Palette management: install, uninstall, enable, disable | Released |
 | v0.4 | `search_nodes`, settings and runtime state — 19 tools, 3 resources, 2 prompts | Released |
-| v0.5 | Read-only mode, context-efficient reads, diagnostics, context, the debug stream, granular node editing and `diff_flows` — 29 tools | Unreleased |
-| v0.6 | Bearer auth on the HTTP transport | Unreleased |
-| v0.7 | OAuth 2.1 for hosted web connectors | Planned |
+| v0.5 | Read-only mode, context-efficient reads, diagnostics, context, the debug stream, granular node editing, `diff_flows`, HTTP bearer auth — 29 tools | Released |
+| v0.6 | OAuth 2.1 Resource Server for hosted web connectors | Released |
+| v0.7 | Local query cache | Planned |
 
 ## License
 
