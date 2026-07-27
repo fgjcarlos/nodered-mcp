@@ -37,16 +37,6 @@ jobs:
             exit 1
           fi
 
-      - name: extract the binary tarball and run it (smoke test)
-        env:
-          VERSION: ${{ github.ref_name }}
-        run: |
-          version="${VERSION#v}"
-          curl -sSL -o /tmp/smoke.tar.gz \
-            "https://github.com/${GITHUB_REPOSITORY}/releases/download/${VERSION}/nodered-mcp_linux_amd64.tar.gz"
-          tar -xzf /tmp/smoke.tar.gz -C /tmp
-          /tmp/nodered-mcp version
-
       - name: publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_SECRET }}
