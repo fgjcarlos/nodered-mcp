@@ -7,6 +7,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/fgjcarlos/nodered-mcp/internal/nodered"
+	"github.com/fgjcarlos/nodered-mcp/internal/oauth"
 )
 
 // Server bundles the MCP server and the Node-RED client it talks to.
@@ -132,10 +134,14 @@ func (s *Server) Run() error {
 // until the process receives SIGINT/SIGTERM or the listener fails. The MCP
 // endpoint is served at <addr>/mcp. On signal it shuts down gracefully.
 //
-// When token is non-empty every request must present it as a bearer token.
-// config.validate decides when that is mandatory: a bind reachable from off
-// this machine will not start without one.
-func (s *Server) RunHTTP(addr, token string) error {
+// auth selects the authentication mode:
+//   - token != "": require a static Bearer matching token (config.validate
+//     decides whether that is mandatory for the bind address).
+//   - verifier != nil: require a JWT Bearer, verified against the pinned
+//     issuer and audience, signed by a key in verifier's keyset.
+//
+// Exactly one is required. config.validate rejects both or neither.
+func (s *Server) RunHTTP(addr, token string, verifier *oauth.Verifier) error {
 	// The http.Server is created first and handed to mcp-go, so the MCP
 	// handler can be wrapped in auth while mcp-go keeps owning the listener
 	// lifecycle — including closing sessions on shutdown.
@@ -143,12 +149,20 @@ func (s *Server) RunHTTP(addr, token string) error {
 	mcpHTTP := server.NewStreamableHTTPServer(s.mcpServer,
 		server.WithStreamableHTTPServer(httpServer))
 
-	mux := http.NewServeMux()
-	if token != "" {
-		mux.Handle("/mcp", requireBearer(token, mcpHTTP))
-	} else {
-		mux.Handle("/mcp", mcpHTTP)
+	var authMW func(http.Handler) http.Handler
+	switch {
+	case token != "":
+		authMW = func(next http.Handler) http.Handler { return requireBearer(token, next) }
+	case verifier != nil:
+		authMW = func(next http.Handler) http.Handler { return oauth.RequireOAuth(verifier, next) }
+	default:
+		// config.validate should have caught this. Fail loudly rather
+		// than come up without authentication.
+		return errors.New("mcp: RunHTTP called without token or OAuth verifier")
 	}
+
+	mux := http.NewServeMux()
+	mux.Handle("/mcp", authMW(mcpHTTP))
 	httpServer.Handler = mux
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -159,9 +173,10 @@ func (s *Server) RunHTTP(addr, token string) error {
 	go func() { errCh <- mcpHTTP.Start(addr) }()
 
 	slog.Info("starting MCP server (http transport)",
-		"addr", addr, "endpoint", "/mcp", "auth", token != "")
-	if token == "" {
-		slog.Warn("http transport has no token; it is only safe because the " +
+		"addr", addr, "endpoint", "/mcp",
+		"auth_mode", authModeLabel(token, verifier))
+	if token == "" && verifier == nil {
+		slog.Warn("http transport has no authentication; it is only safe because the " +
 			"listen address is loopback-only")
 	}
 	select {
@@ -173,4 +188,16 @@ func (s *Server) RunHTTP(addr, token string) error {
 		defer cancel()
 		return mcpHTTP.Shutdown(shutdownCtx)
 	}
+}
+
+// authModeLabel returns "bearer" or "oauth" for the startup log line so
+// operators can see at a glance which mode the server booted with.
+func authModeLabel(token string, verifier *oauth.Verifier) string {
+	if token != "" {
+		return "bearer"
+	}
+	if verifier != nil {
+		return "oauth"
+	}
+	return "none"
 }
