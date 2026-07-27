@@ -747,8 +747,7 @@ func (s *Server) handleListNodes(ctx context.Context, _ mcp.CallToolRequest) (*m
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("encoding nodes: %v", err)), nil
 	}
-	summary := fmt.Sprintf("%d node module(s) installed.\n\n```json\n%s\n```", len(nodes), string(out))
-	return mcp.NewToolResultText(summary), nil
+	return mcp.NewToolResultText(fmt.Sprintf("```json\n%s\n```", string(out))), nil
 }
 
 // handleGetNodeInfo returns metadata for a single node module.
@@ -858,8 +857,7 @@ func (s *Server) handleListBackups(_ context.Context, _ mcp.CallToolRequest) (*m
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("encoding backups: %v", err)), nil
 	}
-	summary := fmt.Sprintf("%d backup(s), newest first.\n\n```json\n%s\n```", len(backups), string(out))
-	return mcp.NewToolResultText(summary), nil
+	return mcp.NewToolResultText(fmt.Sprintf("```json\n%s\n```", string(out))), nil
 }
 
 // handleDiffFlows compares two flow configurations.
