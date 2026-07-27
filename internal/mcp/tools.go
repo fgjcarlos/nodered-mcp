@@ -996,6 +996,13 @@ func (s *Server) handleListPlugins(ctx context.Context, _ mcp.CallToolRequest) (
 
 // handleGetDebugMessages returns recent debug-node output from the tail.
 func (s *Server) handleGetDebugMessages(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if !s.debugStream {
+		return mcp.NewToolResultError(
+			"debug streaming is disabled. Set MCP_DEBUG_STREAM=on (or pass --debug-stream) " +
+				"to enable the /comms WebSocket tail. On some Node-RED versions the tail " +
+				"crashes the runtime; keep it off unless you need it.",
+		), nil
+	}
 	if s.debugTail == nil {
 		return mcp.NewToolResultError(
 			"debug streaming is not available: the /comms WebSocket endpoint could not " +

@@ -1,7 +1,11 @@
 package mcp
 
 import (
+	"context"
+	"strings"
 	"testing"
+
+	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/fgjcarlos/nodered-mcp/internal/nodered"
 )
@@ -36,7 +40,7 @@ func newTestServer(t *testing.T, readOnly bool) *Server {
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
-	return New(c, "test", readOnly)
+	return New(c, "test", readOnly, false)
 }
 
 func toolNames(s *Server) map[string]bool {
@@ -122,5 +126,55 @@ func TestReadOnlyKeepsResourcesAndPrompts(t *testing.T) {
 	}
 	if len(s.prompts) != 2 {
 		t.Errorf("read-only server exposed %d prompts, want 2", len(s.prompts))
+	}
+}
+func newTestServerDebugStream(t *testing.T, readOnly, debugStream bool) *Server {
+	t.Helper()
+	c, err := nodered.NewClient(nodered.Options{BaseURL: "http://localhost:1880"})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	return New(c, "test", readOnly, debugStream)
+}
+
+// When MCP_DEBUG_STREAM is off, get_debug_messages must answer with an
+// actionable error pointing at the flag — not with the underlying
+// "tail unavailable" message, which makes it sound broken.
+func TestHandleGetDebugMessages_DisabledByDefault(t *testing.T) {
+	s := newTestServerDebugStream(t, false, false)
+	res, err := s.handleGetDebugMessages(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("handleGetDebugMessages returned an error: %v", err)
+	}
+	if res == nil || len(res.Content) == 0 {
+		t.Fatal("expected a result with an error message, got nil")
+	}
+	tc, ok := res.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", res.Content[0])
+	}
+	if !strings.Contains(tc.Text, "debug streaming is disabled") {
+		t.Errorf("expected the opt-in hint, got %q", tc.Text)
+	}
+	if !strings.Contains(tc.Text, "MCP_DEBUG_STREAM") {
+		t.Errorf("expected the flag name to be mentioned, got %q", tc.Text)
+	}
+}
+
+// When MCP_DEBUG_STREAM is on but the tail URL is invalid, the existing
+// "tail unavailable" message is the right answer — no behaviour change
+// for the on-but-broken case.
+func TestHandleGetDebugMessages_OnButUnavailable(t *testing.T) {
+	s := newTestServerDebugStream(t, false, true)
+	res, err := s.handleGetDebugMessages(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("handleGetDebugMessages returned an error: %v", err)
+	}
+	tc, ok := res.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", res.Content[0])
+	}
+	if strings.Contains(tc.Text, "debug streaming is disabled") {
+		t.Errorf("on-but-broken should not use the opt-in message, got %q", tc.Text)
 	}
 }

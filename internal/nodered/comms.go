@@ -204,6 +204,11 @@ func (t *DebugTail) session(ctx context.Context) error {
 
 // authenticate performs the {"auth":token} handshake Node-RED requires when
 // adminAuth is enabled.
+//
+// Node-RED 3.x multiplexes the auth reply onto the same envelope format as
+// the data frames, so the reply arrives as an array containing a single
+// {"auth":"ok"} object rather than as a top-level object. We try the
+// object shape first and fall back to the array shape on decode failure.
 func (t *DebugTail) authenticate(ctx context.Context, conn *websocket.Conn) error {
 	frame, err := json.Marshal(map[string]string{"auth": t.token})
 	if err != nil {
@@ -224,7 +229,16 @@ func (t *DebugTail) authenticate(ctx context.Context, conn *websocket.Conn) erro
 		Auth string `json:"auth"`
 	}
 	if err := json.Unmarshal(data, &reply); err != nil {
-		return fmt.Errorf("decoding auth reply: %w", err)
+		// Not an object: try the array envelope. The first element with
+		// auth=="ok" wins; anything else is treated as a fail.
+		var envelope []struct {
+			Auth string `json:"auth"`
+		}
+		if err2 := json.Unmarshal(data, &envelope); err2 == nil && len(envelope) > 0 {
+			reply = envelope[0]
+		} else {
+			return fmt.Errorf("decoding auth reply: %w", err)
+		}
 	}
 	if reply.Auth != "ok" {
 		// Retrying a rejected token forever would be pointless noise; the
@@ -235,15 +249,31 @@ func (t *DebugTail) authenticate(ctx context.Context, conn *websocket.Conn) erro
 }
 
 // consume decodes one /comms frame and records any debug messages it carries.
+//
+// The frame is normally an array of {topic,data} objects, but a single
+// object arrives in the same shape on some versions (notably after a
+// late auth reply). Try the array shape first; if it fails to decode
+// (not "the array is empty" but "the bytes do not represent an array"),
+// fall back to the object shape.
 func (t *DebugTail) consume(frame []byte) {
 	var envelopes []struct {
 		Topic string          `json:"topic"`
 		Data  json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(frame, &envelopes); err != nil {
-		// Not an array: an out-of-band object such as a late auth reply.
-		// Ignoring it is correct — we only care about debug output.
-		slog.Debug("ignoring unrecognised comms frame", "bytes", len(frame))
+		var single struct {
+			Topic string          `json:"topic"`
+			Data  json.RawMessage `json:"data"`
+		}
+		if err2 := json.Unmarshal(frame, &single); err2 != nil {
+			// Not an array or an object — log at debug and move on.
+			// Heartbeats and out-of-band frames can land here.
+			slog.Debug("ignoring unrecognised comms frame", "bytes", len(frame))
+			return
+		}
+		if single.Topic == debugTopic {
+			t.record(single.Data)
+		}
 		return
 	}
 	for _, e := range envelopes {
