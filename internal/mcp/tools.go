@@ -1224,6 +1224,17 @@ func (s *Server) handleGetFlowsState(ctx context.Context, _ mcp.CallToolRequest)
 	raw, err := s.nrClient.GetFlowsState(ctx)
 	if err != nil {
 		slog.Error("get_flows_state failed", "error", err)
+		// Same runtimeState gate as set_flows_state -- the GET endpoint is
+		// only mounted alongside the POST one.
+		var apiErr *nodered.APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+			return mcp.NewToolResultError(
+				"Node-RED did not respond on GET /flows/state. This endpoint is " +
+					"only mounted when settings.runtimeState.enabled is true. Add " +
+					"`runtimeState: { enabled: true, ui: false }` to your " +
+					"settings.js and restart Node-RED, then retry.",
+			), nil
+		}
 		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("```json\n%s\n```", prettyJSON(raw))), nil
@@ -1239,6 +1250,19 @@ func (s *Server) handleSetFlowsState(ctx context.Context, req mcp.CallToolReques
 
 	if err := s.nrClient.SetFlowsState(ctx, state); err != nil {
 		slog.Error("set_flows_state failed", "error", err, "state", state)
+		// Node-RED only mounts POST /flows/state when settings.runtimeState.enabled
+		// is true. Out of the box it is false, so a fresh deploy sees a bare
+		// 404 with no actionable hint -- surface the fix here rather than in
+		// the runtime-layer generic hint, which would not name the setting.
+		var apiErr *nodered.APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+			return mcp.NewToolResultError(
+				"Node-RED did not respond on POST /flows/state. This endpoint is " +
+					"only mounted when settings.runtimeState.enabled is true. Add " +
+					"`runtimeState: { enabled: true, ui: false }` to your " +
+					"settings.js and restart Node-RED, then retry.",
+			), nil
+		}
 		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Node-RED runtime %sed (a backup was taken first).", state)), nil
