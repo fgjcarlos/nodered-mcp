@@ -548,15 +548,22 @@ func (s *Server) handleGetFlow(ctx context.Context, req mcp.CallToolRequest) (*m
 	return mcp.NewToolResultText(fmt.Sprintf("```json\n%s\n```", prettyJSON(raw))), nil
 }
 
-// handleCreateFlow creates a new flow tab from a JSON document.
+// handleCreateFlow creates a new flow tab from a JSON document. The flow
+// argument accepts either a JSON-encoded string OR a flow object directly;
+// either shape is the right thing for an LLM that does not want to serialize
+// a literal by hand.
 func (s *Server) handleCreateFlow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	flowStr, err := req.RequireString("flow")
+	raw, err := flowParam(req, "flow")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	flow, err := normalizeFlowDoc(raw, true)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	slog.Debug("tool: create_flow")
 
-	created, err := s.nrClient.CreateFlow(ctx, nodered.RawFlow(flowStr))
+	created, err := s.nrClient.CreateFlow(ctx, flow)
 	if err != nil {
 		slog.Error("create_flow failed", "error", err)
 		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
@@ -565,18 +572,23 @@ func (s *Server) handleCreateFlow(ctx context.Context, req mcp.CallToolRequest) 
 }
 
 // handleUpdateFlow replaces an existing flow tab with a new JSON document.
+// The flow argument accepts either a JSON-encoded string or a flow object.
 func (s *Server) handleUpdateFlow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	id, err := req.RequireString("id")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	flowStr, err := req.RequireString("flow")
+	raw, err := flowParam(req, "flow")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	flow, err := normalizeFlowDoc(raw, false)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	slog.Debug("tool: update_flow", "id", id)
 
-	if err := s.nrClient.UpdateFlow(ctx, id, nodered.RawFlow(flowStr)); err != nil {
+	if err := s.nrClient.UpdateFlow(ctx, id, flow); err != nil {
 		slog.Error("update_flow failed", "error", err, "id", id)
 		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
 	}
@@ -946,6 +958,94 @@ func prettyJSON(raw []byte) string {
 	return buf.String()
 }
 
+// flowParam reads a "flow" argument as either a JSON-encoded string or a
+// flow object. The two shapes are equivalent on the wire (Node-RED's admin
+// API wants a single flow tab as a JSON object), but accepting the object
+// directly matches how MCP clients naturally describe flows.
+func flowParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) {
+	args := req.GetArguments()
+	v, ok := args[key]
+	if !ok {
+		return nil, fmt.Errorf("required argument %q not found", key)
+	}
+	switch x := v.(type) {
+	case string:
+		raw := json.RawMessage(x)
+		if !json.Valid(raw) {
+			return nil, fmt.Errorf("%q must be a JSON-encoded flow object or a flow object passed directly", key)
+		}
+		return raw, nil
+	case map[string]any:
+		raw, err := json.Marshal(x)
+		if err != nil {
+			return nil, fmt.Errorf("encoding %q: %v", key, err)
+		}
+		return raw, nil
+	default:
+		return nil, fmt.Errorf("%q must be a JSON-encoded flow object or a flow object passed directly", key)
+	}
+}
+
+// flowsParam reads a "flows" argument as either a JSON-encoded string or a
+// flow array. Same reasoning as flowParam.
+func flowsParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) {
+	args := req.GetArguments()
+	v, ok := args[key]
+	if !ok {
+		return nil, fmt.Errorf("required argument %q not found", key)
+	}
+	switch x := v.(type) {
+	case string:
+		raw := json.RawMessage(x)
+		if !json.Valid(raw) {
+			return nil, fmt.Errorf("%q must be a JSON-encoded flow array or a flow array passed directly", key)
+		}
+		return raw, nil
+	case []any:
+		raw, err := json.Marshal(x)
+		if err != nil {
+			return nil, fmt.Errorf("encoding %q: %v", key, err)
+		}
+		return raw, nil
+	default:
+		return nil, fmt.Errorf("%q must be a JSON-encoded flow array or a flow array passed directly", key)
+	}
+}
+
+// normalizeFlowDoc turns a raw flow payload into a Node-RED admin-API
+// document. If fillNodes is true and the document is a tab object missing
+// its "nodes" array, an empty one is added so a POST /flow does not bounce
+// with the unhelpful "missing nodes property" 400 from the runtime.
+func normalizeFlowDoc(raw json.RawMessage, fillNodes bool) (nodered.RawFlow, error) {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("flow document is not a JSON object: %v", err)
+	}
+	if fillNodes {
+		if _, ok := doc["nodes"]; !ok {
+			doc["nodes"] = json.RawMessage(`[]`)
+		}
+	}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		return nil, fmt.Errorf("re-encoding flow document: %v", err)
+	}
+	return nodered.RawFlow(out), nil
+}
+
+// normalizeFlowsArray splits a raw flows payload into the per-flow entries
+// the admin API expects.
+func normalizeFlowsArray(raw json.RawMessage) ([]json.RawMessage, error) {
+	var flows []json.RawMessage
+	if err := json.Unmarshal(raw, &flows); err != nil {
+		return nil, fmt.Errorf("flows is not a JSON array: %v", err)
+	}
+	if len(flows) == 0 {
+		return nil, fmt.Errorf("flows must contain at least one flow")
+	}
+	return flows, nil
+}
+
 // handleGetSettings returns the Node-RED server settings as JSON.
 func (s *Server) handleGetSettings(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	slog.Debug("tool: get_settings")
@@ -1145,17 +1245,19 @@ func (s *Server) handleSetFlowsState(ctx context.Context, req mcp.CallToolReques
 }
 
 // handleSetFlows replaces the entire flow config with a full deployment.
+// The flows argument accepts either a JSON-encoded string OR a flow array
+// directly.
 func (s *Server) handleSetFlows(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	flowsStr, err := req.RequireString("flows")
+	raw, err := flowsParam(req, "flows")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	flows, err := normalizeFlowsArray(raw)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	slog.Debug("tool: set_flows")
 
-	var flows []json.RawMessage
-	if err := json.Unmarshal([]byte(flowsStr), &flows); err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("flows is not a valid JSON array: %v", err)), nil
-	}
 	if err := s.nrClient.SetFlows(ctx, flows); err != nil {
 		slog.Error("set_flows failed", "error", err)
 		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
