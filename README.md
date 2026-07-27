@@ -305,6 +305,7 @@ nodered-mcp                    start the server (equivalent to `nodered-mcp serv
 nodered-mcp serve --read-only  start with the mutating tools withheld
 nodered-mcp serve --help       list every flag
 nodered-mcp init               generate a configuration snippet for your MCP client
+nodered-mcp update             detect the install channel and upgrade in place
 nodered-mcp version            print the version
 ```
 
@@ -319,6 +320,18 @@ nodered-mcp version            print the version
 | `nodered-mcp init --all` | Show every known client, not only the detected ones |
 
 `--write` performs a safe merge that preserves any other servers already configured, and saves a `.bak` of the previous file. It is supported for Claude Desktop, Cursor, and Gemini CLI. For VS Code, whose configuration is workspace-scoped, and for Claude Code, which is configured through its own CLI, `init` prints the instruction instead.
+
+### The update command
+
+`update` detects how the binary was installed and upgrades it in place. The npm wrapper channel (the recommended install path) runs `npm install -g @fgjcarlos/nodered-mcp@latest` after a confirmation prompt. The Docker and standalone-binary channels print the upgrade command for the user to run themselves.
+
+| Invocation | Behaviour |
+|---|---|
+| `nodered-mcp update` | Show current and latest version, prompt for confirmation if newer |
+| `nodered-mcp update --yes` | Skip the confirmation prompt |
+| `nodered-mcp update --check` | Print the latest version and exit 0 if newer than the current one, 1 otherwise |
+
+Detection order: `/.dockerenv` (Docker) → a `@fgjcarlos/nodered-mcp` `package.json` next to the binary, or one directory up (npm) → standalone binary (install script). The npm channel reads the latest version from the public registry; no auth.
 
 ## Transports
 

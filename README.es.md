@@ -305,6 +305,7 @@ nodered-mcp                    arrancar el servidor (equivale a `nodered-mcp ser
 nodered-mcp serve --read-only  arrancar sin las tools que modifican
 nodered-mcp serve --help       listar todas las flags
 nodered-mcp init               generar un snippet de configuración para tu cliente MCP
+nodered-mcp update             detectar el canal de instalación y actualizar in situ
 nodered-mcp version            imprimir la versión
 ```
 
@@ -319,6 +320,18 @@ nodered-mcp version            imprimir la versión
 | `nodered-mcp init --all` | Muestra todos los clientes conocidos, no solo los detectados |
 
 `--write` realiza un merge seguro que preserva cualquier otro servidor ya configurado y guarda un `.bak` del fichero anterior. Está soportado para Claude Desktop, Cursor y Gemini CLI. Para VS Code, cuya configuración es por workspace, y para Claude Code, que se configura mediante su propia CLI, `init` imprime la instrucción en su lugar.
+
+### El comando update
+
+`update` detecta cómo se instaló el binario y lo actualiza in situ. El canal del wrapper npm (la ruta de instalación recomendada) ejecuta `npm install -g @fgjcarlos/nodered-mcp@latest` tras un prompt de confirmación. Los canales Docker y binario standalone imprimen el comando de actualización para que el usuario lo ejecute.
+
+| Invocación | Comportamiento |
+|---|---|
+| `nodered-mcp update` | Muestra la versión actual y la última, pide confirmación si hay una más reciente |
+| `nodered-mcp update --yes` | Salta el prompt de confirmación |
+| `nodered-mcp update --check` | Imprime la última versión y sale con 0 si es más reciente que la actual, 1 en caso contrario |
+
+Orden de detección: `/.dockerenv` (Docker) → un `package.json` con nombre `@fgjcarlos/nodered-mcp` junto al binario, o un directorio por encima (npm) → binario standalone (install script). El canal npm lee la última versión del registro público; sin autenticación.
 
 ## Transportes
 
