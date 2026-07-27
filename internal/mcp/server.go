@@ -194,7 +194,13 @@ func (s *Server) RunHTTP(addr, token string, verifier *oauth.Verifier) error {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", authMW(mcpHTTP))
+	// Wrap the handler with logging and panic recovery. mcp-go's streamable
+	// HTTP transport does not log requests on its own, so a handler that
+	// silently aborts (panic, internal error before write) leaves no trace
+	// — the client sees ECONNRESET and the operator sees nothing. These two
+	// wrappers make the failure mode visible in the server logs.
+	mux.Handle("/mcp", logRequests(recoverPanics(authMW(mcpHTTP))))
+
 	httpServer.Handler = mux
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

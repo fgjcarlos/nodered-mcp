@@ -1292,7 +1292,11 @@ func (s *Server) handleGetDebugMessages(_ context.Context, req mcp.CallToolReque
 			)), nil
 		case !snap.Connected:
 			return mcp.NewToolResultText(
-				"The debug stream is still connecting; nothing captured yet. Try again in a moment.",
+				"The debug stream is still connecting; nothing captured yet. " +
+					"Give it ~3 seconds after server start (or after `initialize` if " +
+					"this is a fresh MCP session) and call get_debug_messages again. " +
+					"If the message persists, set MCP_LOG_LEVEL=debug and look for " +
+					"a /comms dial error in the server logs.",
 			), nil
 		case snap.Received == 0:
 			return mcp.NewToolResultText(
