@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime/debug"
 	"strings"
 
 	"github.com/fgjcarlos/nodered-mcp/internal/config"
@@ -25,18 +26,46 @@ import (
 )
 
 // version is stamped at build time: go build -ldflags "-X main.version=v1.2.3".
+// Release builds go through goreleaser, which sets it. Plain `go install` does
+// not apply ldflags, so resolveVersion recovers it from the build info instead.
 var version = "dev"
+
+// resolveVersion reports the most accurate version available.
+func resolveVersion() string {
+	embedded := ""
+	if info, ok := debug.ReadBuildInfo(); ok {
+		embedded = info.Main.Version
+	}
+	return pickVersion(version, embedded)
+}
+
+// pickVersion chooses between the ldflags stamp and the version the Go
+// toolchain embedded. Kept separate from resolveVersion so the precedence
+// rules are testable without producing real builds.
+func pickVersion(stamped, embedded string) string {
+	if stamped != "" && stamped != "dev" {
+		return stamped
+	}
+	// "(devel)" is what the toolchain reports for a plain `go build` in a
+	// working tree — it carries no more information than "dev" does.
+	if embedded != "" && embedded != "(devel)" {
+		return embedded
+	}
+	return "dev"
+}
 
 // flagEnv maps each CLI flag to the environment variable it overrides. A flag
 // set on the command line is exported into its env twin before config.Load
 // reads (and validates) the environment — so precedence is flag > env >
 // default, with all validation kept in one place.
 var flagEnv = map[string]string{
-	"url":       "NODERED_URL",
-	"token":     "NODERED_TOKEN",
-	"transport": "MCP_TRANSPORT",
-	"http-addr": "MCP_HTTP_ADDR",
-	"log-level": "MCP_LOG_LEVEL",
+	"url":        "NODERED_URL",
+	"token":      "NODERED_TOKEN",
+	"transport":  "MCP_TRANSPORT",
+	"http-addr":  "MCP_HTTP_ADDR",
+	"http-token": "MCP_HTTP_TOKEN",
+	"log-level":  "MCP_LOG_LEVEL",
+	"read-only":  "MCP_READ_ONLY",
 }
 
 func main() {
@@ -55,7 +84,7 @@ func run(args []string) error {
 
 	switch cmd {
 	case "version":
-		fmt.Println(version)
+		fmt.Println(resolveVersion())
 		return nil
 	case "init":
 		return runInit(args)
@@ -72,7 +101,9 @@ func serve(args []string) error {
 	fs.String("token", "", "Node-RED API token (env NODERED_TOKEN)")
 	fs.String("transport", "", "MCP transport: stdio|http (env MCP_TRANSPORT)")
 	fs.String("http-addr", "", "listen address for http transport, host:port (env MCP_HTTP_ADDR)")
+	fs.String("http-token", "", "bearer token required on the http transport; mandatory unless bound to loopback (env MCP_HTTP_TOKEN)")
 	fs.String("log-level", "", "log level: debug|info|warn|error (env MCP_LOG_LEVEL)")
+	fs.Bool("read-only", false, "expose only tools that cannot modify Node-RED (env MCP_READ_ONLY)")
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return nil
@@ -107,9 +138,9 @@ func serve(args []string) error {
 		return fmt.Errorf("creating nodered client: %w", err)
 	}
 
-	srv := mcpserver.New(nrClient, version)
+	srv := mcpserver.New(nrClient, resolveVersion(), cfg.MCPReadOnly)
 	if cfg.MCPTransport == "http" {
-		return srv.RunHTTP(cfg.MCPHTTPAddr)
+		return srv.RunHTTP(cfg.MCPHTTPAddr, cfg.MCPHTTPToken)
 	}
 	return srv.Run()
 }
