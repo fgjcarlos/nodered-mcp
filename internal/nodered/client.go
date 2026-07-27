@@ -121,7 +121,18 @@ type APIError struct {
 }
 
 func (e *APIError) Error() string {
-	return fmt.Sprintf("nodered %s %s: HTTP %d: %s", e.Method, e.Path, e.StatusCode, e.Body)
+	msg := fmt.Sprintf("nodered %s %s: HTTP %d: %s", e.Method, e.Path, e.StatusCode, e.Body)
+	// A 404 with an Express-style "Cannot METHOD /path" body usually means
+	// the admin API does not expose that endpoint on this Node-RED version,
+	// not that the URL is wrong. Surface the most common guard so the
+	// operator has something to check beyond the literal error string.
+	if e.StatusCode == http.StatusNotFound {
+		if strings.HasPrefix(strings.TrimSpace(e.Body), "Cannot ") {
+			msg += " (the admin API does not expose this endpoint on this Node-RED version; " +
+				"check the Node-RED release notes or the runtime-state settings gate)"
+		}
+	}
+	return msg
 }
 
 // defaultTimeout bounds a request when the caller's context carries no
