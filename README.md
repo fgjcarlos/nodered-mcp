@@ -419,6 +419,21 @@ Drop the `headers` block only if the server is bound to loopback and running wit
 
 Restart the client after connecting. All 29 tools should appear.
 
+### OAuth (alternative to the bearer token)
+
+Web connectors that already speak OAuth 2.1 / OpenID Connect (claude.ai, custom front-ends) can identify themselves with a JWT instead of a shared secret. Configure the issuer and audience, drop the bearer token:
+
+```bash
+MCP_TRANSPORT=http
+MCP_HTTP_ADDR=:8090
+MCP_OAUTH_ISSUER=https://your-idp.example/
+MCP_OAUTH_AUDIENCE=nodered-mcp
+```
+
+On startup the server fetches `<issuer>/.well-known/openid-configuration` to discover the JWKS endpoint, then verifies every request's `Authorization: Bearer <jwt>` against the issuer's signing keys. `iss` must match the configured issuer; `aud` must match the configured audience. Discovery happens once at boot, so a misconfigured URL fails fast rather than on the first authenticated call.
+
+Configuring both `MCP_HTTP_TOKEN` and `MCP_OAUTH_ISSUER` is a configuration error and the server refuses to start.
+
 ## Troubleshooting
 
 **Tools do not appear.** Confirm the binary is on the `PATH`, or use an absolute path in `command`. On Windows, escape the backslashes: `C:\\path\\nodered-mcp.exe`. Running `nodered-mcp init` resolves the path for you.
