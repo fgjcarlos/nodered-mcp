@@ -6,7 +6,7 @@ Un servidor [MCP (Model Context Protocol)](https://modelcontextprotocol.io) escr
 Cliente MCP  ──stdio | HTTP──▶  nodered-mcp  ──HTTP──▶  Node-RED :1880
 ```
 
-`nodered-mcp` es independiente del proveedor. El mismo binario funciona con cualquier cliente compatible con MCP — Claude Desktop, Claude Code, Cursor, VS Code, Gemini CLI, OpenCode, Cline — sea cual sea el modelo subyacente.
+`nodered-mcp` es independiente del proveedor. El mismo binario funciona con cualquier cliente compatible con MCP — Claude Desktop, Claude Code, Cursor, VS Code, Gemini CLI, OpenCode, Pi, Cline — sea cual sea el modelo subyacente.
 
 La versión en inglés de este documento está en [`README.md`](./README.md).
 
@@ -459,6 +459,50 @@ Para la variante de transporte HTTP, usa `type: "remote"` con `url` y `headers`:
 ```
 
 Reinicia OpenCode tras editar. Las 29 tools deberían aparecer bajo el servidor `nodered`.
+
+### Pi (pi-mono)
+
+Pi expone MCP a través de un adaptador de terceros (`pi-mcp-adapter` / `pi-mcp-extension`), no en el núcleo. Instala ambos y después escribe la configuración:
+
+```bash
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+pi install mcp-adapter
+```
+
+Después escribe `~/.pi/agent/mcp.json` (global) o `./.pi/mcp.json` (local del proyecto). Ver [`examples/pi_mcp_config.json`](./examples/pi_mcp_config.json).
+
+```json
+{
+  "mcpServers": {
+    "nodered": {
+      "command": "nodered-mcp",
+      "env": {
+        "NODERED_URL": "http://localhost:1880",
+        "NODERED_TOKEN": "tu-token-si-lo-tienes"
+      },
+      "lifecycle": "keep-alive"
+    }
+  }
+}
+```
+
+`lifecycle: "keep-alive"` es lo recomendado para nodered-mcp: reconecta automáticamente tras un reinicio de Node-RED, lo cual importa porque Node-RED se reinicia durante los despliegues de flows. El `lazy` por defecto solo conecta en la primera llamada a una tool y desconecta tras inactividad, lo que puede enmascarar problemas de conexión.
+
+Dentro de Pi, ejecuta `/reload` para recargar la configuración, luego `mcp({ connect: "nodered" })` para verificar la conexión y `mcp({ server: "nodered" })` para listar las 29 tools.
+
+Para la variante de transporte HTTP:
+
+```json
+{
+  "mcpServers": {
+    "nodered": {
+      "url": "http://localhost:8090/mcp",
+      "auth": "bearer",
+      "bearerToken": "tu-token"
+    }
+  }
+}
+
 
 ### Variante HTTP
 
