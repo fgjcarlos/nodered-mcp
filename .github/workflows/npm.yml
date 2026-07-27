@@ -37,7 +37,13 @@ jobs:
             exit 1
           fi
 
+      # npm publish reads NODE_AUTH_TOKEN from env, but on a fresh
+      # runner the empty ~/.npmrc can shadow it; writing the token to
+      # .npmrc avoids that race entirely. The file lives in the
+      # runner's home and is not committed.
       - name: publish
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_SECRET }}
-        run: npm publish --access public
+          NPM_SECRET: ${{ secrets.NPM_SECRET }}
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
+          npm publish --access public
