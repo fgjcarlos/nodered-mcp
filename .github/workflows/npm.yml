@@ -1,0 +1,50 @@
+name: npm
+
+# Mirror release.yml's trigger — every pushed tag produces a fresh npm
+# publish, so a release that publishes a binary also publishes an
+# npm-installable wrapper at the same version. The wrapper itself is
+# versioned in package.json, bumped by hand; this workflow reads that
+# version and refuses to publish if it does not match the tag, so a
+# mismatched package.json never ships.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: read package.json version
+        id: pkg
+        run: node -e "console.log(require('./package.json').version)" >> "$GITHUB_OUTPUT"
+
+      - name: verify package.json version matches the tag
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          expected="${tag#v}"
+          actual="${{ steps.pkg.outputs.value }}"
+          if [ "$actual" != "$expected" ]; then
+            echo "package.json version ($actual) does not match tag $tag (expected $expected)"
+            exit 1
+          fi
+
+      - name: extract the binary tarball and run it (smoke test)
+        run: |
+          # Pull the v*-matching asset for linux/amd64 and run --version.
+          # This catches a broken postinstall before it reaches npm.
+          version=${{ steps.pkg.outputs.value }}
+          curl -sSL -o /tmp/smoke.tar.gz \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/v${version}/nodered-mcp_linux_amd64.tar.gz"
+          tar -xzf /tmp/smoke.tar.gz -C /tmp
+          /tmp/nodered-mcp version
+
+      - name: publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_SECRET }}
+        run: npm publish --access public
