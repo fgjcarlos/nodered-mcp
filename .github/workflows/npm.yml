@@ -20,29 +20,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: read package.json version
-        id: pkg
-        # jq keeps the output as a string and avoids the GitHub Actions
-        # "Invalid format 'X.Y.Z'" trap when an output looks numeric.
-        run: jq -r .version package.json >> "$GITHUB_OUTPUT"
-
+      # The version match check runs inline with the read because GitHub
+      # Actions' step-output parser rejects any value that looks like a
+      # number ("0.5.3" is treated as a float). Passing the value
+      # through `>> $GITHUB_OUTPUT` and then interpolating it in a
+      # later step throws `Invalid format '0.5.3'`. Reading + checking
+      # in the same shell avoids the issue entirely and is shorter.
       - name: verify package.json version matches the tag
+        env:
+          EXPECTED: ${{ github.ref_name }}
         run: |
-          tag="${GITHUB_REF_NAME}"
-          expected="${tag#v}"
-          actual="${{ steps.pkg.outputs.value }}"
+          actual=$(jq -r .version package.json)
+          expected="${EXPECTED#v}"
           if [ "$actual" != "$expected" ]; then
-            echo "package.json version ($actual) does not match tag $tag (expected $expected)"
+            echo "package.json version ($actual) does not match tag $EXPECTED (expected $expected)"
             exit 1
           fi
 
       - name: extract the binary tarball and run it (smoke test)
+        env:
+          VERSION: ${{ github.ref_name }}
         run: |
-          # Pull the v*-matching asset for linux/amd64 and run --version.
-          # This catches a broken postinstall before it reaches npm.
-          version=${{ steps.pkg.outputs.value }}
+          version="${VERSION#v}"
           curl -sSL -o /tmp/smoke.tar.gz \
-            "https://github.com/${GITHUB_REPOSITORY}/releases/download/v${version}/nodered-mcp_linux_amd64.tar.gz"
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/${VERSION}/nodered-mcp_linux_amd64.tar.gz"
           tar -xzf /tmp/smoke.tar.gz -C /tmp
           /tmp/nodered-mcp version
 
