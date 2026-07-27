@@ -208,13 +208,22 @@ Funciona en Linux, macOS y Windows (amd64 y arm64).
 
 ## Instalación
 
-Elige un método y después [conecta tu cliente](#integración-con-clientes).
+Elige un método y después [conecta tu cliente](#integración-con-clientes). Las cinco opciones instalan el mismo binario; la diferencia es quién gestiona la plataforma y arquitectura.
 
-> **Disponibilidad.** Las opciones B, C y D funcionan hoy. La opción A necesita una release etiquetada: el repositorio es público, pero aún no se ha empujado ningún tag `vX.Y.Z`, así que la página de Releases está vacía — ver [`issues/301`](./issues/301-publish-repo.md).
+### Opción A — npm
 
-### Opción A — Binario precompilado
+El wrapper está publicado como [`@fgjcarlos/nodered-mcp`](https://www.npmjs.com/package/@fgjcarlos/nodered-mcp). En el `npm install` se descarga el binario correspondiente a tu plataforma desde el release de GitHub, y un shim lo reejecuta.
 
-Descarga el archivo correspondiente a tu plataforma desde [Releases](https://github.com/fgjcarlos/nodered-mcp/releases) y coloca el binario en el `PATH`.
+```bash
+npm install -g @fgjcarlos/nodered-mcp
+nodered-mcp version   # -> 0.5.8
+```
+
+Funciona en Linux, macOS y Windows (amd64 y arm64) sin configuración adicional. El wrapper no tiene dependencias npm — un parser POSIX de tar implementado a mano en `bin/tar.js` extrae el binario, así que `npm audit` solo ve el wrapper en sí.
+
+### Opción B — Binario precompilado
+
+Descarga el archivo correspondiente a tu plataforma desde [Releases](https://github.com/fgjcarlos/nodered-mcp/releases/latest) y coloca el binario en el `PATH`.
 
 ```bash
 # ajusta el nombre del fichero a tu sistema y arquitectura
@@ -225,7 +234,7 @@ nodered-mcp version
 
 En Windows, descarga el `.zip`, descomprímelo y mueve `nodered-mcp.exe` a un directorio incluido en el `PATH`.
 
-### Opción B — go install
+### Opción C — go install
 
 ```bash
 go install github.com/fgjcarlos/nodered-mcp/cmd/nodered-mcp@latest
@@ -233,23 +242,31 @@ go install github.com/fgjcarlos/nodered-mcp/cmd/nodered-mcp@latest
 
 El binario queda en `$(go env GOPATH)/bin`; comprueba que ese directorio esté en el `PATH`.
 
-`@latest` resuelve al tag más reciente, o a una pseudo-versión de la rama por defecto mientras no exista ninguno. En ambos casos `nodered-mcp version` informa de lo que realmente se instaló: `go install` no aplica flags de enlazado, así que la versión se recupera de la información de módulo que incrusta el toolchain.
+`@latest` resuelve al tag más reciente. `nodered-mcp version` informa de lo que realmente se instaló: `go install` no aplica flags de enlazado, así que la versión se recupera de la información de módulo que incrusta el toolchain.
 
-`@latest` resuelve al tag más reciente, o a una pseudo-versión de la rama por defecto mientras no exista ninguno. En ambos casos `nodered-mcp version` informa de lo que realmente se instaló: `go install` no aplica flags de enlazado, así que la versión se recupera de la información de módulo que incrusta el toolchain.
+### Opción D — Docker
 
-### Opción C — Docker
+La imagen se publica automáticamente en GitHub Container Registry con cada release etiquetado.
 
 ```bash
-docker build -t nodered-mcp .
+docker pull ghcr.io/fgjcarlos/nodered-mcp:latest
 docker run --rm -p 8090:8090 \
   -e NODERED_URL=http://host.docker.internal:1880 \
   -e NODERED_TOKEN=tu-token \
-  nodered-mcp
+  ghcr.io/fgjcarlos/nodered-mcp:latest
 ```
 
 El endpoint MCP queda en `http://localhost:8090/mcp`. La imagen usa el transporte HTTP por defecto, ya que stdio no tiene sentido dentro de un contenedor. En Linux, si Node-RED se ejecuta en el host, añade `--add-host=host.docker.internal:host-gateway`.
 
-### Opción D — Desde el código fuente
+Para construir la imagen tú mismo desde el código fuente:
+
+```bash
+git clone https://github.com/fgjcarlos/nodered-mcp
+cd nodered-mcp
+docker build -t nodered-mcp .
+```
+
+### Opción E — Desde el código fuente
 
 ```bash
 git clone https://github.com/fgjcarlos/nodered-mcp
@@ -484,9 +501,9 @@ Las tareas pendientes se registran en [`issues/`](./issues/README.md) hasta que 
 | v0.2 | Transporte streamable HTTP, CLI con flags y subcomandos | Publicada |
 | v0.3 | Gestión de la palette: instalar, desinstalar, activar, desactivar | Publicada |
 | v0.4 | `search_nodes`, ajustes y estado del runtime — 19 tools, 3 resources, 2 prompts | Publicada |
-| v0.5 | Modo de solo lectura, lecturas eficientes en contexto, diagnóstico, contexto, stream de debug, edición granular de nodos y `diff_flows` — 29 tools | Sin publicar |
-| v0.6 | Autenticación bearer en el transporte HTTP | Sin publicar |
-| v0.7 | OAuth 2.1 para conectores web alojados | Prevista |
+| v0.5 | Modo de solo lectura, lecturas eficientes en contexto, diagnóstico, contexto, stream de debug, edición granular de nodos, `diff_flows`, autenticación bearer HTTP — 29 tools | Publicada |
+| v0.6 | Resource Server OAuth 2.1 para conectores web alojados | Publicada |
+| v0.7 | Caché local de consultas | Prevista |
 
 ## Licencia
 
