@@ -138,3 +138,45 @@ func TestNewClient_NormalizesTrailingSlash(t *testing.T) {
 		t.Errorf("trailing slash not stripped, got %q", c.baseURL)
 	}
 }
+
+func TestAPIError_404ExpressStyle_SurfacesHint(t *testing.T) {
+	err := &APIError{
+		StatusCode: 404,
+		Method:     "POST",
+		Path:       "/flows/state",
+		Body:       "Cannot POST /flows/state",
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "Cannot POST /flows/state") {
+		t.Errorf("original body should still be in the message, got %q", msg)
+	}
+	if !strings.Contains(msg, "the admin API does not expose this endpoint") {
+		t.Errorf("expected the version-or-settings hint, got %q", msg)
+	}
+}
+
+func TestAPIError_404EmptyBody_NoHint(t *testing.T) {
+	err := &APIError{
+		StatusCode: 404,
+		Method:     "GET",
+		Path:       "/nope",
+		Body:       "",
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "the admin API does not expose this endpoint") {
+		t.Errorf("empty body should not trigger the hint, got %q", msg)
+	}
+}
+
+func TestAPIError_500_NoHint(t *testing.T) {
+	err := &APIError{
+		StatusCode: 500,
+		Method:     "POST",
+		Path:       "/flows/state",
+		Body:       "Cannot POST /flows/state",
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "the admin API does not expose this endpoint") {
+		t.Errorf("non-404 should not trigger the hint, got %q", msg)
+	}
+}
