@@ -86,3 +86,74 @@ func TestLoadIgnoresTheTokenRuleOnStdio(t *testing.T) {
 		t.Errorf("stdio must not be affected by the http token rule: %v", err)
 	}
 }
+
+// OAuth is the alternative auth mode for the http transport: it must
+// satisfy the same "no token on an exposed bind" rule, and it must
+// require both issuer and audience to be configured together.
+func TestLoadAllowsExposedHTTPWithOAuth(t *testing.T) {
+	t.Setenv("MCP_TRANSPORT", "http")
+	t.Setenv("MCP_HTTP_ADDR", ":8090")
+	t.Setenv("MCP_HTTP_TOKEN", "")
+	t.Setenv("MCP_OAUTH_ISSUER", "https://issuer.example/")
+	t.Setenv("MCP_OAUTH_AUDIENCE", "nodered-mcp")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.OAuthIssuer != "https://issuer.example/" {
+		t.Errorf("oauth issuer not loaded, got %q", cfg.OAuthIssuer)
+	}
+	if cfg.OAuthAudience != "nodered-mcp" {
+		t.Errorf("oauth audience not loaded, got %q", cfg.OAuthAudience)
+	}
+}
+
+func TestLoadRejectsOAuthHalfConfigured(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		issuer, audience string
+	}{
+		{"issuer only", "https://issuer.example/", ""},
+		{"audience only", "", "nodered-mcp"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("MCP_TRANSPORT", "http")
+			t.Setenv("MCP_HTTP_ADDR", "127.0.0.1:8090")
+			t.Setenv("MCP_HTTP_TOKEN", "")
+			t.Setenv("MCP_OAUTH_ISSUER", tc.issuer)
+			t.Setenv("MCP_OAUTH_AUDIENCE", tc.audience)
+
+			if _, err := Load(); err == nil {
+				t.Fatal("half-configured OAuth must be rejected")
+			}
+		})
+	}
+}
+
+func TestLoadRejectsBearerAndOAuthTogether(t *testing.T) {
+	t.Setenv("MCP_TRANSPORT", "http")
+	t.Setenv("MCP_HTTP_ADDR", "127.0.0.1:8090")
+	t.Setenv("MCP_HTTP_TOKEN", "shared-secret")
+	t.Setenv("MCP_OAUTH_ISSUER", "https://issuer.example/")
+	t.Setenv("MCP_OAUTH_AUDIENCE", "nodered-mcp")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("bearer token and OAuth together must be rejected")
+	}
+}
+
+// OAuth on a loopback bind must be accepted without a token, since the
+// "must not come up unauthenticated" rule is about exposure, not
+// presence of an auth mechanism.
+func TestLoadAllowsLoopbackHTTPWithOAuthAndNoToken(t *testing.T) {
+	t.Setenv("MCP_TRANSPORT", "http")
+	t.Setenv("MCP_HTTP_ADDR", "127.0.0.1:8090")
+	t.Setenv("MCP_HTTP_TOKEN", "")
+	t.Setenv("MCP_OAUTH_ISSUER", "https://issuer.example/")
+	t.Setenv("MCP_OAUTH_AUDIENCE", "nodered-mcp")
+
+	if _, err := Load(); err != nil {
+		t.Errorf("loopback bind with OAuth should not require a token: %v", err)
+	}
+}

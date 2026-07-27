@@ -33,6 +33,16 @@ type Config struct {
 	// the HTTP transport. Mandatory when the listen address is reachable from
 	// outside this machine; optional for a loopback bind.
 	MCPHTTPToken string
+	// OAuthIssuer is the URL of an external OAuth 2.1 / OpenID Connect
+	// identity provider. When set, every HTTP request must carry a
+	// JWT-bearer issued by it, signed by a key advertised at
+	// <issuer>/.well-known/jwks.json, with `iss` equal to OAuthIssuer
+	// and `aud` equal to OAuthAudience. Mutual exclusion with
+	// MCPHTTPToken: set either, not both.
+	OAuthIssuer string
+	// OAuthAudience is the value the JWT `aud` claim must match.
+	// Required when OAuthIssuer is set; meaningless otherwise.
+	OAuthAudience string
 	// MCPReadOnly withholds every tool that mutates the Node-RED instance.
 	// Point the server at a production instance with this set and the model
 	// can inspect and diagnose, but not deploy, install, or inject.
@@ -58,6 +68,8 @@ func Load() (*Config, error) {
 		MCPTransport:     strings.ToLower(getEnv("MCP_TRANSPORT", "stdio")),
 		MCPHTTPAddr:      getEnv("MCP_HTTP_ADDR", ":8090"),
 		MCPHTTPToken:     os.Getenv("MCP_HTTP_TOKEN"),
+		OAuthIssuer:      os.Getenv("MCP_OAUTH_ISSUER"),
+		OAuthAudience:    os.Getenv("MCP_OAUTH_AUDIENCE"),
 	}
 
 	insecure, err := strconv.ParseBool(getEnv("NODERED_INSECURE", "false"))
@@ -82,6 +94,7 @@ func Load() (*Config, error) {
 		"auth_basic", cfg.NodeRedUsername != "",
 		"transport", cfg.MCPTransport,
 		"http_auth", cfg.MCPHTTPToken != "",
+		"oauth_issuer", cfg.OAuthIssuer != "",
 		"read_only", cfg.MCPReadOnly,
 	)
 
@@ -103,12 +116,36 @@ func (c *Config) validate() error {
 		// installing modules. Binding a network interface without a token
 		// publishes that to anyone who can reach the port, so refuse to start
 		// rather than come up quietly insecure.
-		if c.MCPHTTPToken == "" && !isLoopbackAddr(c.MCPHTTPAddr) {
+		//
+		// OAuth (issuer + audience) is the alternative form of authentication
+		// for the HTTP transport: when configured, it satisfies the same
+		// "must not come up unauthenticated" rule without requiring a shared
+		// static secret.
+		if c.MCPHTTPToken == "" && c.OAuthIssuer == "" && !isLoopbackAddr(c.MCPHTTPAddr) {
 			return fmt.Errorf(
-				"MCP_HTTP_TOKEN is required: %q is reachable from outside this machine, "+
-					"and the http transport would otherwise expose full write access to "+
-					"Node-RED. Set a token, or bind to 127.0.0.1 for local-only use",
+				"MCP_HTTP_TOKEN or MCP_OAUTH_ISSUER is required: %q is reachable from outside "+
+					"this machine, and the http transport would otherwise expose full write "+
+					"access to Node-RED. Set a token, configure OAuth, or bind to 127.0.0.1 "+
+					"for local-only use",
 				c.MCPHTTPAddr,
+			)
+		}
+		// OAuth pins both issuer and audience: configuring one without the
+		// other is almost certainly an operator mistake.
+		if (c.OAuthIssuer == "") != (c.OAuthAudience == "") {
+			return errors.New(
+				"MCP_OAUTH_ISSUER and MCP_OAUTH_AUDIENCE must be set together; " +
+					"configuring only one is an insecure half-step",
+			)
+		}
+		// Bearer and OAuth are alternative auth modes. Configuring both is
+		// ambiguous: pick one. The runtime would have to choose which one
+		// wins on each request, which is a footgun.
+		if c.MCPHTTPToken != "" && c.OAuthIssuer != "" {
+			return errors.New(
+				"MCP_HTTP_TOKEN and MCP_OAUTH_ISSUER are mutually exclusive: " +
+					"set the bearer token for static-secret auth, or configure " +
+					"OAuth issuer + audience for IdP-issued JWTs",
 			)
 		}
 	default:
