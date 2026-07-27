@@ -20,7 +20,8 @@
       "env": {
         "NODERED_URL": "${user_config.nodered_url}",
         "NODERED_TOKEN": "${user_config.nodered_token}",
-        "NODERED_BACKUP_DIR": "${user_config.backup_dir}"
+        "NODERED_BACKUP_DIR": "${user_config.backup_dir}",
+        "MCP_READ_ONLY": "${user_config.read_only}"
       }
     }
   },
@@ -44,6 +45,13 @@
       "title": "Backups folder",
       "description": "Where flow snapshots are written before every mutating operation.",
       "default": "${HOME}/nodered-mcp-backups",
+      "required": false
+    },
+    "read_only": {
+      "type": "boolean",
+      "title": "Read-only mode",
+      "description": "Expose only the tools that cannot modify Node-RED. Recommended when pointing at a production instance: flows can be inspected and diagnosed, but not deployed, installed, or injected.",
+      "default": false,
       "required": false
     }
   },
