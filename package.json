@@ -1,12 +1,18 @@
 {
   "name": "@fgjcarlos/nodered-mcp",
-  "version": "0.5.10",
-  "description": "MCP server for Node-RED — installable via npm",
+  "version": "0.5.11",
+  "description": "MCP server for Node-RED \u2014 installable via npm",
   "license": "MIT",
   "repository": "github:fgjcarlos/nodered-mcp",
   "homepage": "https://github.com/fgjcarlos/nodered-mcp#readme",
   "bugs": "https://github.com/fgjcarlos/nodered-mcp/issues",
-  "keywords": ["mcp", "model-context-protocol", "node-red", "nodered", "llm"],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "node-red",
+    "nodered",
+    "llm"
+  ],
   "bin": {
     "nodered-mcp": "bin/nodered-mcp.js"
   },
