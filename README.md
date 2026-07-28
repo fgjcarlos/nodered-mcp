@@ -44,6 +44,9 @@ A Spanish version of this document is available at [`README.es.md`](./README.es.
 | `update_node` | `PUT /flow/:id` | write | Change one node's properties, merging not replacing |
 | `delete_node` | `PUT /flow/:id` | write | Remove one node and the wires pointing at it |
 | `connect_nodes` | `PUT /flow/:id` | write | Wire one node's output to another |
+| `validate_flow` | local | read | Dry-run the structural checks (dangling wires, duplicate / missing ids, missing x/y) against a flow document — returns the list of issues without writing |
+| `disable_flow` | `PUT /flow/:id` | write | Stop a flow tab from running without deleting it |
+| `enable_flow` | `PUT /flow/:id` | write | Re-enable a previously disabled flow tab |
 | `inject_node` | `POST /inject/:id` | action | Fire an inject node on demand |
 
 ### Palette

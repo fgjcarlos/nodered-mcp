@@ -18,7 +18,7 @@ discrepen, manda esta.
 | Capa | Estado |
 |---|---|
 | `internal/nodered` (cliente HTTP) | Completo: flows, edición granular, palette, settings, contexto, diagnóstico, backups, diff, tail |
-| `internal/mcp` (server) | 29 tools, 3 resources, 2 prompts |
+| `internal/mcp` (server) | 37 tools, 3 resources, 2 prompts |
 | `internal/config` | 13 env vars + flags + validación |
 | `internal/oauth` | Resource server OAuth 2.1 / OIDC con JWKS discovery |
 | Modelo de datos | Resuelto: JSON opaco, sin pérdida de campos (ver §2) |
@@ -29,8 +29,8 @@ discrepen, manda esta.
 | CI | `.github/workflows/ci.yml`: formato, vet, tests en 3 SO, race, build cruzado |
 | Releases | Tag-triggered en `.github/workflows/release.yml`; npm wrapper en `@fgjcarlos/nodered-mcp`; imagen GHCR |
 
-29 tools, 3 resources, 2 prompts. La división `read` / `write` se aplica en el
-*registro* de tools, no dentro de cada handler: las 15 que modifican no llegan
+37 tools, 3 resources, 2 prompts. La división `read` / `write` se aplica en el
+*registro* de tools, no dentro de cada handler: las 19 que modifican no llegan
 a anunciarse en `--read-only`, de modo que un modelo no puede invocar lo que
 no ve. `inject_node` cuenta como modificadora — disparar un inject puede
 mandar una orden a un dispositivo real.
@@ -152,7 +152,7 @@ nodered-mcp/
 │   │   └── types.go      # tipos mínimos + RawFlow
 │   ├── mcp/
 │   │   ├── server.go     # stdio + streamable HTTP transports
-│   │   ├── tools.go      # registra las 29 tools
+│   │   ├── tools.go      # registra las 37 tools
 │   │   ├── resources.go  # 3 resources
 │   │   ├── prompts.go    # 2 prompts
 │   │   └── httpauth.go   # bearer + OAuth middleware
@@ -186,14 +186,14 @@ Sin frameworks, sin ORMs, sin cliente Node-RED de terceros.
 
 ---
 
-## 5. Catálogo de tools (29)
+## 5. Catálogo de tools (37)
 
 Marcadas por riesgo. `read` = sin efectos · `write` = muta config (backup
 previo) · `action` = efecto en runtime no persistido. En el código, las
 `action` también se registran como `addWriteTool` para que `--read-only` las
 oculte.
 
-Las 14 marcadas `read` son las únicas que se registran con `--read-only`.
+Las 18 marcadas `read` son las únicas que se registran con `--read-only`.
 
 ### Flows
 
@@ -210,6 +210,9 @@ Las 14 marcadas `read` son las únicas que se registran con `--read-only`.
 | `update_node` | `PUT /flow/:id` | write | ✅ fusiona propiedades |
 | `delete_node` | `PUT /flow/:id` | write | ✅ limpia wires entrantes |
 | `connect_nodes` | `PUT /flow/:id` | write | ✅ |
+| `validate_flow` | local | read | ✅ dry-run estructural (#53) |
+| `disable_flow` | `PUT /flow/:id` | write | ✅ (#53) |
+| `enable_flow` | `PUT /flow/:id` | write | ✅ (#53) |
 | `inject_node` | `POST /inject/:id` | action | ✅ excluida de `--read-only` |
 
 ### Palette
@@ -272,7 +275,7 @@ por dependencia y por valor, no por tamaño.
 | **6** | Bearer auth en el transporte HTTP | ✅ Completada |
 | **6.b** | OAuth 2.1 para conectores web | ✅ Completada — `internal/oauth/` |
 
-Tras la fase 6: **29 tools** (14 en modo de solo lectura), 3 resources, 2
+Tras la fase 6: **37 tools** (18 en modo de solo lectura), 3 resources, 2
 prompts.
 
 ### Detalle de lo entregado
@@ -434,7 +437,7 @@ afirmación de las anteriores en una tarde.
 
 ### Una línea
 
-29 tools, 3 resources, 2 prompts, ~90 tests, dos transportes, OAuth 2.1
+37 tools, 3 resources, 2 prompts, ~120 tests, dos transportes, OAuth 2.1
 opcional. El plan técnico está terminado.
 
 ### Cómo verificar la lista de tools
@@ -536,3 +539,25 @@ sintéticos. La cobertura debería aterrizar en una CI job por release
   bordes de permisos.
 
 Refs: #41, #49.
+
+---
+
+## 12. Roadmap v0.5.13
+
+Tres primitivas de edición/introspección sobre el pipeline de flows
+existentes. Reusan los guardrails del write-path (snapshot, wire
+validation, writeMu) y exponen una **lista estructurada de issues** vía
+`validate_flow` — el resto del catálogo devuelve errores puntuales; éste
+devuelve todos los problemas a la vez para que un modelo los arregle en
+una pasada.
+
+| Tool | HTTP | Tipo | Cubre |
+|---|---|---|---|
+| `validate_flow` | local | read | #53 — dry-run estructural sin tocar el runtime |
+| `disable_flow` | `PUT /flow/:id` | write | #53 — apaga una pestaña sin borrarla |
+| `enable_flow` | `PUT /flow/:id` | write | #53 — reactiva una pestaña |
+
+`inject_node` con `payload` arbitrario (#54) se trackea por separado: la
+infraestructura ya existe en `InjectNodeWithBody` (introducida por #59)
+y la extensión es de una sola herramienta, no un pariente del edit
+pipeline.

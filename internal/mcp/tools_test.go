@@ -39,10 +39,11 @@ var readOnlyTools = []string{
 	"export_flow",
 	"get_runtime_logs",
 	"get_node_status",
+	"validate_flow",
 }
 
 // totalTools is the full-mode count: every read tool plus every mutating one.
-const totalTools = 34
+const totalTools = 37
 
 func newTestServer(t *testing.T, readOnly bool) *Server {
 	t.Helper()
@@ -84,6 +85,7 @@ func TestReadOnlyWithholdsEveryMutatingTool(t *testing.T) {
 		"create_flow", "update_flow", "delete_flow", "set_flows",
 		"inject_node", "install_node", "uninstall_node",
 		"enable_node", "disable_node", "set_flows_state", "restore_backup",
+		"disable_flow", "enable_flow", "set_context",
 	} {
 		if got[banned] {
 			t.Errorf("read-only server exposed mutating tool %q", banned)
@@ -102,7 +104,7 @@ func TestFullServerExposesEveryTool(t *testing.T) {
 			t.Errorf("full server is missing read tool %q", want)
 		}
 	}
-	for _, want := range []string{"create_flow", "set_flows", "restore_backup", "inject_node", "set_context"} {
+	for _, want := range []string{"create_flow", "set_flows", "restore_backup", "inject_node", "set_context", "disable_flow", "enable_flow"} {
 		if !got[want] {
 			t.Errorf("full server is missing mutating tool %q", want)
 		}
