@@ -216,11 +216,68 @@ func (c *Client) RestoreFlows(ctx context.Context, backup RawFlow) error {
 
 // InjectNode fires the trigger on a node of type "inject" by calling
 // POST /inject/:id. This does not change persisted config, so no backup.
+//
+// Guard: Node-RED's /inject/:id endpoint only acts on type "inject".
+// Other node types (comment, debug, link-in) accept the call silently
+// and return success without firing anything — the audit of v0.5.12
+// (28 Jul 2026) caught exactly this on a comment node. We look up the
+// node's type via GET /flows first and refuse if it is not "inject",
+// so the operator sees a typed error naming the actual type instead
+// of a phantom success.
 func (c *Client) InjectNode(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("inject node id is required")
 	}
+	nodeType, ok, err := c.nodeType(ctx, id)
+	if err != nil {
+		// Lookup failed (network, parsing, runtime). Surface the
+		// lookup error rather than silently firing on a node whose
+		// type we could not verify — better to fail loud than to
+		// repeat the v0.5.12 false-positive.
+		return fmt.Errorf("verifying inject node type: %w", err)
+	}
+	if !ok {
+		// No such node. Pass through to /inject/:id so the runtime's
+		// 404 distinguishes "missing" from "wrong type" for the
+		// operator (matches the audit's observation that the HTTP
+		// path already returns 404 on unknown ids).
+		return c.do(ctx, "POST", "/inject/"+id, nil, nil)
+	}
+	if nodeType != "inject" {
+		return fmt.Errorf("node %q is type %q, not \"inject\"; only inject nodes can be fired", id, nodeType)
+	}
 	return c.do(ctx, "POST", "/inject/"+id, nil, nil)
+}
+
+// nodeType returns the Node-RED type ("inject", "comment", "debug",
+// ...) for the node with the given id, plus a boolean for "node
+// found". The boolean lets the caller distinguish "missing" (false)
+// from "found but not what you wanted" (true, type != expected).
+//
+// It walks the GET /flows document — same path SearchFlows uses for
+// its id-agnostic scan — rather than reading one tab. A node's type
+// can be queried cheaply this way, and the result is independent of
+// which tab the node lives in. Cost: one extra HTTP GET per
+// inject_node call. The audit did not flag latency as a problem, so
+// we keep the simple uncached path; cache if a future audit does.
+func (c *Client) nodeType(ctx context.Context, id string) (string, bool, error) {
+	raw, err := c.ListFlows(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	for _, item := range extractFlowArray(raw) {
+		var m nodeMeta
+		if json.Unmarshal(item, &m) != nil {
+			continue
+		}
+		if m.Type == "tab" || m.Type == "subflow" {
+			continue
+		}
+		if m.ID == id {
+			return m.Type, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 // FlowTabCount returns how many flow tabs (objects with "type":"tab") appear
