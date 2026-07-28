@@ -249,6 +249,30 @@ func (c *Client) InjectNode(ctx context.Context, id string) error {
 	return c.do(ctx, "POST", "/inject/"+id, nil, nil)
 }
 
+// InjectNodeWithBody fires the trigger on an inject node by calling
+// POST /inject/:id with a JSON body. Unlike InjectNode, it does NOT
+// re-verify the node's type — the caller is expected to know the type
+// (used for the MCP-managed context helper, which is a fixed shape).
+//
+// The Node-RED 5.x handler at /inject/:id forwards the body to
+// node.receive(body) ONLY when the body carries the special
+// "__user_inject_props__" field. Without that field the body is
+// silently discarded and the inject fires with its configured
+// properties only. Callers that want the body to become the inject's
+// msg (so a downstream function node can read it) MUST include
+// "__user_inject_props__": [] (or any array) in the body — the value
+// is the inject's per-call prop override, and an empty array makes
+// the inject pass msg through unchanged.
+func (c *Client) InjectNodeWithBody(ctx context.Context, id string, body json.RawMessage) error {
+	if id == "" {
+		return errors.New("inject node id is required")
+	}
+	if len(body) == 0 {
+		return errors.New("inject body is required when using InjectNodeWithBody")
+	}
+	return c.do(ctx, "POST", "/inject/"+id, body, nil)
+}
+
 // nodeType returns the Node-RED type ("inject", "comment", "debug",
 // ...) for the node with the given id, plus a boolean for "node
 // found". The boolean lets the caller distinguish "missing" (false)

@@ -1,9 +1,11 @@
 package nodered
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -289,5 +291,88 @@ func TestAPIError_500_NoHint(t *testing.T) {
 	msg := err.Error()
 	if strings.Contains(msg, "the admin API does not expose this endpoint") {
 		t.Errorf("non-404 should not trigger the hint, got %q", msg)
+	}
+}
+
+// TestInjectNodeWithBody covers the helper used by set_context (issue
+// #52): POST /inject/:id with a body that includes
+// __user_inject_props__ so the body becomes the inject's msg. The
+// mock verifies the method, the path, the auth header and that the
+// body round-trips intact.
+func TestInjectNodeWithBody(t *testing.T) {
+	var (
+		gotMethod string
+		gotPath   string
+		gotBody   []byte
+		gotCT     string
+	)
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/inject/mcp_ctx_helper_inj" {
+			gotMethod = r.Method
+			gotPath = r.URL.Path
+			gotCT = r.Header.Get("Content-Type")
+			gotBody, _ = io.ReadAll(r.Body)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		t.Errorf("unexpected path: %s", r.URL.Path)
+	})
+
+	body := json.RawMessage(`{"key":"foo","value":42,"scope":"global","__user_inject_props__":[]}`)
+	if err := c.InjectNodeWithBody(context.Background(), "mcp_ctx_helper_inj", body); err != nil {
+		t.Fatalf("InjectNodeWithBody: %v", err)
+	}
+	if gotMethod != "POST" {
+		t.Errorf("expected POST, got %s", gotMethod)
+	}
+	if gotPath != "/inject/mcp_ctx_helper_inj" {
+		t.Errorf("expected /inject/mcp_ctx_helper_inj, got %s", gotPath)
+	}
+	if !strings.Contains(gotCT, "application/json") {
+		t.Errorf("expected JSON content type, got %q", gotCT)
+	}
+	// Body must round-trip exactly — that's the contract the set_context
+	// helper relies on (Node-RED sees __user_inject_props__ and forwards
+	// the rest as msg).
+	if !bytes.Contains(gotBody, []byte(`"__user_inject_props__":[]`)) {
+		t.Errorf("body lost the trigger field: %s", gotBody)
+	}
+	if !bytes.Contains(gotBody, []byte(`"key":"foo"`)) {
+		t.Errorf("body lost the key field: %s", gotBody)
+	}
+}
+
+func TestInjectNodeWithBody_EmptyID(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called for empty id")
+	})
+	if err := c.InjectNodeWithBody(context.Background(), "", json.RawMessage(`{}`)); err == nil {
+		t.Fatal("expected validation error, got nil")
+	}
+}
+
+func TestInjectNodeWithBody_EmptyBody(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called for empty body")
+	})
+	if err := c.InjectNodeWithBody(context.Background(), "mcp_ctx_helper_inj", nil); err == nil {
+		t.Fatal("expected validation error, got nil")
+	}
+}
+
+func TestInjectNodeWithBody_PropagatesAPIErrors(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "node not found", http.StatusNotFound)
+	})
+	err := c.InjectNodeWithBody(context.Background(), "missing", json.RawMessage(`{"__user_inject_props__":[]}`))
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *APIError, got %T: %v", err, err)
+	}
+	if apiErr.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", apiErr.StatusCode)
 	}
 }

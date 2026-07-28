@@ -46,6 +46,12 @@ type Server struct {
 	// rather than the server refusing to start.
 	debugTail *nodered.DebugTail
 
+	// ctxHelper tracks the on-runtime helper backing the set_context tool
+	// (issue #52). It is provisioned lazily on the first set_context call
+	// and reused across calls — the same inject + function node pair stays
+	// in the flow config until the operator deletes the flow tab.
+	ctxHelper *setContextHelper
+
 	tools     []mcp.Tool
 	resources []mcp.Resource
 	prompts   []mcp.Prompt
