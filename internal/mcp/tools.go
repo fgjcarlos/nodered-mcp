@@ -86,6 +86,36 @@ func (s *Server) registerTools() {
 	)
 	s.addWriteTool(createFlow, s.handleCreateFlow)
 
+	// ---- export_flow / import_flow ------------------------------------
+	// Editor clipboard model exposed as MCP tools. export_flow returns
+	// the same shape Ctrl+C produces in the editor; import_flow takes
+	// that shape back and creates a new flow tab on this instance.
+	exportFlow := mcp.NewTool("export_flow",
+		mcp.WithDescription(
+			"Read a flow tab in editor clipboard format. Returns the same JSON "+
+				"document that Ctrl+C produces in the Node-RED editor — a single-"+
+				"element array whose element is the flow tab. Use this to capture a "+
+				"tested flow, then call import_flow on another instance to deploy it. "+
+				"Wires round-trip intact. Read-only.",
+		),
+		mcp.WithString("id", mcp.Required(),
+			mcp.Description("The flow tab ID to export.")),
+	)
+	s.addReadTool(exportFlow, s.handleExportFlow)
+
+	importFlow := mcp.NewTool("import_flow",
+		mcp.WithDescription(
+			"Create a new flow tab from an editor clipboard JSON document. The "+
+				"argument shape is the same one export_flow returns: a single-element "+
+				"array whose element is the flow tab. Only one tab per call — split "+
+				"multi-tab pastes by hand. A backup of the current config is taken "+
+				"before the write. Returns the runtime-assigned id of the new tab.",
+		),
+		mcp.WithString("clipboard", mcp.Required(),
+			mcp.Description("Editor clipboard JSON: a single-element array containing the flow tab. Either the raw array or a JSON-encoded string is accepted.")),
+	)
+	s.addWriteTool(importFlow, s.handleImportFlow)
+
 	// ---- update_flow ---------------------------------------------------
 	updateFlow := mcp.NewTool("update_flow",
 		mcp.WithDescription(

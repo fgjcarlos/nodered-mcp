@@ -36,10 +36,11 @@ var readOnlyTools = []string{
 	"get_flows_state",
 	"list_backups",
 	"diff_flows",
+	"export_flow",
 }
 
 // totalTools is the full-mode count: every read tool plus every mutating one.
-const totalTools = 30
+const totalTools = 32
 
 func newTestServer(t *testing.T, readOnly bool) *Server {
 	t.Helper()
