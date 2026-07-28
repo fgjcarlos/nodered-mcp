@@ -135,4 +135,7 @@ $ go vet ./...
 
 ## 8. PR
 
-PR will close #44 with this report. Title: `fix(nodered): close #44 as wontfix (deterministic hangs inherit #42, fixed by #55)`.
+- **URL:** https://github.com/fgjcarlos/nodered-mcp/pull/57
+- **Branch:** `fix/issue-44-hang-investigation` → `main`
+- **Title:** `fix(nodered): close #44 as wontfix (deterministic hangs inherit #42, fixed by #55)`
+- **State:** open
