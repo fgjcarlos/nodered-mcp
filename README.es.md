@@ -47,7 +47,7 @@ La versión en inglés de este documento está en [`README.md`](./README.md).
 | `validate_flow` | local | read | Ejecuta en seco las comprobaciones estructurales (wires colgantes, ids duplicados/faltantes, x/y faltantes) sobre un documento de flow — devuelve la lista de problemas sin escribir |
 | `disable_flow` | `PUT /flow/:id` | write | Detener una pestaña sin eliminarla |
 | `enable_flow` | `PUT /flow/:id` | write | Reactivar una pestaña previamente desactivada |
-| `inject_node` | `POST /inject/:id` | action | Disparar un nodo inject bajo demanda |
+| `inject_node` | `POST /inject/:id` | action | Disparar un nodo inject bajo demanda. `payload` opcional (cualquier valor JSON) sobrescribe `msg.payload` para esa llamada — útil para "¿qué pasa si msg.payload = X?" sin redesplegar el nodo (requiere Node-RED 5.x) |
 
 ### Palette
 

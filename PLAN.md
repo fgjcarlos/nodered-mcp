@@ -213,7 +213,7 @@ Las 18 marcadas `read` son las únicas que se registran con `--read-only`.
 | `validate_flow` | local | read | ✅ dry-run estructural (#53) |
 | `disable_flow` | `PUT /flow/:id` | write | ✅ (#53) |
 | `enable_flow` | `PUT /flow/:id` | write | ✅ (#53) |
-| `inject_node` | `POST /inject/:id` | action | ✅ excluida de `--read-only` |
+| `inject_node` | `POST /inject/:id` | action | ✅ excluida de `--read-only`; payload opcional (#54) |
 
 ### Palette
 
@@ -556,8 +556,13 @@ una pasada.
 | `validate_flow` | local | read | #53 — dry-run estructural sin tocar el runtime |
 | `disable_flow` | `PUT /flow/:id` | write | #53 — apaga una pestaña sin borrarla |
 | `enable_flow` | `PUT /flow/:id` | write | #53 — reactiva una pestaña |
+| `inject_node` (con `payload`) | `POST /inject/:id` | action | #54 — override per-call de `msg.payload` |
 
-`inject_node` con `payload` arbitrario (#54) se trackea por separado: la
-infraestructura ya existe en `InjectNodeWithBody` (introducida por #59)
-y la extensión es de una sola herramienta, no un pariente del edit
-pipeline.
+`inject_node` con `payload` arbitrario (#54) se trackea junto con #53:
+la infraestructura ya existe en `InjectNodeWithBody` (introducida por
+#59) y la extensión es de una sola herramienta, no un pariente del edit
+pipeline. El cuerpo se envía envuelto en `__user_inject_props__`, el
+mismo mecanismo que Node-RED 5.x usa para propagar un body al `msg`
+que recibe el inject. Requiere Node-RED 5.x — en versiones anteriores
+el body se ignora silenciosamente y el inject dispara con su payload
+configurado.

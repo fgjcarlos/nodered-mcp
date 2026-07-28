@@ -274,10 +274,20 @@ func (s *Server) registerTools() {
 	injectNode := mcp.NewTool("inject_node",
 		mcp.WithDescription(
 			"Manually fire an inject node by its ID (POST /inject/:id), kicking "+
-				"off a flow on demand without opening the editor.",
+				"off a flow on demand without opening the editor.\n\n"+
+				"Pass an optional `payload` (any JSON value) to override what the inject "+
+				"sends downstream. The payload becomes the inject's `msg.payload` — "+
+				"use it for \"what if msg.payload equals this?\" edge cases "+
+				"(commissioning, replay, error reproduction) without redeploying the "+
+				"node. When omitted, the inject fires with whatever the node is "+
+				"configured to send.",
 		),
 		mcp.WithString("id", mcp.Required(),
 			mcp.Description("The ID of the inject node to trigger.")),
+		mcp.WithObject("payload",
+			mcp.Description("Optional override for msg.payload. Any JSON value (object, array, string, number, bool, null). Omit to fire with the node's configured payload. Requires Node-RED 5.x — older releases silently ignore the body."),
+			mcp.AdditionalProperties(true),
+		),
 	)
 	s.addWriteTool(injectNode, s.handleInjectNode)
 
@@ -951,19 +961,66 @@ func (s *Server) handleEnableFlow(ctx context.Context, req mcp.CallToolRequest) 
 	return mcp.NewToolResultText(fmt.Sprintf("Flow %q enabled (a backup was taken first).", id)), nil
 }
 
-// handleInjectNode triggers an inject node.
+// handleInjectNode triggers an inject node. With no payload it fires the
+// inject with its configured properties (POST /inject/:id, no body); with
+// a payload it wraps that payload in the __user_inject_props__ envelope
+// Node-RED 5.x expects and posts the body so msg.payload lands as the
+// supplied value downstream. The wrap is mechanical — set_context uses
+// the same plumbing with a fixed payload.
 func (s *Server) handleInjectNode(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	id, err := req.RequireString("id")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	slog.Debug("tool: inject_node", "id", id)
+	payload, payloadPresent := req.GetArguments()["payload"]
+	slog.Debug("tool: inject_node", "id", id, "has_payload", payloadPresent)
+
+	if payloadPresent {
+		body, err := injectPayloadEnvelope(payload)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		if err := s.nrClient.InjectNodeWithBody(ctx, id, body); err != nil {
+			slog.Error("inject_node failed", "error", err, "id", id)
+			return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("Inject node %q fired with override payload.", id)), nil
+	}
 
 	if err := s.nrClient.InjectNode(ctx, id); err != nil {
 		slog.Error("inject_node failed", "error", err, "id", id)
 		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Inject node %q fired.", id)), nil
+}
+
+// injectPayloadEnvelope wraps an arbitrary JSON payload in the
+// __user_inject_props__ envelope Node-RED 5.x's /inject/:id handler reads
+// to forward the body to msg.payload. The user's value becomes the
+// "v" field of the prop override; "vt":"json" tells the runtime to
+// JSON.parse the value rather than treating it as a string literal.
+//
+// ponytail: only the "payload" field is settable this way. A user who
+// needs to override msg.topic or msg.headers must do it downstream (a
+// function node reading msg.payload). Supporting arbitrary per-call
+// msg-fields would need either an envelope-shaped argument or a
+// dedicated __user_inject_props__ passthrough — both out of scope for
+// issue #54.
+func injectPayloadEnvelope(payload any) (json.RawMessage, error) {
+	envelope := struct {
+		UserProps []map[string]any `json:"__user_inject_props__"`
+	}{
+		UserProps: []map[string]any{{
+			"p":  "payload",
+			"v":  payload,
+			"vt": "json",
+		}},
+	}
+	out, err := json.Marshal(envelope)
+	if err != nil {
+		return nil, fmt.Errorf("encoding inject payload envelope: %w", err)
+	}
+	return out, nil
 }
 
 // handleListNodes lists the installed palette modules.
