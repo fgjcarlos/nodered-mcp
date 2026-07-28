@@ -37,10 +37,12 @@ var readOnlyTools = []string{
 	"list_backups",
 	"diff_flows",
 	"export_flow",
+	"get_runtime_logs",
+	"get_node_status",
 }
 
 // totalTools is the full-mode count: every read tool plus every mutating one.
-const totalTools = 32
+const totalTools = 34
 
 func newTestServer(t *testing.T, readOnly bool) *Server {
 	t.Helper()
@@ -709,5 +711,335 @@ func TestSetContext_WithheldInReadOnly(t *testing.T) {
 	names := toolNames(ro)
 	if names["set_context"] {
 		t.Error("read-only server must not advertise set_context")
+	}
+}
+
+// TestGetRuntimeLogs_NotFoundSurfacesActionableHint covers the most
+// likely real case: stock Node-RED 5.x has no /logs endpoint, so
+// the handler must translate a 404 into something an operator
+// can act on rather than the bare "Cannot GET /logs" string the
+// admin API gives.
+func TestGetRuntimeLogs_NotFoundSurfacesActionableHint(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/logs" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		http.Error(w, "Cannot GET /logs", http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	s := New(c, "test", false, false)
+
+	res, err := s.handleGetRuntimeLogs(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("handleGetRuntimeLogs returned err=%v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result, got %+v", res)
+	}
+	tc, ok := res.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", res.Content[0])
+	}
+	if !strings.Contains(tc.Text, "/logs") {
+		t.Errorf("the error should mention the endpoint, got %q", tc.Text)
+	}
+	if !strings.Contains(tc.Text, "stdout") && !strings.Contains(tc.Text, "log") {
+		t.Errorf("the error should mention the stdout/log fallback, got %q", tc.Text)
+	}
+}
+
+// TestGetRuntimeLogs_ReturnsLines covers the happy path: the
+// endpoint returns an envelope and the tool renders the lines
+// newest-last, with the level normalised to {info,warn,error}.
+func TestGetRuntimeLogs_ReturnsLines(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/logs" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("count"); got == "" {
+			t.Errorf("expected a count query, got nothing")
+		}
+		_, _ = w.Write([]byte(`{"logs":[
+			{"ts":"2026-07-28T10:00:00Z","level":"info","msg":"started"},
+			{"ts":"2026-07-28T10:00:01Z","level":"error","msg":"boom"}
+		]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	s := New(c, "test", false, false)
+
+	res, err := s.handleGetRuntimeLogs(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("handleGetRuntimeLogs returned err=%v", err)
+	}
+	if res == nil || res.IsError {
+		t.Fatalf("expected a non-error result, got %+v", res)
+	}
+	tc := res.Content[0].(mcp.TextContent)
+	for _, want := range []string{"started", "boom", "ERROR", "INFO"} {
+		if !strings.Contains(tc.Text, want) {
+			t.Errorf("expected %q in the output, got:\n%s", want, tc.Text)
+		}
+	}
+}
+
+// TestGetRuntimeLogs_FilterByLevel covers the level filter: a
+// caller asking for errors must not get info lines back, even when
+// the runtime returns both.
+func TestGetRuntimeLogs_FilterByLevel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"logs":[
+			{"ts":"2026-07-28T10:00:00Z","level":"info","msg":"ok"},
+			{"ts":"2026-07-28T10:00:01Z","level":"error","msg":"boom"}
+		]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	s := New(c, "test", false, false)
+
+	res, _ := s.handleGetRuntimeLogs(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{"level": "error"}},
+	})
+	tc := res.Content[0].(mcp.TextContent)
+	if !strings.Contains(tc.Text, "boom") {
+		t.Errorf("error line should be present, got:\n%s", tc.Text)
+	}
+	if strings.Contains(tc.Text, "INFO") || strings.Contains(tc.Text, "ok\n") {
+		t.Errorf("info line should be filtered out, got:\n%s", tc.Text)
+	}
+}
+
+// TestGetRuntimeLogs_RejectsBadLevel covers the schema's
+// belt-and-braces handler check: an unknown level is rejected
+// without hitting the runtime.
+func TestGetRuntimeLogs_RejectsBadLevel(t *testing.T) {
+	var called bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	}))
+	t.Cleanup(srv.Close)
+
+	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	s := New(c, "test", false, false)
+
+	res, _ := s.handleGetRuntimeLogs(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{"level": "trace"}},
+	})
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error, got %+v", res)
+	}
+	if called {
+		t.Error("a bad level must not reach the runtime")
+	}
+}
+
+// TestGetRuntimeLogs_LineOffset covers the "-N" form of since:
+// the caller asks for the last N lines and we trim to that
+// window. The runtime may return more; we trim.
+func TestGetRuntimeLogs_LineOffset(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"logs":[
+			{"ts":"2026-07-28T10:00:00Z","level":"info","msg":"a"},
+			{"ts":"2026-07-28T10:00:01Z","level":"info","msg":"b"},
+			{"ts":"2026-07-28T10:00:02Z","level":"info","msg":"c"},
+			{"ts":"2026-07-28T10:00:03Z","level":"info","msg":"d"}
+		]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	s := New(c, "test", false, false)
+
+	res, _ := s.handleGetRuntimeLogs(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{"since": "-2"}},
+	})
+	tc := res.Content[0].(mcp.TextContent)
+	if !strings.Contains(tc.Text, "c") || !strings.Contains(tc.Text, "d") {
+		t.Errorf("expected the last 2 lines, got:\n%s", tc.Text)
+	}
+	if strings.Contains(tc.Text, " a\n") || strings.Contains(tc.Text, " b\n") {
+		t.Errorf("earlier lines should be trimmed, got:\n%s", tc.Text)
+	}
+}
+
+// TestGetRuntimeLogs_RejectsBadSince covers the same input
+// validation: a since string that is neither a timestamp nor a
+// line offset is rejected up-front.
+func TestGetRuntimeLogs_RejectsBadSince(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("server should not be called for a bad since, got %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(srv.Close)
+
+	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	s := New(c, "test", false, false)
+
+	for _, bad := range []string{"not-a-date", "-abc", "0", "-0", "yesterday"} {
+		t.Run(bad, func(t *testing.T) {
+			res, _ := s.handleGetRuntimeLogs(context.Background(), mcp.CallToolRequest{
+				Params: mcp.CallToolParams{Arguments: map[string]any{"since": bad}},
+			})
+			if res == nil || !res.IsError {
+				t.Errorf("expected an error for since=%q, got %+v", bad, res)
+			}
+		})
+	}
+}
+
+// TestGetNodeStatus_DisabledByDefault covers the MCP_DEBUG_STREAM
+// gate: when the flag is off, the tool reports a clear opt-in
+// hint, never empty data (which a model would read as "node is
+// fine, no events to report").
+func TestGetNodeStatus_DisabledByDefault(t *testing.T) {
+	s := newTestServerDebugStream(t, false, false)
+	res, err := s.handleGetNodeStatus(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{"node_id": "n1"}},
+	})
+	if err != nil {
+		t.Fatalf("handleGetNodeStatus returned err=%v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result, got %+v", res)
+	}
+	tc := res.Content[0].(mcp.TextContent)
+	if !strings.Contains(tc.Text, "MCP_DEBUG_STREAM") {
+		t.Errorf("the error should name the opt-in flag, got %q", tc.Text)
+	}
+}
+
+// TestGetNodeStatus_RequiresIdOrFlow covers the schema's
+// belt-and-braces: pass one of node_id / flow_id, not both, not
+// neither.
+func TestGetNodeStatus_RequiresIdOrFlow(t *testing.T) {
+	s := newTestServerDebugStream(t, false, true)
+
+	t.Run("both", func(t *testing.T) {
+		res, _ := s.handleGetNodeStatus(context.Background(), mcp.CallToolRequest{
+			Params: mcp.CallToolParams{Arguments: map[string]any{"node_id": "n1", "flow_id": "tabA"}},
+		})
+		if res == nil || !res.IsError {
+			t.Errorf("expected an error for both, got %+v", res)
+		}
+	})
+	t.Run("neither", func(t *testing.T) {
+		res, _ := s.handleGetNodeStatus(context.Background(), mcp.CallToolRequest{})
+		if res == nil || !res.IsError {
+			t.Errorf("expected an error for neither, got %+v", res)
+		}
+	})
+}
+
+// TestGetNodeStatus_UnknownNode covers the audit's "never seen"
+// case: a model asks about an id the cache has no record of.
+// The reply must say "unknown", not "disconnected" — they mean
+// different things to the operator.
+func TestGetNodeStatus_UnknownNode(t *testing.T) {
+	s := newTestServerDebugStream(t, false, true)
+
+	res, _ := s.handleGetNodeStatus(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{"node_id": "n_never_seen"}},
+	})
+	if res == nil || res.IsError {
+		t.Fatalf("expected a non-error result, got %+v", res)
+	}
+	tc := res.Content[0].(mcp.TextContent)
+	if !strings.Contains(tc.Text, "unknown") {
+		t.Errorf("expected 'unknown' in the reply, got %q", tc.Text)
+	}
+}
+
+// TestGetNodeStatus_ConnectedNode covers the audit's headline
+// acceptance criterion: a known connected node reports
+// `connected: true` (here: status=connected).
+func TestGetNodeStatus_ConnectedNode(t *testing.T) {
+	s := newTestServerDebugStream(t, false, true)
+	// Seed the cache directly. The tail is nil in this
+	// test server (no real /comms), so we exercise the
+	// render path through the same lookup the handler
+	// uses; the production path is covered by the
+	// nodered-package status tests.
+	entry := nodered.StatusEntry{
+		ID:     "n1",
+		Status: nodered.StatusConnected,
+		Text:   "ready",
+		Fill:   "green", Shape: "dot",
+	}
+	// Inject through the tail's public record method via
+	// the construction helper.
+	tail := s.statusTail
+	if tail == nil {
+		// The test server does not construct a status tail
+		// when debugStream is true with a localhost URL
+		// (it cannot derive /comms for "http://localhost:1880").
+		// We need a server that does, so build a real one.
+		c, err := nodered.NewClient(nodered.Options{BaseURL: "http://127.0.0.1:1"})
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
+		tail, err = nodered.NewStatusTail(c)
+		if err != nil {
+			t.Fatalf("NewStatusTail: %v", err)
+		}
+	}
+	// record() is package-private to nodered, so we go
+	// through consume() with a wire-shaped frame.
+	tail.ConsumeForTest([]byte(
+		`[{"topic":"status/n1","data":{"text":"ready","fill":"green","shape":"dot"}}]`,
+	))
+
+	res, _ := s.handleGetNodeStatus(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{"node_id": "n1"}},
+	})
+	if res == nil || res.IsError {
+		t.Fatalf("expected a non-error result, got %+v", res)
+	}
+	tc := res.Content[0].(mcp.TextContent)
+	if !strings.Contains(tc.Text, "status=connected") {
+		t.Errorf("expected status=connected in the reply, got %q", tc.Text)
+	}
+	_ = entry // referenced for documentation
+}
+
+// TestGetNodeStatus_ErroredNodeWithLastError covers the second
+// half of the audit's acceptance criteria: a node that errored
+// reports `connected: false` (status=errored) plus the last
+// error text. We also assert that LastError survives a recovery
+// to connected, so an operator who asks "why was this red?"
+// after the node has come back to green still gets the answer.
+func TestGetNodeStatus_ErroredNodeWithLastError(t *testing.T) {
+	c, _ := nodered.NewClient(nodered.Options{BaseURL: "http://127.0.0.1:1"})
+	tail, _ := nodered.NewStatusTail(c)
+	tail.ConsumeForTest([]byte(
+		`[{"topic":"status/n1","data":{"text":"broker unreachable","fill":"red","shape":"dot"}}]`,
+	))
+	tail.ConsumeForTest([]byte(
+		`[{"topic":"status/n1","data":{"text":"ok","fill":"green","shape":"dot"}}]`,
+	))
+
+	// Build a server that uses this tail directly, so we
+	// can assert on its output without going through a
+	// real /comms dial.
+	s := &Server{
+		nrClient:    c,
+		statusTail:  tail,
+		debugStream: true,
+	}
+
+	res, _ := s.handleGetNodeStatus(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{"node_id": "n1"}},
+	})
+	if res == nil || res.IsError {
+		t.Fatalf("expected a non-error result, got %+v", res)
+	}
+	tc := res.Content[0].(mcp.TextContent)
+	if !strings.Contains(tc.Text, "status=connected") {
+		t.Errorf("expected the recovered status=connected, got %q", tc.Text)
+	}
+	if !strings.Contains(tc.Text, "broker unreachable") {
+		t.Errorf("expected the last_error to survive recovery, got %q", tc.Text)
 	}
 }

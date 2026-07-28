@@ -172,7 +172,20 @@ func (c *Client) do(ctx context.Context, method, path string, body interface{}, 
 	if err != nil {
 		return fmt.Errorf("building URL: %w", err)
 	}
+	return c.doURL(ctx, method, u, path, body, out, reqOpts...)
+}
 
+// doURL is the lower half of do: it takes a fully-resolved URL, builds
+// the request, applies auth, and decodes the body. Split out so a
+// caller that needs to preserve a query string (which url.JoinPath
+// would URL-encode into the path) can build the URL itself.
+//
+// The errorPath is what APIError.Path records on a non-2xx response.
+// It is the path-style segment the caller asked for, not the full URL:
+// the tests assert against the path-style segment and the error
+// message rendered to the operator should not include a token-bearing
+// query string.
+func (c *Client) doURL(ctx context.Context, method, u, errorPath string, body interface{}, out interface{}, reqOpts ...func(*http.Request)) error {
 	var reqBody io.Reader
 	if body != nil {
 		buf, err := json.Marshal(body)
@@ -212,7 +225,7 @@ func (c *Client) do(ctx context.Context, method, path string, body interface{}, 
 		return &APIError{
 			StatusCode: resp.StatusCode,
 			Method:     method,
-			Path:       path,
+			Path:       errorPath,
 			Body:       string(respBody),
 		}
 	}
@@ -223,4 +236,77 @@ func (c *Client) do(ctx context.Context, method, path string, body interface{}, 
 		}
 	}
 	return nil
+}
+
+// getRaw performs a GET and returns the response body verbatim, with
+// no JSON decoding. Used by endpoints whose body shape is not
+// guaranteed JSON: the runtime log endpoint can return plain text on
+// some versions, and we want the same code to handle both.
+//
+// The path may include a query string; if it does, the caller built it
+// with url.Values and it is split off and reattached to the joined URL
+// without being percent-encoded into the path. A 4xx/5xx still
+// surfaces as *APIError, just like do.
+func (c *Client) getRaw(ctx context.Context, path string) ([]byte, error) {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, defaultTimeout)
+		defer cancel()
+	}
+
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parsing base URL: %w", err)
+	}
+	// Split off the query so we can re-stitch it after joining the
+	// path. url.JoinPath would percent-encode the '?'.
+	query := ""
+	if i := strings.IndexByte(path, '?'); i >= 0 {
+		query = path[i+1:]
+		path = path[:i]
+	}
+	joined, err := url.JoinPath(strings.TrimRight(u.String(), "/"), path)
+	if err != nil {
+		return nil, fmt.Errorf("building URL: %w", err)
+	}
+	if query != "" {
+		// Re-parse the joined URL so we can set RawQuery without
+		// re-encoding (the query is already encoded by the caller).
+		ju, err := url.Parse(joined)
+		if err != nil {
+			return nil, fmt.Errorf("parsing joined URL: %w", err)
+		}
+		ju.RawQuery = query
+		joined = ju.String()
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", joined, nil)
+	if err != nil {
+		return nil, fmt.Errorf("building request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json, text/plain")
+	c.auth.apply(req)
+
+	slog.Debug("nodered raw request", "method", "GET", "url", joined)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("calling GET %s: %w", joined, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response body: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, &APIError{
+			StatusCode: resp.StatusCode,
+			Method:     "GET",
+			Path:       joined,
+			Body:       string(respBody),
+		}
+	}
+	return respBody, nil
 }

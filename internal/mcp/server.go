@@ -45,6 +45,15 @@ type Server struct {
 	// could not be constructed, in which case get_debug_messages says so
 	// rather than the server refusing to start.
 	debugTail *nodered.DebugTail
+	// statusTail mirrors debugTail for node-status events on the same
+	// /comms WebSocket (issue #51). Nil when the tail could not be
+	// constructed, in which case get_node_status reports a clear
+	// "stream unavailable" message. The tail lives independently of
+	// debugTail because debug and status have different lifetimes
+	// (consume-and-forget vs remember-the-latest), but they share the
+	// MCP_DEBUG_STREAM opt-in for the same reason: the /comms dial can
+	// crash the runtime on some Node-RED versions.
+	statusTail *nodered.StatusTail
 
 	// ctxHelper tracks the on-runtime helper backing the set_context tool
 	// (issue #52). It is provisioned lazily on the first set_context call
@@ -99,10 +108,21 @@ func New(nrClient *nodered.Client, version string, readOnly, debugStream bool) *
 	// and must not bring the runtime down by triggering the upstream bug.
 	if !debugStream {
 		slog.Info("debug stream disabled; set MCP_DEBUG_STREAM=on to enable")
-	} else if tail, err := nodered.NewDebugTail(nrClient, nodered.DefaultDebugBufferSize); err != nil {
-		slog.Warn("debug tail unavailable", "error", err)
 	} else {
-		srv.debugTail = tail
+		if tail, err := nodered.NewDebugTail(nrClient, nodered.DefaultDebugBufferSize); err != nil {
+			slog.Warn("debug tail unavailable", "error", err)
+		} else {
+			srv.debugTail = tail
+		}
+		// The status tail shares the same /comms transport and the
+		// same opt-in. A failure to construct it (typically: the
+		// base URL has an unparseable scheme) is logged but does
+		// not stop the rest of the server.
+		if tail, err := nodered.NewStatusTail(nrClient); err != nil {
+			slog.Warn("status tail unavailable", "error", err)
+		} else {
+			srv.statusTail = tail
+		}
 	}
 
 	srv.registerTools()
@@ -285,11 +305,20 @@ func resultFirstText(res *mcp.CallToolResult) string {
 // debugTail is nil and Run is never started — opening the WebSocket on
 // some Node-RED versions (notably :latest as of writing) crashes the
 // runtime via @node-red/editor-api/auth/tokens.js.
+//
+// Since issue #51 the same call also starts the status tail: it
+// reuses the same /comms socket and the same opt-in (the upstream
+// bug applies to any /comms consumer, not just the debug one).
 func (s *Server) startDebugTail(ctx context.Context) {
-	if s.debugTail == nil || !s.debugStream {
+	if !s.debugStream {
 		return
 	}
-	go s.debugTail.Run(ctx)
+	if s.debugTail != nil {
+		go s.debugTail.Run(ctx)
+	}
+	if s.statusTail != nil {
+		go s.statusTail.Run(ctx)
+	}
 }
 
 // Run starts the server over stdio and blocks until the client
