@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -37,7 +39,7 @@ var readOnlyTools = []string{
 }
 
 // totalTools is the full-mode count: every read tool plus every mutating one.
-const totalTools = 29
+const totalTools = 30
 
 func newTestServer(t *testing.T, readOnly bool) *Server {
 	t.Helper()
@@ -97,7 +99,7 @@ func TestFullServerExposesEveryTool(t *testing.T) {
 			t.Errorf("full server is missing read tool %q", want)
 		}
 	}
-	for _, want := range []string{"create_flow", "set_flows", "restore_backup", "inject_node"} {
+	for _, want := range []string{"create_flow", "set_flows", "restore_backup", "inject_node", "set_context"} {
 		if !got[want] {
 			t.Errorf("full server is missing mutating tool %q", want)
 		}
@@ -359,5 +361,352 @@ func TestNormalizeFlowDoc_FlatArray(t *testing.T) {
 	}
 	if bytes.Contains(putBody, []byte(`"type":"tab"`)) {
 		t.Errorf("expected the type:tab marker to be dropped, got %s", putBody)
+	}
+}
+
+// TestSetContext_HappyPathAndHelperReuse covers issue #52's two
+// acceptance criteria together:
+//
+//  1. set_context scope=global key=foo value=42 is observable in
+//     a subsequent get_context scope=global key=foo (here, in the
+//     captured request, since the helper runs in a real runtime and
+//     we do not have one in the unit test).
+//  2. No new persistent nodes are left between calls — the helper
+//     is reused, not re-created per invocation.
+//
+// The httptest mock records the sequence of calls AND keeps a
+// minimal in-memory "live flow" so reads after writes reflect the
+// current state (mirrors what a real Node-RED does). On the first
+// set_context, we expect a flow creation + two add_node calls + a
+// connect_nodes + the inject dispatch. On the second set_context
+// (same scope/key/value), we expect exactly one call: the inject
+// dispatch. Anything else is a regression.
+func TestSetContext_HappyPathAndHelperReuse(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		postFlow int
+		putFlow  int
+		postInj  int
+		injected [][]byte
+		// liveFlow is the in-memory representation of the helper flow
+		// on the (mocked) Node-RED instance. It starts as an empty
+		// flow with just the tab and grows with each PUT the mock
+		// sees. GET /flow/:id returns the current snapshot so the
+		// read-modify-write AddNode / ConnectNodes path sees the
+		// right state.
+		liveFlow = map[string]any{
+			"id":    "mcp_ctx_helper_tab",
+			"label": "__mcp_context_helper__",
+			"nodes": []any{},
+		}
+	)
+	// refreshSnapshot rebuilds the doc the mock serves for
+	// GET /flow/mcp_ctx_helper_tab from the current liveFlow.
+	refreshSnapshot := func() []byte {
+		out, _ := json.Marshal(liveFlow)
+		return out
+	}
+	// ingestPUT applies a PUT /flow/mcp_ctx_helper_tab body to
+	// liveFlow. It preserves the tab id/label and overwrites the
+	// nodes array with whatever the body said. That is enough for
+	// the wire-validation step and for the next read to see the
+	// just-installed nodes.
+	ingestPUT := func(body []byte) {
+		var doc struct {
+			ID    string           `json:"id"`
+			Label string           `json:"label"`
+			Nodes []map[string]any `json:"nodes"`
+		}
+		if err := json.Unmarshal(body, &doc); err != nil {
+			return
+		}
+		liveFlow["id"] = doc.ID
+		liveFlow["label"] = doc.Label
+		liveFlow["nodes"] = doc.Nodes
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			// Backup snapshot. Two-flow array so the snapshot file
+			// looks like a real config, with the helper tab
+			// alongside one unrelated tab.
+			_, _ = w.Write([]byte(fmt.Sprintf(
+				`[{"type":"tab","id":"other","label":"Other","nodes":[]},%s]`,
+				refreshSnapshot(),
+			)))
+		case r.Method == "POST" && r.URL.Path == "/flow":
+			// CreateFlow for the helper tab.
+			postFlow++
+			body, _ := io.ReadAll(r.Body)
+			if !bytes.Contains(body, []byte(`"label":"__mcp_context_helper__"`)) {
+				t.Errorf("CreateFlow: expected the helper label, got %s", body)
+			}
+			if !bytes.Contains(body, []byte(`"id":"mcp_ctx_helper_tab"`)) {
+				t.Errorf("CreateFlow: expected the helper flow id, got %s", body)
+			}
+			// Echo the body so the post-CreateFlow response has a
+			// valid nested shape.
+			_, _ = w.Write(body)
+		case r.Method == "GET" && r.URL.Path == "/flow/mcp_ctx_helper_tab":
+			// GetFlow, called by AddNode (read-modify-write) and
+			// also by the fallback path on /flows synthesis. The
+			// snapshot reflects whatever PUT last wrote.
+			_, _ = w.Write(refreshSnapshot())
+		case r.Method == "PUT" && r.URL.Path == "/flow/mcp_ctx_helper_tab":
+			// Every AddNode + ConnectNodes goes through PUT /flow/:id.
+			// The mock captures the body so the next GET reflects
+			// the just-installed nodes.
+			putFlow++
+			body, _ := io.ReadAll(r.Body)
+			ingestPUT(body)
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/inject/"):
+			postInj++
+			body, _ := io.ReadAll(r.Body)
+			injected = append(injected, body)
+			if !bytes.Contains(body, []byte(`"__user_inject_props__":[]`)) {
+				t.Errorf("inject body missing the user-props trigger: %s", body)
+			}
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	srv2 := New(c, "test", false, false)
+
+	makeReq := func(value string) mcp.CallToolRequest {
+		return mcp.CallToolRequest{
+			Params: mcp.CallToolParams{Arguments: map[string]any{
+				"scope": "global",
+				"key":   "foo",
+				"value": value,
+			}},
+		}
+	}
+
+	// First call: provision + dispatch.
+	if _, err := srv2.handleSetContext(context.Background(), makeReq("42")); err != nil {
+		t.Fatalf("first set_context returned err=%v", err)
+	}
+	// Second call: reuse, no extra provisioning.
+	if _, err := srv2.handleSetContext(context.Background(), makeReq("99")); err != nil {
+		t.Fatalf("second set_context returned err=%v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if postFlow != 1 {
+		t.Errorf("expected exactly 1 CreateFlow across 2 calls, got %d (helper should be reused)", postFlow)
+	}
+	if postInj != 2 {
+		t.Errorf("expected 2 inject dispatches, got %d", postInj)
+	}
+	// The inject dispatch count == putFlow count only if AddNode and
+	// ConnectNodes each went through PUT /flow/:id exactly once. We
+	// provision 2 nodes (inject + function) and 1 wire, so 3 PUTs
+	// total — the magic number, not a coincidence. If it changes the
+	// test still catches it; the "exactly 3" assertion is the
+	// anti-regression for the helper being created in one shot
+	// rather than incrementally.
+	if putFlow != 3 {
+		t.Errorf("expected 3 PUT /flow/:id calls (2 add_node + 1 connect_nodes), got %d", putFlow)
+	}
+	// Bodies must carry the value the caller asked for, not the
+	// value from the first call. Two separate dispatches with two
+	// different values is the literal acceptance criterion.
+	if len(injected) != 2 {
+		t.Fatalf("expected 2 captured inject bodies, got %d", len(injected))
+	}
+	if !bytes.Contains(injected[0], []byte(`"value":42`)) {
+		t.Errorf("first inject body missing value:42: %s", injected[0])
+	}
+	if !bytes.Contains(injected[1], []byte(`"value":99`)) {
+		t.Errorf("second inject body missing value:99: %s", injected[1])
+	}
+}
+
+// TestSetContext_RejectsBadScope ensures the scope enum is enforced
+// at the handler, even though the schema already says it. (The schema
+// is the primary guard; the handler check is belt-and-braces —
+// callers reaching the handler directly, e.g. the unit tests, must
+// still get a typed error.)
+func TestSetContext_RejectsBadScope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("server should not be called for an invalid scope, got %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(srv.Close)
+
+	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	srv2 := New(c, "test", false, false)
+
+	res, err := srv2.handleSetContext(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"scope": "everywhere",
+			"key":   "foo",
+			"value": "1",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("handleSetContext returned err=%v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result, got %+v", res)
+	}
+	tc, ok := res.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", res.Content[0])
+	}
+	if !strings.Contains(tc.Text, "scope must be") {
+		t.Errorf("error should explain the scope rule, got %q", tc.Text)
+	}
+}
+
+// TestSetContext_RejectsBadJSONValue mirrors get_context's "value
+// must be parseable" rule. A value that is not valid JSON is a
+// caller mistake, not a runtime condition — fail fast before the
+// helper is even touched.
+func TestSetContext_RejectsBadJSONValue(t *testing.T) {
+	var serverCalled bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serverCalled = true
+	}))
+	t.Cleanup(srv.Close)
+
+	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	srv2 := New(c, "test", false, false)
+
+	res, err := srv2.handleSetContext(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"scope": "global",
+			"key":   "foo",
+			"value": "{not json",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("handleSetContext returned err=%v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result, got %+v", res)
+	}
+	tc, ok := res.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", res.Content[0])
+	}
+	if !strings.Contains(tc.Text, "valid JSON") {
+		t.Errorf("error should mention the JSON parse step, got %q", tc.Text)
+	}
+	if serverCalled {
+		t.Error("server must not be called when the value fails to parse")
+	}
+}
+
+// TestSetContext_RequiresIdForFlow covers the same rule get_context
+// applies: scope=flow without an id is undefined. We reject
+// proactively (before provisioning) so a confused caller does not
+// also pay the cost of installing a helper.
+func TestSetContext_RequiresIdForFlow(t *testing.T) {
+	var serverCalled bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serverCalled = true
+	}))
+	t.Cleanup(srv.Close)
+
+	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	srv2 := New(c, "test", false, false)
+
+	res, err := srv2.handleSetContext(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"scope": "flow",
+			"key":   "foo",
+			"value": "1",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("handleSetContext returned err=%v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result, got %+v", res)
+	}
+	tc, ok := res.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", res.Content[0])
+	}
+	if !strings.Contains(tc.Text, "requires an id") {
+		t.Errorf("error should explain the id rule, got %q", tc.Text)
+	}
+	if serverCalled {
+		t.Error("server must not be called when the id is missing")
+	}
+}
+
+// TestSetContext_FlowScopeRejectsForeignId makes the limitation
+// explicit: scope=flow can ONLY target the helper's own flow
+// context, because a function node has no runtime API to reach
+// another tab's flow context. The error message names the right id
+// so the caller can fix the call without reading the source.
+func TestSetContext_FlowScopeRejectsForeignId(t *testing.T) {
+	var serverCalled bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serverCalled = true
+	}))
+	t.Cleanup(srv.Close)
+
+	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	srv2 := New(c, "test", false, false)
+
+	res, err := srv2.handleSetContext(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"scope": "flow",
+			"id":    "some_other_tab",
+			"key":   "foo",
+			"value": "1",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("handleSetContext returned err=%v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result, got %+v", res)
+	}
+	tc, ok := res.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", res.Content[0])
+	}
+	if !strings.Contains(tc.Text, "mcp_ctx_helper_tab") {
+		t.Errorf("error should name the only legal id, got %q", tc.Text)
+	}
+	if !strings.Contains(tc.Text, "some_other_tab") {
+		t.Errorf("error should echo the bad id back, got %q", tc.Text)
+	}
+	if serverCalled {
+		t.Error("server must not be called for a foreign flow id")
+	}
+}
+
+// TestSetContext_WithheldInReadOnly covers the read-only mode gate:
+// set_context is a mutating tool (it creates a flow tab on the
+// runtime on first use) and so must be absent from a read-only
+// server's advertised surface, exactly like the other writers.
+func TestSetContext_WithheldInReadOnly(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("server should not be touched for tool enumeration, got %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(srv.Close)
+
+	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	ro := New(c, "test", true, false)
+
+	names := toolNames(ro)
+	if names["set_context"] {
+		t.Error("read-only server must not advertise set_context")
 	}
 }

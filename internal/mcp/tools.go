@@ -382,7 +382,7 @@ func (s *Server) registerTools() {
 				"Scope \"global\" is instance-wide. Scope \"flow\" needs the tab id, and "+
 				"\"node\" needs the node id. Omit key to read the whole store. Values come "+
 				"back keyed by store name, each with its value and type. Read-only: the "+
-				"Node-RED admin API exposes no way to write context.",
+				"Node-RED admin API exposes no way to write context; use set_context for that.",
 		),
 		mcp.WithString("scope", mcp.Required(),
 			mcp.Description("\"global\", \"flow\", or \"node\"."),
@@ -394,6 +394,41 @@ func (s *Server) registerTools() {
 			mcp.Description("A single context key to read. Omit to return the whole store.")),
 	)
 	s.addReadTool(getContext, s.handleGetContext)
+
+	// ---- set_context ----------------------------------------------------
+	setContext := mcp.NewTool("set_context",
+		mcp.WithDescription(
+			"Write to Node-RED context: the state flows keep between messages.\n\n"+
+				"The admin API exposes no way to write context (it only reads it via get_context), "+
+				"so this tool installs a small helper on the runtime on first use: a single flow tab "+
+				"named \"__mcp_context_helper__\" containing one inject node wired to one function "+
+				"node. Each call dispatches a payload to that helper. The helper is reused across "+
+				"calls; it is not re-created per invocation.\n\n"+
+				"Scope \"global\" is instance-wide. Scope \"flow\" writes to the helper's own "+
+				"flow context (Node-RED has no runtime API to write another tab's flow context "+
+				"from a single function node). Scope \"node\" writes to the helper's function "+
+				"node's own context — pass the helper's function id (visible via list_flows as "+
+				"\"__mcp_context_helper_set__\") to get_context to read it back. The \"id\" arg "+
+				"is required for scope \"flow\" and \"node\", and is validated against the "+
+				"expected target so a typo gets a clear error instead of a silent no-op.\n\n"+
+				"Pass \"value\" as a JSON-encoded string (objects, arrays, numbers, booleans, "+
+				"strings, null — all accepted). It is parsed server-side and stored as the "+
+				"corresponding JS value in the context store.\n\n"+
+				"To write multiple keys, call set_context once per key (the issue's out-of-scope "+
+				"item; we do not batch). Read back what you wrote with get_context.",
+		),
+		mcp.WithString("scope", mcp.Required(),
+			mcp.Description("\"global\", \"flow\", or \"node\"."),
+			mcp.Enum("global", "flow", "node"),
+		),
+		mcp.WithString("id",
+			mcp.Description("Flow tab id (for scope \"flow\") or node id (for scope \"node\"). Required for non-global scopes; ignored for \"global\".")),
+		mcp.WithString("key", mcp.Required(),
+			mcp.Description("The context key to set.")),
+		mcp.WithString("value", mcp.Required(),
+			mcp.Description(`The value to store, as a JSON-encoded string: "42", "\"hello\"", "[1,2,3]", "{\"a\":1}", "true", "null". Anything json.Unmarshal accepts.`)),
+	)
+	s.addWriteTool(setContext, s.handleSetContext)
 
 	// ---- get_flows_state ----------------------------------------------
 	getFlowsState := mcp.NewTool("get_flows_state",
@@ -1368,6 +1403,152 @@ func describeContextTarget(id, key string) string {
 		return fmt.Sprintf(" (key %q)", key)
 	}
 	return ""
+}
+
+// handleSetContext writes to Node-RED context via the managed helper.
+//
+// Flow:
+//  1. Lazy-provision the helper flow tab + inject + function on first
+//     call (see ensureSetContextHelper in setcontext.go).
+//  2. Build a JSON body containing the (scope, key, value) and the
+//     magic __user_inject_props__ field that makes the POST
+//     /inject/:id body become the inject's msg on Node-RED 5.x.
+//  3. POST the body to /inject/<helper-inject-id>. The function node
+//     downstream reads msg and writes to global/flow/context.
+//
+// Scope "node" writes to the helper's function node's own context;
+// scope "flow" writes to the helper's flow context. Both are
+// limitations of how a function node reaches context, not of this
+// tool — the description states this so callers do not assume
+// arbitrary-target writes.
+func (s *Server) handleSetContext(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	scope, err := req.RequireString("scope")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	key, err := req.RequireString("key")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	valueRaw, err := req.RequireString("value")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	id := req.GetString("id", "")
+	slog.Debug("tool: set_context", "scope", scope, "id", id, "key", key)
+
+	// Scope + id shape mirrors get_context so a caller that reads
+	// with one and writes with the other cannot get a silent
+	// mismatch. For "global" the id is ignored by the runtime; for
+	// the other two it is required AND must point at the helper's
+	// own target, because the helper is the only place that can
+	// actually accept the write.
+	switch scope {
+	case "global", "flow", "node":
+		// accepted; the per-scope id check happens below, BEFORE
+		// any server call. We compare against the helper's
+		// deterministic ids (constants), not the runtime-assigned
+		// ones, because the caller never sees the runtime ids —
+		// Node-RED's POST /flow reassigns the tab id and the MCP
+		// keeps the new id internally. Using the constants lets a
+		// caller pre-flight the check without ever provisioning
+		// anything.
+	default:
+		return mcp.NewToolResultError(
+			fmt.Sprintf(`scope must be "global", "flow" or "node", got %q`, scope),
+		), nil
+	}
+
+	// Per-scope id check (run before any server call so a bad id
+	// surfaces a clean error without provisioning the helper).
+	switch scope {
+	case "flow":
+		if id == "" {
+			return mcp.NewToolResultError(fmt.Sprintf(
+				`scope "flow" requires an id; the helper can only write to its own flow context, so the id must be the helper flow id %q`,
+				setContextHelperFlowID,
+			)), nil
+		}
+		if id != setContextHelperFlowID {
+			return mcp.NewToolResultError(fmt.Sprintf(
+				`scope "flow" can only target the helper's own flow context, so the id must be %q (got %q); the Node-RED admin API exposes no way to write another tab's flow context from a single function node`,
+				setContextHelperFlowID, id,
+			)), nil
+		}
+	case "node":
+		if id == "" {
+			return mcp.NewToolResultError(fmt.Sprintf(
+				`scope "node" requires an id; the helper can only write to its function node's own context, so the id must be the helper function id %q`,
+				setContextHelperFunctionID,
+			)), nil
+		}
+		if id != setContextHelperFunctionID {
+			return mcp.NewToolResultError(fmt.Sprintf(
+				`scope "node" can only target the helper's function node's own context, so the id must be %q (got %q)`,
+				setContextHelperFunctionID, id,
+			)), nil
+		}
+	}
+
+	// value arrives as a JSON-encoded string. json.Unmarshal into
+	// any is the most permissive parse: a string, number, bool,
+	// null, object, or array all decode into the corresponding
+	// interface{} slot, and we re-marshal the same value back when
+	// building the inject body so the runtime sees the same shape.
+	var value any
+	if err := json.Unmarshal([]byte(valueRaw), &value); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf(
+			"value is not valid JSON: %v (pass it as a JSON-encoded string, e.g. \"42\" or \"\\\"hello\\\"\")",
+			err,
+		)), nil
+	}
+
+	helper, err := s.ensureSetContextHelper(ctx)
+	if err != nil {
+		slog.Error("set_context: provisioning helper failed", "error", err)
+		return mcp.NewToolResultError(fmt.Sprintf("provisioning set_context helper: %v", err)), nil
+	}
+
+	// Build the inject body. The shape is:
+	//   { "scope": "...", "key": "...", "value": <any>, "id": "...",
+	//     "__user_inject_props__": [] }
+	// The first four become the inject's msg; the last one is the
+	// flag that makes the body actually arrive as msg (see
+	// InjectNodeWithBody docs and the 20-inject.js handler).
+	body := map[string]any{
+		"scope":                 scope,
+		"key":                   key,
+		"value":                 value,
+		"id":                    id,
+		"__user_inject_props__": []any{},
+	}
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("encoding set_context body: %v", err)), nil
+	}
+
+	if err := s.nrClient.InjectNodeWithBody(ctx, helper.injectID, bodyBytes); err != nil {
+		slog.Error("set_context failed", "error", err, "scope", scope, "id", id, "key", key)
+		return mcp.NewToolResultError(fmt.Sprintf("dispatching set_context: %v", err)), nil
+	}
+
+	return mcp.NewToolResultText(fmt.Sprintf(
+		"Set context %s key %q to %s (via helper flow %q, inject %q). "+
+			"Read it back with get_context; the helper is reused, not re-created.",
+		scope, key, prettyJSONValue(value), helper.flowID, helper.injectID,
+	)), nil
+}
+
+// prettyJSONValue renders a decoded value the way get_context shows one:
+// as JSON. Used in the success reply so the caller sees exactly what
+// was written (an int, a string, an object) instead of having to parse
+// prose.
+func prettyJSONValue(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprintf("%v", v)
+	}
+	return string(b)
 }
 
 // handleGetFlowsState returns the current runtime state of Node-RED.
