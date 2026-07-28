@@ -3,6 +3,7 @@ package nodered
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -82,21 +83,34 @@ func TestListFlows_ServerError(t *testing.T) {
 	}
 }
 
+// TestInjectNode covers the happy path: a known inject node is fired.
+// Since issue #43, InjectNode first looks up the node's type via
+// GET /flows, so the test mock answers both /flows and /inject/:id.
 func TestInjectNode(t *testing.T) {
-	var called string
+	var injectCalled bool
 	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		called = r.URL.Path
-		if r.Method != "POST" {
-			t.Errorf("expected POST, got %s", r.Method)
+		switch r.URL.Path {
+		case "/flows":
+			_, _ = w.Write([]byte(`[
+				{"id":"n1","type":"inject","z":"tab1","name":"tick"},
+				{"id":"tab1","type":"tab","label":"Home"}
+			]`))
+		case "/inject/n1":
+			injectCalled = true
+			if r.Method != "POST" {
+				t.Errorf("expected POST, got %s", r.Method)
+			}
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
-		w.WriteHeader(http.StatusOK)
 	})
 
 	if err := c.InjectNode(context.Background(), "n1"); err != nil {
 		t.Fatalf("InjectNode: %v", err)
 	}
-	if called != "/inject/n1" {
-		t.Errorf("expected path /inject/n1, got %s", called)
+	if !injectCalled {
+		t.Error("expected POST /inject/n1 to be called")
 	}
 }
 
@@ -106,6 +120,97 @@ func TestInjectNode_EmptyID(t *testing.T) {
 	})
 	if err := c.InjectNode(context.Background(), ""); err == nil {
 		t.Fatal("expected validation error, got nil")
+	}
+}
+
+// TestInjectNode_RejectsNonInjectType is the regression test for
+// issue #43 (audit of v0.5.12, 28 Jul 2026): the MCP used to return
+// success for any node id that existed, even when the node was not an
+// inject. Now InjectNode refuses and surfaces the actual type.
+func TestInjectNode_RejectsNonInjectType(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/flows":
+			_, _ = w.Write([]byte(`[
+				{"id":"aud_comment","type":"comment","z":"tab1","info":"staging"},
+				{"id":"tab1","type":"tab","label":"Home"}
+			]`))
+		case "/inject/aud_comment":
+			t.Error("POST /inject/aud_comment must not be called for a non-inject node")
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	})
+
+	err := c.InjectNode(context.Background(), "aud_comment")
+	if err == nil {
+		t.Fatal("expected error for non-inject node, got nil")
+	}
+	if !strings.Contains(err.Error(), "comment") {
+		t.Errorf("error should name the actual type, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "aud_comment") {
+		t.Errorf("error should name the node id, got %v", err)
+	}
+}
+
+// TestInjectNode_UnknownIDPassesThrough covers the audit's
+// observation that the runtime's HTTP /inject/:id endpoint already
+// returns 404 for unknown ids — so the helper passes through to the
+// runtime when the node is missing in /flows, and the operator sees
+// the runtime's 404 (not a synthetic "wrong type" error).
+func TestInjectNode_UnknownIDPassesThrough(t *testing.T) {
+	var injectCalled bool
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/flows":
+			_, _ = w.Write([]byte(`[
+				{"id":"n1","type":"inject","z":"tab1"},
+				{"id":"tab1","type":"tab","label":"Home"}
+			]`))
+		case "/inject/missing":
+			injectCalled = true
+			http.Error(w, "Not Found", http.StatusNotFound)
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	})
+
+	err := c.InjectNode(context.Background(), "missing")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !injectCalled {
+		t.Error("expected POST /inject/missing to be called")
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
+		t.Errorf("expected *APIError 404 from runtime, got %v", err)
+	}
+}
+
+// TestInjectNode_LookupFails_SurfacesLookupError covers the
+// "fail-loud" branch: when GET /flows errors out, we must NOT silently
+// fall back to /inject/:id (that would re-introduce the v0.5.12 false
+// positive for any transient runtime blip).
+func TestInjectNode_LookupFails_SurfacesLookupError(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/flows":
+			http.Error(w, "boom", http.StatusInternalServerError)
+		case "/inject/n1":
+			t.Error("POST /inject/n1 must not be called when type lookup fails")
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	})
+
+	err := c.InjectNode(context.Background(), "n1")
+	if err == nil {
+		t.Fatal("expected error from failed type lookup, got nil")
+	}
+	if !strings.Contains(err.Error(), "verifying inject node type") {
+		t.Errorf("error should explain the lookup step, got %v", err)
 	}
 }
 
