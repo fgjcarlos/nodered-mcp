@@ -221,6 +221,55 @@ func (s *Server) registerTools() {
 	)
 	s.addWriteTool(deleteFlow, s.handleDeleteFlow)
 
+	// ---- validate_flow -------------------------------------------------
+	// validate_flow runs the same structural checks the write path applies
+	// (dangling wires, duplicate / missing ids, missing x/y) against an
+	// arbitrary flow document, WITHOUT writing it. The caller formats the
+	// returned issues list so a model can see "would this break?" before
+	// committing. Read-only: no HTTP, no state change.
+	validateFlow := mcp.NewTool("validate_flow",
+		mcp.WithDescription(
+			"Run the structural checks the write path applies (dangling wires, "+
+				"duplicate or missing ids, missing x/y canvas coordinates) against a "+
+				"flow document WITHOUT writing it. Returns every issue found so the "+
+				"caller can fix them all at once, rather than discover one per failed "+
+				"deploy. Read-only — nothing is sent to the runtime.",
+		),
+		mcp.WithString("flow", mcp.Required(),
+			mcp.Description("The flow document as a JSON string (same shape as create_flow).")),
+	)
+	s.addReadTool(validateFlow, s.handleValidateFlow)
+
+	// ---- disable_flow / enable_flow ------------------------------------
+	// Flips the "disabled" flag on an existing flow tab via the same
+	// editFlow read-modify-write path the granular node tools use. Goes
+	// through snapshot + wire validation + writeMu, so concurrent edits
+	// cannot race a disable against a node mutation. Both are write
+	// tools: disabling a tab stops it from running, and Node-RED's editor
+	// does not surface any undo.
+	disableFlow := mcp.NewTool("disable_flow",
+		mcp.WithDescription(
+			"Stop a flow tab from running without deleting it. Flips the tab's "+
+				"\"disabled\" flag via PUT /flow/:id; a backup is taken first. The tab "+
+				"stays in the editor and can be re-enabled with enable_flow.",
+		),
+		mcp.WithString("id", mcp.Required(),
+			mcp.Description("The flow tab ID to disable (as shown by list_flows).")),
+	)
+	s.addWriteTool(disableFlow, s.handleDisableFlow)
+
+	enableFlow := mcp.NewTool("enable_flow",
+		mcp.WithDescription(
+			"Re-enable a previously disabled flow tab. Flips the tab's "+
+				"\"disabled\" flag back to false via PUT /flow/:id; a backup is taken "+
+				"first. The tab starts running again with whatever nodes were already "+
+				"on it — no redeploy needed.",
+		),
+		mcp.WithString("id", mcp.Required(),
+			mcp.Description("The flow tab ID to enable (as shown by list_flows).")),
+	)
+	s.addWriteTool(enableFlow, s.handleEnableFlow)
+
 	// ---- inject_node ---------------------------------------------------
 	injectNode := mcp.NewTool("inject_node",
 		mcp.WithDescription(
@@ -837,6 +886,69 @@ func (s *Server) handleDeleteFlow(ctx context.Context, req mcp.CallToolRequest) 
 		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Flow %q deleted (a backup was taken first).", id)), nil
+}
+
+// handleValidateFlow runs the structural checks against an in-memory flow
+// document. It does not contact the runtime. The "flow" argument accepts
+// either a JSON-encoded string or a flow object directly, matching the
+// shape create_flow / update_flow accept — so a model can copy the same
+// payload it would have written, run validate_flow over it, and only call
+// the write tool after the issue list comes back empty.
+func (s *Server) handleValidateFlow(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	raw, err := flowParam(req, "flow")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	slog.Debug("tool: validate_flow")
+
+	issues := nodered.ValidateFlow(nodered.RawFlow(raw))
+	resp := struct {
+		OK     bool                `json:"ok"`
+		Issues []nodered.FlowIssue `json:"issues"`
+	}{
+		OK:     len(issues) == 0,
+		Issues: issues,
+	}
+	out, err := json.MarshalIndent(resp, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("encoding response: %v", err)), nil
+	}
+	if resp.OK {
+		return mcp.NewToolResultText(fmt.Sprintf("ok — 0 issues\n\n```json\n%s\n```", string(out))), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf(
+		"%d issue(s) found:\n\n```json\n%s\n```", len(issues), string(out),
+	)), nil
+}
+
+// handleDisableFlow stops a flow tab from running without deleting it.
+func (s *Server) handleDisableFlow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	id, err := req.RequireString("id")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	slog.Debug("tool: disable_flow", "id", id)
+
+	if err := s.nrClient.SetFlowDisabled(ctx, id, true); err != nil {
+		slog.Error("disable_flow failed", "error", err, "id", id)
+		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("Flow %q disabled (a backup was taken first).", id)), nil
+}
+
+// handleEnableFlow re-enables a previously disabled flow tab.
+func (s *Server) handleEnableFlow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	id, err := req.RequireString("id")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	slog.Debug("tool: enable_flow", "id", id)
+
+	if err := s.nrClient.SetFlowDisabled(ctx, id, false); err != nil {
+		slog.Error("enable_flow failed", "error", err, "id", id)
+		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("Flow %q enabled (a backup was taken first).", id)), nil
 }
 
 // handleInjectNode triggers an inject node.

@@ -320,40 +320,63 @@ func FlowTabCount(raw RawFlow) int {
 	return n
 }
 
-// validateFlowWires checks that every wire in a flow document points at a node
-// that exists within the same document. Node-RED accepts dangling wire targets
-// silently, leaving broken connections — this catches an LLM referencing a
-// node that isn't there before the write reaches the runtime.
+// SetFlowDisabled flips the "disabled" flag on an existing flow tab. The
+// write goes through the same editFlow read-modify-write path as the
+// granular node tools, so the same guardrails apply (wire validation,
+// snapshot backup, write-mutex). The only field changed on the document
+// is "disabled"; every other byte — including nodes, configs, env, and
+// unknown fields — round-trips untouched.
 //
-// It expects a single flow-tab object ({"label":..,"nodes":[..]}), the shape
-// used by POST /flow and PUT /flow/:id. Config-node references (properties like
-// an MQTT node's "broker") are NOT validated: those can legitimately live
-// outside a single flow document.
-func validateFlowWires(raw RawFlow) error {
-	var doc struct {
-		Nodes []struct {
-			ID    string     `json:"id"`
-			Type  string     `json:"type"`
-			Wires [][]string `json:"wires"`
-		} `json:"nodes"`
-	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return fmt.Errorf("not a valid flow document: %w", err)
-	}
+// Setting disabled=true stops the tab from running; the runtime still
+// holds the parsed flow in memory, so flipping it back to false does not
+// require a deploy. Node-RED's editor exposes the same toggle as the
+// checkbox next to each tab in the sidebar.
+func (c *Client) SetFlowDisabled(ctx context.Context, id string, disabled bool) error {
+	return c.editFlow(ctx, id, func(f RawFlow) (RawFlow, error) {
+		return SetDisabledInFlow(f, disabled)
+	})
+}
 
-	ids := make(map[string]bool, len(doc.Nodes))
-	for _, n := range doc.Nodes {
-		if n.ID != "" {
-			ids[n.ID] = true
-		}
+// SetDisabledInFlow flips the "disabled" key on a flow document, returning
+// the updated document. The document must be a single tab (the shape used
+// by POST /flow and PUT /flow/:id).
+//
+// The "disabled" key is encoded as JSON `true` or `false`. The output is
+// always explicit: writing the empty/default value is not free — an operator
+// who toggles the flag once does not want a stray schema change later.
+func SetDisabledInFlow(flow RawFlow, disabled bool) (RawFlow, error) {
+	doc, err := decodeFlow(flow)
+	if err != nil {
+		return nil, err
 	}
-	for _, n := range doc.Nodes {
-		for _, port := range n.Wires {
-			for _, target := range port {
-				if !ids[target] {
-					return fmt.Errorf("node %q (%s) wires to unknown node %q", n.ID, n.Type, target)
-				}
-			}
+	if doc.Extra == nil {
+		doc.Extra = map[string]json.RawMessage{}
+	}
+	encoded, err := json.Marshal(disabled)
+	if err != nil {
+		return nil, fmt.Errorf("encoding disabled flag: %w", err)
+	}
+	doc.Extra["disabled"] = encoded
+	return doc.encode()
+}
+
+// validateFlowWires is the write-path guard: it returns the first structural
+// issue that would cause the runtime to behave unexpectedly, so the write
+// is refused up front. The full list of issues is reported by ValidateFlow
+// for callers that want to show every problem at once (the validate_flow
+// tool). Both share the same underlying rules — only the output shape
+// differs.
+//
+// A document the runtime cannot parse at all is also refused; the prior
+// implementation returned that error directly from json.Unmarshal.
+func validateFlowWires(raw RawFlow) error {
+	issues := ValidateFlow(raw)
+	for _, issue := range issues {
+		switch issue.Kind {
+		case IssueDanglingWire:
+			return fmt.Errorf("node %q wires to unknown node %q", issue.NodeID, issue.Target)
+		case "invalid_document":
+			return errors.New(issue.Message)
 		}
 	}
 	return nil

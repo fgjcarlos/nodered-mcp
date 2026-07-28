@@ -44,6 +44,9 @@ La versión en inglés de este documento está en [`README.md`](./README.md).
 | `update_node` | `PUT /flow/:id` | write | Cambiar propiedades de un nodo, fusionando en vez de reemplazar |
 | `delete_node` | `PUT /flow/:id` | write | Eliminar un nodo y los wires que apuntan a él |
 | `connect_nodes` | `PUT /flow/:id` | write | Conectar la salida de un nodo con otro |
+| `validate_flow` | local | read | Ejecuta en seco las comprobaciones estructurales (wires colgantes, ids duplicados/faltantes, x/y faltantes) sobre un documento de flow — devuelve la lista de problemas sin escribir |
+| `disable_flow` | `PUT /flow/:id` | write | Detener una pestaña sin eliminarla |
+| `enable_flow` | `PUT /flow/:id` | write | Reactivar una pestaña previamente desactivada |
 | `inject_node` | `POST /inject/:id` | action | Disparar un nodo inject bajo demanda |
 
 ### Palette
