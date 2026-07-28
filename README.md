@@ -47,7 +47,7 @@ A Spanish version of this document is available at [`README.es.md`](./README.es.
 | `validate_flow` | local | read | Dry-run the structural checks (dangling wires, duplicate / missing ids, missing x/y) against a flow document — returns the list of issues without writing |
 | `disable_flow` | `PUT /flow/:id` | write | Stop a flow tab from running without deleting it |
 | `enable_flow` | `PUT /flow/:id` | write | Re-enable a previously disabled flow tab |
-| `inject_node` | `POST /inject/:id` | action | Fire an inject node on demand |
+| `inject_node` | `POST /inject/:id` | action | Fire an inject node on demand. Optional `payload` (any JSON value) overrides `msg.payload` for that one call — useful for "what if msg.payload = X?" edge cases without redeploying the node (requires Node-RED 5.x) |
 
 ### Palette
 
