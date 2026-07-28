@@ -484,3 +484,55 @@ a quien los ignore:
 - **Configurar `MCP_HTTP_TOKEN` y `MCP_OAUTH_ISSUER` a la vez** es error de
   configuración y el servidor rehúsa arrancar. No es un runtime check — es
   una validación en el arranque.
+
+---
+
+## 11. Estado de auditoría v0.5.12 (28 Jul 2026)
+
+Auditoría del MCP server para Node-RED, ejecutada el 2026-07-28 contra
+`fgjcarlos/nodered-mcp v0.5.12` en una instancia real de Node-RED 5.0.0
+(52 nodos, 3 tabs, debug stream off). La instancia se restauró a su
+estado original al final. Issue umbrella cerrada: #41.
+
+### 22 tools auditadas
+
+Las 14 de lectura + 8 de escritura. Cada finding con bug tiene su issue
+hija: #42 (timeout/retry), #43 (`inject_node` false-positive), #44
+(`connect_nodes` / `get_context` cuelgan), #45 (`list_nodes` sin
+summary), #46 (descripciones y precondición `runtimeState.enabled`), #47
+(`get_debug_messages` off by default), #48 (`get_node_info` sin latest
+version). La lista exacta de las 22 ejercitadas no se preservó en
+`#41`; se reconstruye desde las issues hijas.
+
+### 7 tools NO auditadas
+
+Por decisión del auditor para no tocar un servidor OPC UA en producción.
+Reproducción sugerida: container descartable de Node-RED 5.0.0 sin
+módulos de OPC UA / species API, o un `nodered-test` con flows
+sintéticos. La cobertura debería aterrizar en una CI job por release
+(sigue como follow-up de #49, fuera de alcance de esta sección).
+
+| Tool | HTTP | Tipo | Razón del skip | Repro sugerido |
+|---|---|---|---|---|
+| `set_flows` | `POST /flows` | write | Reemplaza toda la config de flows | Container limpio, flow de prueba, verificar que el backup se crea y la config se reemplaza |
+| `restore_backup` | `POST /flows` | write | Restaura una snapshot local | Backup dummy creado con `list_backups`, verificar `flows.json` post-restore |
+| `set_flows_state` | `POST /flows/state` | write | start/stop del runtime | Container con `runtimeState.enabled = true`, observar `get_flows_state` antes/después |
+| `install_node` | `POST /nodes` | write | `npm install`, puede tardar minutos | Container con red, verificar que el módulo aparece en `list_nodes` |
+| `uninstall_node` | `DELETE /nodes/:module` | write | Remueve del runtime | Instalar primero, después desinstalar, verificar ausencia en `list_nodes` |
+| `enable_node` | `PUT /nodes/:module/:set` | write | Toggle de carga del módulo | Módulo instalado pero deshabilitado, habilitar, verificar `loaded: true` |
+| `disable_node` | `PUT /nodes/:module/:set` | write | Toggle de carga del módulo | Módulo cargado, deshabilitar, verificar `loaded: false` |
+
+### Caveats
+
+- El log exacto de cuáles 22 tools se ejercitaron no se preservó en `#41`.
+  Futuras auditorías deberían adjuntar el run-log al cierre de la
+  umbrella para que esta tabla sea rellenable automáticamente.
+- El `✅` en las tablas de §5 marca "implementado y en verde" — la
+  columna de audit status es ortogonal. Una herramienta puede ser `✅`
+  en §5 y "no auditada" aquí.
+- El instance auditado corría con `adminAuth: UNSET` (decisión del
+  operador, no del MCP). Si un futuro audit corre con admin auth activo,
+  las tools de escritura pueden tener un comportamiento distinto en los
+  bordes de permisos.
+
+Refs: #41, #49.
