@@ -348,10 +348,43 @@ func (s *Server) Run() error {
 // gate that decides whether the listen address is reachable from outside —
 // RunHTTP trusts it and never re-decides.
 func (s *Server) RunHTTP(addr, token string, verifier *oauth.Verifier) error {
+	// signal.NotifyContext makes shutdown "send SIGINT/SIGTERM" the
+	// production contract. Tests inject a cancelable context instead
+	// so the smoke can drive Shutdown() programmatically.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return s.runHTTP(ctx, addr, token, verifier)
+}
+
+// runHTTP is the testable inner loop. It owns the server lifecycle but
+// not the shutdown signal — that decision lives in RunHTTP, where the
+// signal handling is also documented. The split keeps the smoke test
+// honest (real http.Server, real mcp-go, real timeout configuration)
+// without giving up the operator-facing signal contract.
+func (s *Server) runHTTP(ctx context.Context, addr, token string, verifier *oauth.Verifier) error {
 	// The http.Server is created first and handed to mcp-go, so the MCP
 	// handler can be wrapped in auth while mcp-go keeps owning the listener
 	// lifecycle — including closing sessions on shutdown.
-	httpServer := &http.Server{}
+	//
+	// Timeouts: ReadHeaderTimeout closes the Slowloris window. ReadTimeout
+	// and IdleTimeout cap stuck connections. WriteTimeout is deliberately
+	// left at zero because mcp-go's Streamable HTTP transport serves
+	// long-lived SSE responses (text/event-stream via http.Flusher); a
+	// global WriteTimeout would kill the SSE stream before it has a chance
+	// to deliver. mcp-go v0.57.0 (server/streamable_http_handle.go:120)
+	// checks for Flusher support and 405s if the writer is non-streaming,
+	// so the underlying writer on /mcp is SSE-capable. Tightening
+	// WriteTimeout would require a second http.Server with its own mux
+	// around the SSE path; that's a larger refactor and out of scope here.
+	//
+	// ponytail: WriteTimeout=0 is the intentional ceiling for SSE; a
+	// per-handler deadline is the upgrade path if a future tool ever
+	// produces runaway writes.
+	httpServer := &http.Server{
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 	mcpHTTP := server.NewStreamableHTTPServer(s.mcpServer,
 		server.WithStreamableHTTPServer(httpServer))
 
@@ -382,8 +415,6 @@ func (s *Server) RunHTTP(addr, token string, verifier *oauth.Verifier) error {
 
 	httpServer.Handler = mux
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	s.startDebugTail(ctx)
 
 	errCh := make(chan error, 1)
