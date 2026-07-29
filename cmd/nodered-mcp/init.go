@@ -173,18 +173,76 @@ func readJSONObject(path string) (map[string]any, error) {
 
 // writeJSONObject writes m as indented JSON, creating parent dirs and backing
 // up any existing file to path+".bak" first.
+//
+// Safety invariants enforced here (issue #70):
+//   - The parent directory is created with owner-only permissions.
+//   - A failed backup of the existing config is an error: we never
+//     silently overwrite the user's config when a backup could not be
+//     taken.
+//   - The new file is written atomically via atomicWriteFile: a
+//     partially-written config cannot replace a valid one if the
+//     process is killed mid-write.
+//   - The final file is owner-only (0o600). Generated client config
+//     may carry NODERED_TOKEN.
 func writeJSONObject(path string, m map[string]any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	if data, err := os.ReadFile(path); err == nil {
-		_ = os.WriteFile(path+".bak", data, 0o644)
+		if err := atomicWriteFile(path+".bak", data, 0o600); err != nil {
+			return fmt.Errorf("backup existing config to %q: %w", path+".bak", err)
+		}
 	}
 	out, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(out, '\n'), 0o644)
+	return atomicWriteFile(path, append(out, '\n'), 0o600)
+}
+
+// atomicWriteFile writes data to path atomically: it stages a
+// sibling temp file in the same directory, fsyncs it, and renames
+// it over the target. A failure at any step leaves the original
+// file untouched (or removes the staged temp on rename failure).
+//
+// Same-directory staging guarantees the rename is atomic on the
+// same filesystem (POSIX rename(2)). The temp file is created with
+// 0o600 so a process death between CreateTemp and rename cannot
+// leave a world-readable copy on disk.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpName) }
+
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		cleanup()
+		return err
+	}
+	_ = os.Chmod(path, perm)
+	return nil
 }
 
 // ask prints a prompt to stderr and reads one line; empty input keeps def.

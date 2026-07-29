@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -109,5 +110,50 @@ func TestRestoreFlows_RejectsGarbageBackup(t *testing.T) {
 	c, _ := NewClient(Options{BaseURL: "http://x", BackupDir: t.TempDir()})
 	if err := c.RestoreFlows(context.Background(), RawFlow(`"just a string"`)); err == nil {
 		t.Fatal("expected RestoreFlows to reject a backup with no flow array")
+	}
+}
+
+// TestSnapshotFlows_FileAndDirModeOwnerOnly covers the third invariant
+// of #70: the backup file is owner-only (0o600) and, when the
+// directory is created, it is owner-only (0o700). Skipped on Windows
+// where the POSIX mode bits are not honoured the same way.
+func TestSnapshotFlows_FileAndDirModeOwnerOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows mode bits differ; permission tests run on Unix only")
+	}
+	dir := t.TempDir()
+	// Place the backup dir one level down so the test exercises
+	// MkdirAll and the file write together, not just the write.
+	backupDir := filepath.Join(dir, "backups")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(srv.Close)
+	c, _ := NewClient(Options{BaseURL: srv.URL, Token: "t", BackupDir: backupDir})
+
+	if _, err := c.snapshotFlows(context.Background()); err != nil {
+		t.Fatalf("snapshotFlows: %v", err)
+	}
+
+	dirInfo, err := os.Stat(backupDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dp := dirInfo.Mode().Perm(); dp != 0o700 {
+		t.Errorf("backup dir perm: expected 0o700, got %04o", dp)
+	}
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 backup, got %d", len(entries))
+	}
+	info, err := os.Stat(filepath.Join(backupDir, entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fp := info.Mode().Perm(); fp != 0o600 {
+		t.Errorf("backup file perm: expected 0o600, got %04o", fp)
 	}
 }
