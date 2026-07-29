@@ -27,7 +27,7 @@ La versión en inglés de este documento está en [`README.md`](./README.md).
 
 ## Capacidades
 
-29 tools, 3 resources y 2 prompts. Las tools se clasifican por riesgo: **read** no tiene efectos secundarios, **write** modifica configuración persistida y realiza un backup previo, **action** tiene un efecto en el runtime que no se persiste.
+37 tools, 3 resources y 2 prompts. Las tools se clasifican por riesgo: **read** no tiene efectos secundarios, **write** modifica configuración persistida y realiza un backup previo, **action** tiene un efecto en el runtime que no se persiste.
 
 ### Flows
 
@@ -48,6 +48,8 @@ La versión en inglés de este documento está en [`README.md`](./README.md).
 | `disable_flow` | `PUT /flow/:id` | write | Detener una pestaña sin eliminarla |
 | `enable_flow` | `PUT /flow/:id` | write | Reactivar una pestaña previamente desactivada |
 | `inject_node` | `POST /inject/:id` | action | Disparar un nodo inject bajo demanda. `payload` opcional (cualquier valor JSON) sobrescribe `msg.payload` para esa llamada — útil para "¿qué pasa si msg.payload = X?" sin redesplegar el nodo (requiere Node-RED 5.x) |
+| `export_flow` | `GET /flow/:id` | read | Exportar una pestaña como documento JSON, con sus nodos y wires |
+| `import_flow` | `POST /flow` | write | Importar un documento de flow producido por `export_flow` (o escrito a mano) en una pestaña nueva |
 
 ### Palette
 
@@ -69,8 +71,11 @@ La versión en inglés de este documento está en [`README.md`](./README.md).
 | `get_diagnostics` | `GET /diagnostics` | read | Versión de Node.js y memoria, sistema operativo, detección de contenedor |
 | `get_flows_state` | `GET /flows/state` | read | Si el runtime está arrancado o detenido |
 | `get_context` | `GET /context/...` | read | Estado que los flows conservan entre mensajes |
+| `set_context` | `POST /context/...` | write | Inyectar un valor en el context store de los flows, válido hasta el siguiente deploy |
 | `get_debug_messages` | WebSocket `/comms` | read | Lo que los flows produjeron realmente |
 | `list_plugins` | `GET /plugins` | read | Plugins de editor cargados por el runtime |
+| `get_node_status` | WebSocket `/comms` | read | Eventos de estado de nodos en vivo (offline, disconnect, connected) desde el runtime |
+| `get_runtime_logs` | journal / stream | read | Logs recientes del runtime Node-RED: stdout, stderr y la superficie de log del editor |
 | `set_flows_state` | `POST /flows/state` | write | Arrancar o detener el runtime (requiere `runtimeState.enabled` en los settings de Node-RED) |
 | `list_backups` | local | read | Snapshots guardados, del más reciente al más antiguo |
 | `diff_flows` | local + `GET /flows` | read | Qué cambió entre un snapshot y ahora |
@@ -198,7 +203,7 @@ Los resources y los prompts siguen disponibles: los tres resources son vistas de
 
 | Modo | Tools | Resources | Prompts |
 |---|---|---|---|
-| por defecto | 29 | 3 | 2 |
+| por defecto | 37 | 3 | 2 |
 | `--read-only` | 14 | 3 | 2 |
 
 ## Requisitos
@@ -475,7 +480,7 @@ Para la variante de transporte HTTP, usa `type: "remote"` con `url` y `headers`:
 }
 ```
 
-Reinicia OpenCode tras editar. Las 29 tools deberían aparecer bajo el servidor `nodered`.
+Reinicia OpenCode tras editar. Las 37 tools deberían aparecer bajo el servidor `nodered`.
 
 ### Pi (pi-mono)
 
@@ -505,7 +510,7 @@ Después escribe `~/.pi/agent/mcp.json` (global) o `./.pi/mcp.json` (local del p
 
 `lifecycle: "keep-alive"` es lo recomendado para nodered-mcp: reconecta automáticamente tras un reinicio de Node-RED, lo cual importa porque Node-RED se reinicia durante los despliegues de flows. El `lazy` por defecto solo conecta en la primera llamada a una tool y desconecta tras inactividad, lo que puede enmascarar problemas de conexión.
 
-Dentro de Pi, ejecuta `/reload` para recargar la configuración, luego `mcp({ connect: "nodered" })` para verificar la conexión y `mcp({ server: "nodered" })` para listar las 29 tools.
+Dentro de Pi, ejecuta `/reload` para recargar la configuración, luego `mcp({ connect: "nodered" })` para verificar la conexión y `mcp({ server: "nodered" })` para listar las 37 tools.
 
 Para la variante de transporte HTTP:
 
@@ -538,7 +543,7 @@ Arranca el servidor una vez y apunta el cliente al endpoint en lugar de a un com
 
 Omite el bloque `headers` solo si el servidor escucha en loopback y corre sin token.
 
-Reinicia el cliente tras conectar. Deberían aparecer las 29 tools.
+Reinicia el cliente tras conectar. Deberían aparecer las 37 tools.
 
 ## Resolución de problemas
 
@@ -603,7 +608,7 @@ Las tareas pendientes se registran en [`issues/`](./issues/README.md) hasta que 
 | v0.2 | Transporte streamable HTTP, CLI con flags y subcomandos | Publicada |
 | v0.3 | Gestión de la palette: instalar, desinstalar, activar, desactivar | Publicada |
 | v0.4 | `search_nodes`, ajustes y estado del runtime — 19 tools, 3 resources, 2 prompts | Publicada |
-| v0.5 | Modo de solo lectura, lecturas eficientes en contexto, diagnóstico, contexto, stream de debug, edición granular de nodos, `diff_flows`, autenticación bearer HTTP — 29 tools | Publicada |
+| v0.5 | Modo de solo lectura, lecturas eficientes en contexto, diagnóstico, contexto, stream de debug, edición granular de nodos, `diff_flows`, autenticación bearer HTTP — 37 tools | Publicada |
 | v0.6 | Resource Server OAuth 2.1 para conectores web alojados | Publicada |
 | v0.7 | Caché local de consultas | Prevista |
 

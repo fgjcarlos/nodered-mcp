@@ -27,7 +27,7 @@ A Spanish version of this document is available at [`README.es.md`](./README.es.
 
 ## Capabilities
 
-29 tools, 3 resources, and 2 prompts. Tools are classified by risk: **read** is side-effect free, **write** mutates persisted configuration and takes a backup first, **action** has a runtime side effect that is not persisted.
+37 tools, 3 resources, and 2 prompts. Tools are classified by risk: **read** is side-effect free, **write** mutates persisted configuration and takes a backup first, **action** has a runtime side effect that is not persisted.
 
 ### Flows
 
@@ -48,6 +48,8 @@ A Spanish version of this document is available at [`README.es.md`](./README.es.
 | `disable_flow` | `PUT /flow/:id` | write | Stop a flow tab from running without deleting it |
 | `enable_flow` | `PUT /flow/:id` | write | Re-enable a previously disabled flow tab |
 | `inject_node` | `POST /inject/:id` | action | Fire an inject node on demand. Optional `payload` (any JSON value) overrides `msg.payload` for that one call — useful for "what if msg.payload = X?" edge cases without redeploying the node (requires Node-RED 5.x) |
+| `export_flow` | `GET /flow/:id` | read | Export a single flow tab as a JSON document, including its nodes and wires |
+| `import_flow` | `POST /flow` | write | Import a flow document previously produced by `export_flow` (or hand-written) into a new tab |
 
 ### Palette
 
@@ -69,8 +71,11 @@ A Spanish version of this document is available at [`README.es.md`](./README.es.
 | `get_diagnostics` | `GET /diagnostics` | read | Node.js version and memory, OS, container detection |
 | `get_flows_state` | `GET /flows/state` | read | Whether the runtime is started or stopped |
 | `get_context` | `GET /context/...` | read | State the flows keep between messages |
+| `set_context` | `POST /context/...` | write | Inject a value into the flows' context store, valid until the next deploy |
 | `get_debug_messages` | `/comms` WebSocket | read | Output the flows actually produced |
 | `list_plugins` | `GET /plugins` | read | Editor plugins loaded by the runtime |
+| `get_node_status` | `/comms` WebSocket | read | Live node status events (offline, disconnect, connected) streamed from the runtime |
+| `get_runtime_logs` | journal / stream | read | Recent Node-RED runtime logs: stdout, stderr, and the editor's own log surface |
 | `set_flows_state` | `POST /flows/state` | write | Start or stop the runtime (requires `runtimeState.enabled` in Node-RED settings) |
 | `list_backups` | local | read | Saved flow snapshots, newest first |
 | `diff_flows` | local + `GET /flows` | read | What changed between a snapshot and now |
@@ -213,7 +218,7 @@ Resources and prompts remain available: all three resources are read-only views,
 
 | Mode | Tools | Resources | Prompts |
 |---|---|---|---|
-| default | 29 | 3 | 2 |
+| default | 37 | 3 | 2 |
 | `--read-only` | 14 | 3 | 2 |
 
 ## Requirements
@@ -490,7 +495,7 @@ For the HTTP transport variant, use `type: "remote"` with `url` and `headers`:
 }
 ```
 
-Restart OpenCode after editing. All 29 tools should appear under the `nodered` server.
+Restart OpenCode after editing. All 37 tools should appear under the `nodered` server.
 
 ### Pi (pi-mono)
 
@@ -520,7 +525,7 @@ Then write `~/.pi/agent/mcp.json` (global) or `./.pi/mcp.json` (project-local). 
 
 `lifecycle: "keep-alive"` is recommended for nodered-mcp: it reconnects automatically after a Node-RED restart, which matters because Node-RED bounces during flow deployments. The default `lazy` only connects on the first tool call and disconnects after idle, which can mask connection issues.
 
-Inside Pi, run `/reload` to pick up the config, then `mcp({ connect: "nodered" })` to verify the connection and `mcp({ server: "nodered" })` to list the 29 tools.
+Inside Pi, run `/reload` to pick up the config, then `mcp({ connect: "nodered" })` to verify the connection and `mcp({ server: "nodered" })` to list the 37 tools.
 
 For the HTTP transport variant:
 
@@ -553,7 +558,7 @@ Start the server once, then point the client at the endpoint rather than at a co
 
 Drop the `headers` block only if the server is bound to loopback and running without a token.
 
-Restart the client after connecting. All 29 tools should appear.
+Restart the client after connecting. All 37 tools should appear.
 
 ### OAuth (alternative to the bearer token)
 
@@ -633,7 +638,7 @@ Work items are tracked in [`issues/`](./issues/README.md) until the repository m
 | v0.2 | Streamable HTTP transport, CLI with flags and subcommands | Released |
 | v0.3 | Palette management: install, uninstall, enable, disable | Released |
 | v0.4 | `search_nodes`, settings and runtime state — 19 tools, 3 resources, 2 prompts | Released |
-| v0.5 | Read-only mode, context-efficient reads, diagnostics, context, the debug stream, granular node editing, `diff_flows`, HTTP bearer auth — 29 tools | Released |
+| v0.5 | Read-only mode, context-efficient reads, diagnostics, context, the debug stream, granular node editing, `diff_flows`, HTTP bearer auth — 37 tools | Released |
 | v0.6 | OAuth 2.1 Resource Server for hosted web connectors | Released |
 | v0.7 | Local query cache | Planned |
 
