@@ -27,7 +27,7 @@ La versión en inglés de este documento está en [`README.md`](./README.md).
 
 ## Capacidades
 
-37 tools, 3 resources y 2 prompts. Las tools se clasifican por riesgo: **read** no tiene efectos secundarios, **write** modifica configuración persistida y realiza un backup previo, **action** tiene un efecto en el runtime que no se persiste.
+43 tools, 3 resources y 2 prompts. Las tools se clasifican por riesgo: **read** no tiene efectos secundarios, **write** modifica configuración persistida y realiza un backup previo, **action** tiene un efecto en el runtime que no se persiste.
 
 ### Flows
 
@@ -50,6 +50,12 @@ La versión en inglés de este documento está en [`README.md`](./README.md).
 | `inject_node` | `POST /inject/:id` | action | Disparar un nodo inject bajo demanda. `payload` opcional (cualquier valor JSON) sobrescribe `msg.payload` para esa llamada — útil para "¿qué pasa si msg.payload = X?" sin redesplegar el nodo (requiere Node-RED 5.x) |
 | `export_flow` | `GET /flow/:id` | read | Exportar una pestaña como documento JSON, con sus nodos y wires |
 | `import_flow` | `POST /flow` | write | Importar un documento de flow producido por `export_flow` (o escrito a mano) en una pestaña nueva |
+| `list_subflows` | `GET /flow/global` | read | Todas las definiciones de subflow instaladas en el runtime |
+| `get_subflow` | `GET /flow/global` | read | Una definición de subflow por id (metadata, ports, env, nodos internos) |
+| `create_subflow` | `PUT /flow/global` | write | Instalar una nueva definición de subflow |
+| `update_subflow` | `PUT /flow/global` | write | Reemplazar una definición de subflow existente |
+| `delete_subflow` | `PUT /flow/global` | write | Eliminar una definición de subflow (el runtime no comprueba si aún hay instancias que la referencien) |
+| `instantiate_subflow` | `PUT /flow/:id` | write | Añadir una nueva instancia de un subflow a una pestaña — `type` se fija en `subflow:<id>` y los `params` del llamante se fusionan tal cual |
 
 ### Palette
 
