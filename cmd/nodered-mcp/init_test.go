@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -128,5 +129,99 @@ func TestRenderConfig_ClaudeCodeIsCommand(t *testing.T) {
 	}
 	if !strings.HasSuffix(out, "-- /bin/nodered-mcp") {
 		t.Errorf("command must end with the binary path:\n%s", out)
+	}
+}
+
+// TestMergeServerIntoFile_BackupFailureFailsMerge covers the first
+// half of the issue #70 atomic-write story: a successful merge MUST
+// only happen when the .bak snapshot of the existing config is on
+// disk. We simulate a backup failure by making the parent directory
+// read-only: on POSIX, that prevents creation of new entries, so the
+// atomic write to path+".bak" fails.
+//
+// Skipped on Windows where POSIX mode bits are not honoured the same
+// way (a `chmod 0o500` directory still accepts new file creations
+// under the standard ACLs the Windows runner uses), so this trap
+// does not reproduce the failure mode there.
+func TestMergeServerIntoFile_BackupFailureFailsMerge(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows POSIX mode bits differ; the read-only-dir trap does not reproduce the failure mode there")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "claude_desktop_config.json")
+	if err := os.WriteFile(path, []byte(`{"mcpServers":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil { // owner: r-x, no write
+		t.Fatal(err)
+	}
+	// Restore perms so TempDir cleanup works even on test failure.
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	env := map[string]string{"NODERED_URL": "http://localhost:1880"}
+	err := mergeServerIntoFile(path, "mcpServers", "/bin/nodered-mcp", env)
+	if err == nil {
+		t.Fatal("expected merge to fail when .bak cannot be created, got nil")
+	}
+	// The original config must still be intact: the failure happened
+	// before the atomic write of the new file.
+	data, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatalf("original config unreadable after failed merge: %v", readErr)
+	}
+	if !strings.Contains(string(data), "mcpServers") {
+		t.Errorf("original config was modified despite failure: %s", data)
+	}
+}
+
+// TestMergeServerIntoFile_NoStaleTempLeftBehind covers the second
+// half of the atomic-write story: on success, no .tmp-* file should
+// remain in the destination directory. On failure (we don't simulate
+// one here), the helper removes its own staged temp; the happy path
+// does too because the rename consumes it.
+func TestMergeServerIntoFile_NoStaleTempLeftBehind(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "claude_desktop_config.json")
+	env := map[string]string{"NODERED_URL": "http://localhost:1880"}
+	if err := mergeServerIntoFile(path, "mcpServers", "/bin/nodered-mcp", env); err != nil {
+		t.Fatalf("mergeServerIntoFile: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), filepath.Base(path)+".tmp-") {
+			t.Errorf("stale temp file left behind after successful merge: %s", e.Name())
+		}
+	}
+}
+
+// TestMergeServerIntoFile_FileModeOwnerOnly covers the third invariant
+// of #70: the resulting config file is owner-readable and not
+// group/world readable. Skipped on Windows where mode bits are not
+// honoured the same way.
+func TestMergeServerIntoFile_FileModeOwnerOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows mode bits differ; permission tests run on Unix only")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "claude_desktop_config.json")
+	env := map[string]string{"NODERED_URL": "http://localhost:1880"}
+	if err := mergeServerIntoFile(path, "mcpServers", "/bin/nodered-mcp", env); err != nil {
+		t.Fatalf("mergeServerIntoFile: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	perm := info.Mode().Perm()
+	// Owner must be able to read and write; group and world must
+	// have no permissions.
+	if perm&0o700 != 0o600 {
+		t.Errorf("expected owner-only 0o600, got %04o", perm)
+	}
+	if perm&0o077 != 0 {
+		t.Errorf("expected no group/world bits, got %04o", perm)
 	}
 }

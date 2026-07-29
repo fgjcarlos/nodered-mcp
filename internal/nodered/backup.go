@@ -26,7 +26,7 @@ func (c *Client) snapshotFlows(ctx context.Context) (string, error) {
 	}
 
 	dir := c.backupsDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("backup: creating dir %q: %w", dir, err)
 	}
 
@@ -34,7 +34,7 @@ func (c *Client) snapshotFlows(ctx context.Context) (string, error) {
 	// backup. Add a counter/nanos if that ever bites.
 	name := "flows-" + time.Now().UTC().Format("20060102-150405.000") + ".json"
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, raw, 0o644); err != nil {
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		return "", fmt.Errorf("backup: writing %q: %w", path, err)
 	}
 
