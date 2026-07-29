@@ -40,6 +40,15 @@ jobs:
           go mod tidy
           git diff --exit-code -- go.mod go.sum
 
+      # govulncheck is a fast security gate against the reachable subset of
+      # the Go vulnerability database. The audit exposed 12 reachable stdlib
+      # advisories on Go 1.25.5 (issue #66); bumping the toolchain cleared
+      # them all. This step keeps that floor from regressing.
+      - name: govulncheck
+        uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod
+
   # nodered-mcp ships for Linux, macOS and Windows, and it does real work with
   # OS-specific paths (backup directories, per-client config locations in the
   # init command). Testing on one platform would not cover that.
