@@ -19,7 +19,7 @@ const { extract } = require('./tar');
 // each release; the npm publish workflow runs after the goreleaser push
 // so the tarball is guaranteed to exist by the time this script runs in
 // a fresh `npm install`.
-const VERSION = '0.5.12';
+const VERSION = '0.5.13';
 const REPO = 'fgjcarlos/nodered-mcp';
 
 // Map node's process.platform / process.arch to the goreleaser asset

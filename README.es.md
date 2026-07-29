@@ -219,7 +219,7 @@ El wrapper está publicado como [`@fgjcarlos/nodered-mcp`](https://www.npmjs.com
 
 ```bash
 npm install -g @fgjcarlos/nodered-mcp
-nodered-mcp version   # -> 0.5.12
+nodered-mcp version   # -> 0.5.13
 ```
 
 Funciona en Linux, macOS y Windows (amd64 y arm64) sin configuración adicional. El wrapper no tiene dependencias npm — un parser POSIX de tar implementado a mano en `bin/tar.js` extrae el binario, así que `npm audit` solo ve el wrapper en sí.
