@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -166,6 +167,81 @@ func TestLoad_NodeDenylist_EmptyOptOut(t *testing.T) {
 			}
 			if cfg.HasDeniedNodeType("exec") {
 				t.Errorf("explicit empty value must NOT carry the default denylist (raw=%q)", raw)
+			}
+		})
+	}
+}
+
+// TestLoad_NodeRedURL_AcceptsHTTPScheme covers issue #84: a normal
+// http:// URL must keep loading. The SSRF guard is added on top of the
+// existing empty-string check, so the happy path must still work.
+func TestLoad_NodeRedURL_AcceptsHTTPScheme(t *testing.T) {
+	t.Setenv("NODERED_URL", "http://localhost:1880")
+	if _, err := Load(); err != nil {
+		t.Fatalf("expected http URL to be accepted, got: %v", err)
+	}
+}
+
+// TestLoad_NodeRedURL_AcceptsHTTPSScheme is the https counterpart of
+// AcceptsHTTPScheme — TLS to the Node-RED host must be a first-class
+// option, not a path that hits the new SSRF guard.
+func TestLoad_NodeRedURL_AcceptsHTTPSScheme(t *testing.T) {
+	t.Setenv("NODERED_URL", "https://nodered.example.com")
+	if _, err := Load(); err != nil {
+		t.Fatalf("expected https URL to be accepted, got: %v", err)
+	}
+}
+
+// TestLoad_NodeRedURL_RejectsEmpty preserves the pre-existing
+// defence-in-depth check: a Config with NodeRedURL == "" is rejected
+// at validate() time. getEnv's default fallback means Load() never
+// produces an empty value in practice, but the check stays so a
+// future caller or refactor cannot silently start the server with
+// an empty URL.
+func TestLoad_NodeRedURL_RejectsEmpty(t *testing.T) {
+	cfg := &Config{NodeRedURL: ""}
+	if err := cfg.validate(); err == nil {
+		t.Fatal("expected error for empty NodeRedURL, got nil")
+	}
+}
+
+// TestLoad_NodeRedURL_RejectsNonHTTPSchemes is the SSRF guard test for
+// issue #84. Node-RED's admin API only listens on http/https, so any
+// other scheme — file://, ftp://, gopher://, javascript:, or a value
+// without a scheme at all — must be refused at config-load time. A
+// misconfigured or maliciously-injected NODERED_URL would otherwise
+// turn the MCP into a proxy for reading local files or hitting
+// non-HTTP services on the network.
+func TestLoad_NodeRedURL_RejectsNonHTTPSchemes(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+	}{
+		{"file", "file:///etc/passwd"},
+		{"ftp", "ftp://x"},
+		{"gopher", "gopher://x"},
+		{"javascript", "javascript:alert(1)"},
+		{"javascript-leading-space", " javascript:alert(1)"},
+		{"missing-scheme", "localhost:1880"},
+		{"empty-scheme", "://no-scheme"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("NODERED_URL", tc.value)
+			_, err := Load()
+			if err == nil {
+				t.Fatalf("expected error for NODERED_URL=%q, got nil", tc.value)
+			}
+			// The error must be informative enough for an operator
+			// to fix the value without reading the source. The scheme
+			// guard says "scheme"/"http"; the url.Parse path says
+			// "valid URL". Either is acceptable — what matters is
+			// that the rejection is not silent.
+			msg := err.Error()
+			if !strings.Contains(msg, "scheme") &&
+				!strings.Contains(msg, "http") &&
+				!strings.Contains(msg, "valid URL") {
+				t.Errorf("error for NODERED_URL=%q should mention scheme, http, or \"valid URL\", got: %v", tc.value, err)
 			}
 		})
 	}
