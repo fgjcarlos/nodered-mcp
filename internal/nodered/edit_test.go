@@ -281,6 +281,20 @@ func TestConnectNodesRejectsANegativePort(t *testing.T) {
 	}
 }
 
+// TestConnectNodesRejectsAPortOverTheBound guards against a port=999999 call
+// from growing the wires array to a multi-megabyte allocation before the HTTP
+// round trip. Node-RED's editor never uses more than a single-digit port; 999
+// is already generous and keeps the wires slice trivially small.
+func TestConnectNodesRejectsAPortOverTheBound(t *testing.T) {
+	_, err := ConnectNodesInFlow(RawFlow(sampleTab), "n1", 1000, "n2")
+	if err == nil {
+		t.Fatal("expected a port above 999 to be rejected")
+	}
+	if !strings.Contains(err.Error(), "out of range") && !strings.Contains(err.Error(), "999") {
+		t.Errorf("error should mention the bound, got: %v", err)
+	}
+}
+
 // Every edit must leave a document that still passes wire validation, which is
 // what the write path checks before it reaches Node-RED.
 func TestEditsProduceValidFlows(t *testing.T) {

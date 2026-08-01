@@ -872,6 +872,9 @@ func (s *Server) handleConnectNodes(ctx context.Context, req mcp.CallToolRequest
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	port := int(req.GetFloat("port", 0))
+	if port < 0 || port > 999 {
+		return mcp.NewToolResultError(fmt.Sprintf("port %d is out of range (must be 0-999)", port)), nil
+	}
 	slog.Debug("tool: connect_nodes", "flow_id", flowID, "from", fromID, "port", port, "to", toID)
 
 	if err := s.nrClient.ConnectNodes(ctx, flowID, fromID, port, toID); err != nil {

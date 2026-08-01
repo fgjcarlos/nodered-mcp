@@ -349,8 +349,8 @@ func ConnectNodesInFlow(flow RawFlow, fromID string, port int, toID string) (Raw
 	if fromID == "" || toID == "" {
 		return nil, fmt.Errorf("both a source and a target node id are required")
 	}
-	if port < 0 {
-		return nil, fmt.Errorf("output port must be zero or greater, got %d", port)
+	if port < 0 || port > 999 {
+		return nil, fmt.Errorf("port %d is out of range (0-999); most nodes have 1 output and switch nodes have at most a few", port)
 	}
 
 	doc, err := decodeFlow(flow)
