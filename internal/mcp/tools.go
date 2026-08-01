@@ -499,8 +499,8 @@ func (s *Server) registerTools() {
 				"from a single function node). Scope \"node\" writes to the helper's function "+
 				"node's own context — pass the helper's function id (visible via list_flows as "+
 				"\"__mcp_context_helper_set__\") to get_context to read it back. The \"id\" arg "+
-				"is required for scope \"flow\" and \"node\", and is validated against the "+
-				"expected target so a typo gets a clear error instead of a silent no-op.\n\n"+
+				"is required for scope \"flow\" and \"node\" and must match the helper's runtime id — "+
+				"call list_flows to find it (look for the tab labelled \"__mcp_context_helper__\").\n\n"+
 				"Pass \"value\" as a JSON-encoded string (objects, arrays, numbers, booleans, "+
 				"strings, null — all accepted). It is parsed server-side and stored as the "+
 				"corresponding JS value in the context store.\n\n"+
@@ -2014,56 +2014,12 @@ func (s *Server) handleSetContext(ctx context.Context, req mcp.CallToolRequest) 
 	// actually accept the write.
 	switch scope {
 	case "global", "flow", "node":
-		// accepted; the per-scope id check happens below, BEFORE
-		// any server call. We compare against the helper's
-		// deterministic ids (constants), not the runtime-assigned
-		// ones, because the caller never sees the runtime ids —
-		// Node-RED's POST /flow reassigns the tab id and the MCP
-		// keeps the new id internally. Using the constants lets a
-		// caller pre-flight the check without ever provisioning
-		// anything.
 	default:
 		return mcp.NewToolResultError(
 			fmt.Sprintf(`scope must be "global", "flow" or "node", got %q`, scope),
 		), nil
 	}
 
-	// Per-scope id check (run before any server call so a bad id
-	// surfaces a clean error without provisioning the helper).
-	switch scope {
-	case "flow":
-		if id == "" {
-			return mcp.NewToolResultError(fmt.Sprintf(
-				`scope "flow" requires an id; the helper can only write to its own flow context, so the id must be the helper flow id %q`,
-				setContextHelperFlowID,
-			)), nil
-		}
-		if id != setContextHelperFlowID {
-			return mcp.NewToolResultError(fmt.Sprintf(
-				`scope "flow" can only target the helper's own flow context, so the id must be %q (got %q); the Node-RED admin API exposes no way to write another tab's flow context from a single function node`,
-				setContextHelperFlowID, id,
-			)), nil
-		}
-	case "node":
-		if id == "" {
-			return mcp.NewToolResultError(fmt.Sprintf(
-				`scope "node" requires an id; the helper can only write to its function node's own context, so the id must be the helper function id %q`,
-				setContextHelperFunctionID,
-			)), nil
-		}
-		if id != setContextHelperFunctionID {
-			return mcp.NewToolResultError(fmt.Sprintf(
-				`scope "node" can only target the helper's function node's own context, so the id must be %q (got %q)`,
-				setContextHelperFunctionID, id,
-			)), nil
-		}
-	}
-
-	// value arrives as a JSON-encoded string. json.Unmarshal into
-	// any is the most permissive parse: a string, number, bool,
-	// null, object, or array all decode into the corresponding
-	// interface{} slot, and we re-marshal the same value back when
-	// building the inject body so the runtime sees the same shape.
 	var value any
 	if err := json.Unmarshal([]byte(valueRaw), &value); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf(
@@ -2076,6 +2032,33 @@ func (s *Server) handleSetContext(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		slog.Error("set_context: provisioning helper failed", "error", err)
 		return mcp.NewToolResultError(fmt.Sprintf("provisioning set_context helper: %v", err)), nil
+	}
+
+	switch scope {
+	case "flow":
+		if id == "" {
+			return mcp.NewToolResultError(
+				`scope "flow" requires an id; call list_flows to find the helper flow labelled "__mcp_context_helper__"`,
+			), nil
+		}
+		if id != helper.flowID && id != setContextHelperFlowID {
+			return mcp.NewToolResultError(fmt.Sprintf(
+				`scope "flow" can only target the helper's own flow context, so the id must be the helper flow id (got %q); call list_flows to discover it`,
+				id,
+			)), nil
+		}
+	case "node":
+		if id == "" {
+			return mcp.NewToolResultError(
+				`scope "node" requires an id; call list_flows to find the function node named "__mcp_context_helper_set__"`,
+			), nil
+		}
+		if id != helper.functionID && id != setContextHelperFunctionID {
+			return mcp.NewToolResultError(fmt.Sprintf(
+				`scope "node" can only target the helper's function node's own context, so the id must be the helper function id (got %q)`,
+				id,
+			)), nil
+		}
 	}
 
 	// Build the inject body. The shape is:

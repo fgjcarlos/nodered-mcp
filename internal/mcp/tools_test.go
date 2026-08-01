@@ -627,6 +627,11 @@ func TestSetContext_RequiresIdForFlow(t *testing.T) {
 
 	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
 	srv2 := New(c, "test", false, false)
+	srv2.ctxHelper = &setContextHelper{
+		flowID:     "runtime_helper_tab",
+		injectID:   setContextHelperInjectID,
+		functionID: setContextHelperFunctionID,
+	}
 
 	res, err := srv2.handleSetContext(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{Arguments: map[string]any{
@@ -667,6 +672,11 @@ func TestSetContext_FlowScopeRejectsForeignId(t *testing.T) {
 
 	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
 	srv2 := New(c, "test", false, false)
+	srv2.ctxHelper = &setContextHelper{
+		flowID:     "runtime_helper_tab",
+		injectID:   setContextHelperInjectID,
+		functionID: setContextHelperFunctionID,
+	}
 
 	res, err := srv2.handleSetContext(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{Arguments: map[string]any{
@@ -686,14 +696,63 @@ func TestSetContext_FlowScopeRejectsForeignId(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected TextContent, got %T", res.Content[0])
 	}
-	if !strings.Contains(tc.Text, "mcp_ctx_helper_tab") {
-		t.Errorf("error should name the only legal id, got %q", tc.Text)
+	if !strings.Contains(tc.Text, "helper flow id") {
+		t.Errorf("error should explain the only legal id, got %q", tc.Text)
 	}
 	if !strings.Contains(tc.Text, "some_other_tab") {
 		t.Errorf("error should echo the bad id back, got %q", tc.Text)
 	}
 	if serverCalled {
 		t.Error("server must not be called for a foreign flow id")
+	}
+}
+
+func TestSetContext_AcceptsRealRuntimeId(t *testing.T) {
+	var injects int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/inject/"+setContextHelperInjectID {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			return
+		}
+		injects++
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	s := New(c, "test", false, false)
+	s.ctxHelper = &setContextHelper{
+		flowID:     "d23de851e7ed4098",
+		injectID:   setContextHelperInjectID,
+		functionID: setContextHelperFunctionID,
+	}
+
+	call := func(id string) *mcp.CallToolResult {
+		res, err := s.handleSetContext(context.Background(), mcp.CallToolRequest{
+			Params: mcp.CallToolParams{Arguments: map[string]any{
+				"scope": "flow",
+				"id":    id,
+				"key":   "foo",
+				"value": "1",
+			}},
+		})
+		if err != nil {
+			t.Fatalf("handleSetContext returned err=%v", err)
+		}
+		return res
+	}
+
+	if res := call("d23de851e7ed4098"); res == nil || res.IsError {
+		t.Fatalf("expected runtime id to succeed, got %+v", res)
+	}
+	if res := call(setContextHelperFlowID); res == nil || res.IsError {
+		t.Fatalf("expected constant id alias to succeed, got %+v", res)
+	}
+	if res := call("some_other_tab"); res == nil || !res.IsError {
+		t.Fatalf("expected foreign id to fail, got %+v", res)
+	}
+	if injects != 2 {
+		t.Fatalf("expected two successful injects, got %d", injects)
 	}
 }
 
