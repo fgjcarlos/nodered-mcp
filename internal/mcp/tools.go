@@ -80,7 +80,11 @@ func (s *Server) registerTools() {
 		mcp.WithDescription(
 			"Create a new Node-RED flow tab. Pass the full flow JSON document "+
 				"(at minimum {\"label\":\"...\",\"nodes\":[...]}). Node-RED assigns "+
-				"the ID and returns the created flow. A backup is taken first.",
+				"the ID and returns the created flow. A backup is taken first.\n\n"+
+				"WARNING: this tool can deploy any node type the Node-RED instance has "+
+				"installed, including exec/system nodes that execute shell commands on "+
+				"the Node-RED host. The MCP server blocks a configurable set of node "+
+				"types (MCP_NODE_DENYLIST, default: exec,system); see SECURITY.md.",
 		),
 		mcp.WithString("flow", mcp.Required(),
 			mcp.Description("The flow document as a JSON string.")),
@@ -123,7 +127,11 @@ func (s *Server) registerTools() {
 			"Replace an existing flow tab with a new JSON document (PUT semantics: "+
 				"the whole flow is replaced). Read the flow first with get_flow, modify "+
 				"it, and send it back intact — every node field is preserved. A backup "+
-				"of the current config is taken before the write.",
+				"of the current config is taken before the write.\n\n"+
+				"WARNING: this tool can deploy any node type, including exec/system "+
+				"nodes that execute shell commands on the Node-RED host. The MCP "+
+				"server blocks a configurable set of node types (MCP_NODE_DENYLIST, "+
+				"default: exec,system); see SECURITY.md.",
 		),
 		mcp.WithString("id", mcp.Required(),
 			mcp.Description("The flow tab ID to replace.")),
@@ -141,7 +149,11 @@ func (s *Server) registerTools() {
 				"appends and leaves the rest of the tab byte-for-byte identical. A backup "+
 				"is taken and the wires are validated before the write.\n\n"+
 				"The node needs at least an id and a type. Wire it up afterwards with "+
-				"connect_nodes rather than hand-writing the wires array.",
+				"connect_nodes rather than hand-writing the wires array.\n\n"+
+				"WARNING: this tool can deploy any node type, including exec/system "+
+				"nodes that execute shell commands on the Node-RED host. The MCP "+
+				"server blocks a configurable set of node types (MCP_NODE_DENYLIST, "+
+				"default: exec,system); see SECURITY.md.",
 		),
 		mcp.WithString("flow_id", mcp.Required(),
 			mcp.Description("The flow tab to add the node to (from list_flows or search_flows).")),
@@ -601,7 +613,11 @@ func (s *Server) registerTools() {
 				"(full deployment). MUTATES the runtime: this is the most destructive "+
 				"operation the admin API exposes. A backup of the current config is taken "+
 				"first so the change can be rolled back. Prefer create_flow / update_flow "+
-				"/ delete_flow for single-tab edits.",
+				"/ delete_flow for single-tab edits.\n\n"+
+				"WARNING: this tool can deploy any node type, including exec/system "+
+				"nodes that execute shell commands on the Node-RED host. The MCP "+
+				"server blocks a configurable set of node types (MCP_NODE_DENYLIST, "+
+				"default: exec,system); see SECURITY.md.",
 		),
 		mcp.WithString("flows", mcp.Required(),
 			mcp.Description("A JSON array of flow objects (the same shape returned by list_flows).")),
@@ -739,6 +755,12 @@ func (s *Server) handleCreateFlow(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	if denied, t := s.findDeniedNodeInFlow(flow); denied {
+		return mcp.NewToolResultError(fmt.Sprintf(
+			"node type %q is in MCP_NODE_DENYLIST; remove it from the denylist or use a different node type (see SECURITY.md)",
+			t,
+		)), nil
+	}
 	slog.Debug("tool: create_flow")
 
 	created, err := s.nrClient.CreateFlow(ctx, flow)
@@ -764,6 +786,12 @@ func (s *Server) handleUpdateFlow(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	if denied, t := s.findDeniedNodeInFlow(flow); denied {
+		return mcp.NewToolResultError(fmt.Sprintf(
+			"node type %q is in MCP_NODE_DENYLIST; remove it from the denylist or use a different node type (see SECURITY.md)",
+			t,
+		)), nil
+	}
 	slog.Debug("tool: update_flow", "id", id)
 
 	if err := s.nrClient.UpdateFlow(ctx, id, flow); err != nil {
@@ -783,6 +811,12 @@ func (s *Server) handleAddNode(ctx context.Context, req mcp.CallToolRequest) (*m
 	node, err := nodeParam(req, "node")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if denied, t := s.findDeniedNodeInNode(node); denied {
+		return mcp.NewToolResultError(fmt.Sprintf(
+			"node type %q is in MCP_NODE_DENYLIST; remove it from the denylist or use a different node type (see SECURITY.md)",
+			t,
+		)), nil
 	}
 	slog.Debug("tool: add_node", "flow_id", flowID)
 
@@ -1484,6 +1518,94 @@ func normalizeFlowsArray(raw json.RawMessage) ([]json.RawMessage, error) {
 	return flows, nil
 }
 
+// findDeniedNodeInFlow walks every node entry of a single nested
+// tab document and reports the first one whose type is in the
+// configured denylist. Returns (false, "") when the document is
+// empty, malformed, or contains no denied node — the caller treats
+// "no denied node" the same as "no denylist". Issue #81.
+//
+// A nested tab doc is {"label":...,"nodes":[...],...}. The
+// "nodes" array carries the canvas nodes; "configs" carries
+// brokers, credentials, and other shared definitions. The latter
+// can also carry shell-executing node types (any "exec"-class
+// instance the operator pasted in), so both arrays are walked.
+func (s *Server) findDeniedNodeInFlow(raw nodered.RawFlow) (denied bool, nodeType string) {
+	if s.denylist == nil {
+		return false, ""
+	}
+	var doc struct {
+		Nodes   []json.RawMessage `json:"nodes"`
+		Configs []json.RawMessage `json:"configs"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return false, ""
+	}
+	for _, n := range doc.Nodes {
+		if t := readNodeType(n); s.denylist(t) {
+			return true, t
+		}
+	}
+	for _, n := range doc.Configs {
+		if t := readNodeType(n); s.denylist(t) {
+			return true, t
+		}
+	}
+	return false, ""
+}
+
+// findDeniedNodeInNode inspects a single node payload (as accepted by
+// add_node). Issue #81: a caller can ship an "exec" node directly,
+// without wrapping it in a flow document.
+func (s *Server) findDeniedNodeInNode(raw json.RawMessage) (denied bool, nodeType string) {
+	if s.denylist == nil {
+		return false, ""
+	}
+	if t := readNodeType(raw); s.denylist(t) {
+		return true, t
+	}
+	return false, ""
+}
+
+// findDeniedNodeInFlowsArray walks every tab of a full /flows
+// payload and reports the first denied node type encountered. The
+// set_flows shape is a flat array; each element is a tab object or a
+// canvas/config node, so we delegate to the same walker the single-
+// flow handlers use. Issue #81.
+func (s *Server) findDeniedNodeInFlowsArray(flows []json.RawMessage) (denied bool, nodeType string) {
+	if s.denylist == nil {
+		return false, ""
+	}
+	for _, entry := range flows {
+		// Each entry can be either a tab doc ({"nodes":[...],"configs":[...]})
+		// or a flat /flows element (just a single node). Try the nested
+		// shape first: a single node has no "nodes" array, so the walker
+		// returns no hit; we then fall back to inspecting the entry as a
+		// node directly.
+		if d, t := s.findDeniedNodeInFlow(nodered.RawFlow(entry)); d {
+			return true, t
+		}
+		if d, t := s.findDeniedNodeInNode(entry); d {
+			return true, t
+		}
+	}
+	return false, ""
+}
+
+// readNodeType extracts the "type" field of a node object as a
+// string, returning "" when the payload is not a JSON object or has
+// no type. Failure-to-parse is treated as "" because the write
+// handlers downstream of this check have their own validation; the
+// denylist guard only needs to react to types it can name.
+func readNodeType(raw json.RawMessage) string {
+	var probe struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return ""
+	}
+	return probe.Type
+}
+
 // handleGetSettings returns the Node-RED server settings as JSON.
 func (s *Server) handleGetSettings(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	slog.Debug("tool: get_settings")
@@ -2165,6 +2287,12 @@ func (s *Server) handleSetFlows(ctx context.Context, req mcp.CallToolRequest) (*
 	flows, err := normalizeFlowsArray(raw)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if denied, t := s.findDeniedNodeInFlowsArray(flows); denied {
+		return mcp.NewToolResultError(fmt.Sprintf(
+			"node type %q is in MCP_NODE_DENYLIST; remove it from the denylist or use a different node type (see SECURITY.md)",
+			t,
+		)), nil
 	}
 	slog.Debug("tool: set_flows")
 

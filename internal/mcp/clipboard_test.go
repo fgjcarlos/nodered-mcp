@@ -40,7 +40,7 @@ func TestExportFlow_HappyPath(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
-	s := New(c, "test", false, false)
+	s := New(c, Options{Version: "test"})
 
 	res, err := s.handleExportFlow(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{Arguments: map[string]any{"id": "tab1"}},
@@ -94,7 +94,7 @@ func TestImportFlow_HappyPath(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
-	s := New(c, "test", false, false)
+	s := New(c, Options{Version: "test"})
 
 	clipboard := "[" + sampleTab + "]"
 	res, err := s.handleImportFlow(context.Background(), mcp.CallToolRequest{
@@ -159,7 +159,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
-	s := New(c, "test", false, false)
+	s := New(c, Options{Version: "test"})
 
 	// First export.
 	res1, err := s.handleExportFlow(context.Background(), mcp.CallToolRequest{
@@ -209,7 +209,7 @@ func TestImportFlow_RejectsMultiTabClipboard(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
-	s := New(c, "test", false, false)
+	s := New(c, Options{Version: "test"})
 
 	multi := `[{"id":"a","type":"tab"},{"id":"b","type":"tab"}]`
 	res, err := s.handleImportFlow(context.Background(), mcp.CallToolRequest{
@@ -236,7 +236,7 @@ func TestImportFlow_RejectsNonArrayClipboard(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
-	s := New(c, "test", false, false)
+	s := New(c, Options{Version: "test"})
 
 	res, err := s.handleImportFlow(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{Arguments: map[string]any{"clipboard": `{"id":"tab","type":"tab"}`}},
@@ -258,7 +258,7 @@ func TestImportFlow_RejectsInvalidJSON(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
-	s := New(c, "test", false, false)
+	s := New(c, Options{Version: "test"})
 
 	res, err := s.handleImportFlow(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{Arguments: map[string]any{"clipboard": "not json"}},
@@ -288,7 +288,7 @@ func TestImportFlow_AcceptsRawArray(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
-	s := New(c, "test", false, false)
+	s := New(c, Options{Version: "test"})
 
 	clipboardArg := []any{
 		map[string]any{
@@ -332,7 +332,7 @@ func TestImportFlow_PreservesWires(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
-	s := New(c, "test", false, false)
+	s := New(c, Options{Version: "test"})
 
 	clipboard := `[` + sampleTab + `]`
 	res, err := s.handleImportFlow(context.Background(), mcp.CallToolRequest{

@@ -35,7 +35,7 @@ func injectServer(t *testing.T, h http.HandlerFunc) (*Server, *capture) {
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
-	return New(c, "test", false, false), got
+	return New(c, Options{Version: "test"}), got
 }
 
 type capture struct {
@@ -241,7 +241,7 @@ func TestHandleInjectNode_EmptyID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
-	s := New(c, "test", false, false)
+	s := New(c, Options{Version: "test"})
 
 	res, err := s.handleInjectNode(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{Arguments: map[string]any{"id": ""}},

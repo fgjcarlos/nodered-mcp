@@ -150,7 +150,12 @@ func serve(args []string) error {
 		return fmt.Errorf("creating nodered client: %w", err)
 	}
 
-	srv := mcpserver.New(nrClient, resolveVersion(), cfg.MCPReadOnly, cfg.MCPDebugStream)
+	srv := mcpserver.New(nrClient, mcpserver.Options{
+		Version:      resolveVersion(),
+		ReadOnly:     cfg.MCPReadOnly,
+		DebugStream:  cfg.MCPDebugStream,
+		NodeDenylist: cfg.NodeDenylist,
+	})
 	if cfg.MCPTransport == "http" {
 		verifier, err := buildOAuthVerifier(cfg)
 		if err != nil {

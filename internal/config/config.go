@@ -51,6 +51,30 @@ type Config struct {
 	// server start. Defaults to false because the tail crashes some
 	// Node-RED versions (see #17). Set true to enable debug streaming.
 	MCPDebugStream bool
+	// NodeDenylist is the set of node types the MCP write tools must refuse
+	// to deploy. The default ("exec,system") defends against RCE on the
+	// Node-RED host (issue #81): callers of create_flow / update_flow /
+	// add_node / set_flows can otherwise ship a node that executes shell
+	// commands as the Node-RED process. Operators who genuinely need those
+	// node types can opt out with MCP_NODE_DENYLIST="" — see SECURITY.md.
+	NodeDenylist []string
+}
+
+// defaultNodeDenylist is the set of node types the MCP write tools refuse
+// by default. Issue #81: the Node-RED "exec" and "system" nodes run shell
+// commands on the host OS; an MCP caller can otherwise achieve RCE simply
+// by writing a flow that contains one of them.
+var defaultNodeDenylist = []string{"exec", "system"}
+
+// HasDeniedNodeType reports whether nodeType is in the configured
+// denylist. The check is case-sensitive (Node-RED node types are).
+func (c *Config) HasDeniedNodeType(nodeType string) bool {
+	for _, t := range c.NodeDenylist {
+		if t == nodeType {
+			return true
+		}
+	}
+	return false
 }
 
 // Load reads configuration from the environment. If a .env file exists in
@@ -93,6 +117,16 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("parsing MCP_DEBUG_STREAM: %w", err)
 	}
 	cfg.MCPDebugStream = debugStream
+
+	// Issue #81: MCP_NODE_DENYLIST is a defense-in-depth against RCE via
+	// the Node-RED "exec" / "system" nodes (and any other shell-executing
+	// node type the operator wants to block). Unset -> apply the default
+	// list ("exec,system"); explicit empty -> opt out (no denylist at all).
+	if raw, ok := os.LookupEnv("MCP_NODE_DENYLIST"); ok {
+		cfg.NodeDenylist = parseNodeDenylist(raw)
+	} else {
+		cfg.NodeDenylist = append([]string(nil), defaultNodeDenylist...)
+	}
 
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -176,4 +210,23 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// parseNodeDenylist turns the comma-separated MCP_NODE_DENYLIST value
+// into a list of trimmed, non-empty node types. An all-whitespace input
+// yields a nil slice, which is the signal "no denylist" — distinct from
+// the unset default, which applies defaultNodeDenylist. This split is
+// what makes MCP_NODE_DENYLIST="" an opt-out (issue #81).
+func parseNodeDenylist(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

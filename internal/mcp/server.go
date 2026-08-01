@@ -61,16 +61,60 @@ type Server struct {
 	// in the flow config until the operator deletes the flow tab.
 	ctxHelper *setContextHelper
 
+	// denylist reports whether a given node type is forbidden by the
+	// operator-configured MCP_NODE_DENYLIST. Issue #81: defaults to a
+	// closure that allows every type when nil (no denylist configured).
+	// Stored as a closure so tests can swap in any predicate.
+	denylist func(string) bool
+
 	tools     []mcp.Tool
 	resources []mcp.Resource
 	prompts   []mcp.Prompt
 }
 
+// Options configures a Server. It exists so the constructor signature
+// can grow with new knobs without churning every test call site. A zero
+// Options gives the dev-friendly defaults the MCP server has always
+// shipped with (no denylist — issue #81's defaults are applied at the
+// config layer, not here, so tests can opt out explicitly).
+type Options struct {
+	// Version is what the server reports during the MCP handshake.
+	// Callers pass the build-time version (see main.version) so every
+	// surface (binary, server identity, mcpb manifest) stays in sync.
+	Version string
+	// ReadOnly withholds every tool that mutates the Node-RED instance.
+	ReadOnly bool
+	// DebugStream opts in to opening the /comms WebSocket tail at
+	// server start. See MCP_DEBUG_STREAM / --debug-stream docs.
+	DebugStream bool
+	// NodeDenylist is the set of node types the write tools must
+	// refuse to deploy. Empty slice (or nil) means "no denylist":
+	// every node type is allowed. See config.Load for the
+	// operator-facing toggle MCP_NODE_DENYLIST (issue #81).
+	NodeDenylist []string
+}
+
+// buildDenylist turns a slice of node types into a closure the write
+// tools can call per-node. The closure form lets tests inject any
+// predicate they like (the slice path is reserved for production). A
+// nil or empty slice yields a pass-through closure: empty denylist is
+// the documented opt-out, not a regression.
+func buildDenylist(types []string) func(string) bool {
+	if len(types) == 0 {
+		return func(string) bool { return false }
+	}
+	set := make(map[string]struct{}, len(types))
+	for _, t := range types {
+		set[t] = struct{}{}
+	}
+	return func(t string) bool {
+		_, ok := set[t]
+		return ok
+	}
+}
+
 // New builds a fully-configured MCP server. It registers all tools,
-// resources and prompts declared in the rest of this package. The version
-// string is what the server reports to clients during the MCP handshake —
-// callers pass the build-time version (see main.version) so every surface
-// (binary, server identity, mcpb manifest) stays in sync.
+// resources and prompts declared in the rest of this package.
 //
 // When readOnly is set, only side-effect-free tools are registered: the
 // mutating ones are never advertised to the client, so a model cannot call
@@ -83,7 +127,15 @@ type Server struct {
 // versions (notably :latest) crashes the runtime via a bug in
 // @node-red/editor-api/auth/tokens.js. Operators who need debug streaming
 // opt in explicitly via MCP_DEBUG_STREAM=on.
-func New(nrClient *nodered.Client, version string, readOnly, debugStream bool) *Server {
+//
+// opts.NodeDenylist is wired into the server's denylist closure. The
+// write tools call it before forwarding any node payload to Node-RED
+// (issue #81 — defense in depth against RCE via the "exec" / "system"
+// node types). Empty slice (or nil) means "no denylist": every node type
+// is allowed. See config.Load for the operator-facing toggle
+// MCP_NODE_DENYLIST.
+func New(nrClient *nodered.Client, opts Options) *Server {
+	version := opts.Version
 	if version == "" {
 		version = "dev"
 	}
@@ -98,15 +150,16 @@ func New(nrClient *nodered.Client, version string, readOnly, debugStream bool) *
 	srv := &Server{
 		mcpServer:   s,
 		nrClient:    nrClient,
-		readOnly:    readOnly,
-		debugStream: debugStream,
+		readOnly:    opts.ReadOnly,
+		debugStream: opts.DebugStream,
+		denylist:    buildDenylist(opts.NodeDenylist),
 	}
 
 	// The debug tail is best-effort and opt-in. A Node-RED that is
 	// unreachable, or one that crashes on the /comms handshake (Node-RED
 	// :latest as of writing), must not stop the other 23 tools from working
 	// and must not bring the runtime down by triggering the upstream bug.
-	if !debugStream {
+	if !opts.DebugStream {
 		slog.Info("debug stream disabled; set MCP_DEBUG_STREAM=on to enable")
 	} else {
 		if tail, err := nodered.NewDebugTail(nrClient, nodered.DefaultDebugBufferSize); err != nil {
@@ -133,7 +186,7 @@ func New(nrClient *nodered.Client, version string, readOnly, debugStream bool) *
 		"tools", len(srv.tools),
 		"resources", len(srv.resources),
 		"prompts", len(srv.prompts),
-		"read_only", readOnly,
+		"read_only", opts.ReadOnly,
 	)
 
 	return srv

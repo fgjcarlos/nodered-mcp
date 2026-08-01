@@ -126,7 +126,7 @@ func TestRunHTTP_SlowlorisIsDisconnected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
-	srv := New(c, "test", false, false)
+	srv := New(c, Options{Version: "test"})
 	addr, stop := runHTTPSmoke(t, srv, "")
 	defer stop()
 
@@ -170,7 +170,7 @@ func TestRunHTTP_InitializeLoopbackNoAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
-	srv := New(c, "test", false, false)
+	srv := New(c, Options{Version: "test"})
 	addr, stop := runHTTPSmoke(t, srv, "")
 	defer stop()
 
@@ -211,7 +211,7 @@ func TestRunHTTP_InitializeBearerRejectedWithoutToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
-	srv := New(c, "test", false, false)
+	srv := New(c, Options{Version: "test"})
 	addr, stop := runHTTPSmoke(t, srv, "supersecrettoken")
 	defer stop()
 
@@ -243,7 +243,7 @@ func TestRunHTTP_InitializeBearerAccepted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
-	srv := New(c, "test", false, false)
+	srv := New(c, Options{Version: "test"})
 	addr, stop := runHTTPSmoke(t, srv, "supersecrettoken")
 	defer stop()
 

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"testing"
 )
 
@@ -97,5 +98,75 @@ func TestLoad_ParsesInsecure(t *testing.T) {
 	}
 	if !cfg.NodeRedInsecure {
 		t.Error("expected NodeRedInsecure=true")
+	}
+}
+
+// TestLoad_NodeDenylist_Default covers issue #81: with no env var set,
+// the server must default to blocking exec/system so a fresh deployment
+// is not vulnerable to RCE out of the box. (Setting the var to "" is the
+// explicit opt-out, not the default — see TestLoad_NodeDenylist_EmptyOptOut.)
+func TestLoad_NodeDenylist_Default(t *testing.T) {
+	// t.Unsetenv was added in Go 1.17 but we still target Go versions
+	// where it is absent; do the unset+restore dance by hand.
+	prev, hadPrev := os.LookupEnv("MCP_NODE_DENYLIST")
+	os.Unsetenv("MCP_NODE_DENYLIST")
+	t.Cleanup(func() {
+		if hadPrev {
+			os.Setenv("MCP_NODE_DENYLIST", prev)
+		} else {
+			os.Unsetenv("MCP_NODE_DENYLIST")
+		}
+	})
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.HasDeniedNodeType("exec") {
+		t.Error("default denylist must block \"exec\" (issue #81)")
+	}
+	if !cfg.HasDeniedNodeType("system") {
+		t.Error("default denylist must block \"system\" (issue #81)")
+	}
+	if cfg.HasDeniedNodeType("inject") {
+		t.Error("default denylist must NOT block \"inject\"")
+	}
+}
+
+// TestLoad_NodeDenylist_FromEnv covers the parse path: a comma-separated
+// list comes back as a slice, with whitespace tolerated.
+func TestLoad_NodeDenylist_FromEnv(t *testing.T) {
+	t.Setenv("MCP_NODE_DENYLIST", "foo, bar ,baz")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.HasDeniedNodeType("foo") || !cfg.HasDeniedNodeType("bar") || !cfg.HasDeniedNodeType("baz") {
+		t.Errorf("expected foo/bar/baz in denylist, got %v", cfg.NodeDenylist)
+	}
+	if cfg.HasDeniedNodeType("exec") {
+		t.Errorf("non-default value must replace the defaults, got %v", cfg.NodeDenylist)
+	}
+}
+
+// TestLoad_NodeDenylist_EmptyOptOut is the explicit "I know what I'm
+// doing" path: an operator who needs exec/system sets the variable to
+// an empty (or whitespace-only) string and the denylist is empty —
+// no defaults applied.
+func TestLoad_NodeDenylist_EmptyOptOut(t *testing.T) {
+	for _, raw := range []string{"", " ", "  ,  "} {
+		t.Run(raw, func(t *testing.T) {
+			t.Setenv("MCP_NODE_DENYLIST", raw)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if len(cfg.NodeDenylist) != 0 {
+				t.Errorf("MCP_NODE_DENYLIST=%q must opt out (nil/empty), got %v", raw, cfg.NodeDenylist)
+			}
+			if cfg.HasDeniedNodeType("exec") {
+				t.Errorf("explicit empty value must NOT carry the default denylist (raw=%q)", raw)
+			}
+		})
 	}
 }

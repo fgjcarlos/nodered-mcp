@@ -29,7 +29,7 @@ func TestReadmeSyncWithRegistry(t *testing.T) {
 	}
 	// debugStream=true exercises the WebSocket tail construction path;
 	// the registry set is identical either way.
-	srv := New(c, "test", false, true)
+	srv := New(c, Options{Version: "test", DebugStream: true})
 
 	registryTools := make([]string, 0, len(srv.tools))
 	for _, tool := range srv.tools {

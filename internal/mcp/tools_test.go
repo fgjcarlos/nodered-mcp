@@ -51,7 +51,7 @@ func newTestServer(t *testing.T, readOnly bool) *Server {
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
-	return New(c, "test", readOnly, false)
+	return New(c, Options{Version: "test", ReadOnly: readOnly})
 }
 
 func toolNames(s *Server) map[string]bool {
@@ -146,7 +146,7 @@ func newTestServerDebugStream(t *testing.T, readOnly, debugStream bool) *Server 
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
-	return New(c, "test", readOnly, debugStream)
+	return New(c, Options{Version: "test", ReadOnly: readOnly, DebugStream: debugStream})
 }
 
 // When MCP_DEBUG_STREAM is off, get_debug_messages must answer with an
@@ -486,7 +486,7 @@ func TestSetContext_HappyPathAndHelperReuse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
-	srv2 := New(c, "test", false, false)
+	srv2 := New(c, Options{Version: "test"})
 
 	makeReq := func(value string) mcp.CallToolRequest {
 		return mcp.CallToolRequest{
@@ -551,7 +551,7 @@ func TestSetContext_RejectsBadScope(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
-	srv2 := New(c, "test", false, false)
+	srv2 := New(c, Options{Version: "test"})
 
 	res, err := srv2.handleSetContext(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{Arguments: map[string]any{
@@ -587,7 +587,7 @@ func TestSetContext_RejectsBadJSONValue(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
-	srv2 := New(c, "test", false, false)
+	srv2 := New(c, Options{Version: "test"})
 
 	res, err := srv2.handleSetContext(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{Arguments: map[string]any{
@@ -626,7 +626,7 @@ func TestSetContext_RequiresIdForFlow(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
-	srv2 := New(c, "test", false, false)
+	srv2 := New(c, Options{Version: "test"})
 	srv2.ctxHelper = &setContextHelper{
 		flowID:     "runtime_helper_tab",
 		injectID:   setContextHelperInjectID,
@@ -671,7 +671,7 @@ func TestSetContext_FlowScopeRejectsForeignId(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
-	srv2 := New(c, "test", false, false)
+	srv2 := New(c, Options{Version: "test"})
 	srv2.ctxHelper = &setContextHelper{
 		flowID:     "runtime_helper_tab",
 		injectID:   setContextHelperInjectID,
@@ -720,7 +720,7 @@ func TestSetContext_AcceptsRealRuntimeId(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
-	s := New(c, "test", false, false)
+	s := New(c, Options{Version: "test"})
 	s.ctxHelper = &setContextHelper{
 		flowID:     "d23de851e7ed4098",
 		injectID:   setContextHelperInjectID,
@@ -767,7 +767,7 @@ func TestSetContext_WithheldInReadOnly(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
-	ro := New(c, "test", true, false)
+	ro := New(c, Options{Version: "test", ReadOnly: true})
 
 	names := toolNames(ro)
 	if names["set_context"] {
@@ -790,7 +790,7 @@ func TestGetRuntimeLogs_NotFoundSurfacesActionableHint(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
-	s := New(c, "test", false, false)
+	s := New(c, Options{Version: "test"})
 
 	res, err := s.handleGetRuntimeLogs(context.Background(), mcp.CallToolRequest{})
 	if err != nil {
@@ -830,7 +830,7 @@ func TestGetRuntimeLogs_ReturnsLines(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
-	s := New(c, "test", false, false)
+	s := New(c, Options{Version: "test"})
 
 	res, err := s.handleGetRuntimeLogs(context.Background(), mcp.CallToolRequest{})
 	if err != nil {
@@ -860,7 +860,7 @@ func TestGetRuntimeLogs_FilterByLevel(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
-	s := New(c, "test", false, false)
+	s := New(c, Options{Version: "test"})
 
 	res, _ := s.handleGetRuntimeLogs(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{Arguments: map[string]any{"level": "error"}},
@@ -885,7 +885,7 @@ func TestGetRuntimeLogs_RejectsBadLevel(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
-	s := New(c, "test", false, false)
+	s := New(c, Options{Version: "test"})
 
 	res, _ := s.handleGetRuntimeLogs(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{Arguments: map[string]any{"level": "trace"}},
@@ -913,7 +913,7 @@ func TestGetRuntimeLogs_LineOffset(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
-	s := New(c, "test", false, false)
+	s := New(c, Options{Version: "test"})
 
 	res, _ := s.handleGetRuntimeLogs(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{Arguments: map[string]any{"since": "-2"}},
@@ -937,7 +937,7 @@ func TestGetRuntimeLogs_RejectsBadSince(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
-	s := New(c, "test", false, false)
+	s := New(c, Options{Version: "test"})
 
 	for _, bad := range []string{"not-a-date", "-abc", "0", "-0", "yesterday"} {
 		t.Run(bad, func(t *testing.T) {
@@ -1102,5 +1102,230 @@ func TestGetNodeStatus_ErroredNodeWithLastError(t *testing.T) {
 	}
 	if !strings.Contains(tc.Text, "broker unreachable") {
 		t.Errorf("expected the last_error to survive recovery, got %q", tc.Text)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Issue #81: defense in depth against RCE via the Node-RED "exec" / "system"
+// node types. The MCP write tools must refuse to deploy a flow that contains
+// any node type in MCP_NODE_DENYLIST, before any side effect on Node-RED
+// (backup, deploy) is triggered.
+// ---------------------------------------------------------------------------
+
+// serverWithDenylist builds a Server whose denylist contains exactly
+// the given node types. Used by the issue #81 tests so each scenario
+// controls the policy independently of the global config layer.
+func serverWithDenylist(t *testing.T, types ...string) (*Server, *httptest.Server) {
+	t.Helper()
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Snapshot-only: any handler reaching this point means the
+		// denylist guard let the request through, which is what the
+		// "positive" tests assert. The "negative" tests expect an
+		// early error and so never arrive here.
+		t.Errorf("denylist let an exec/system node through to the runtime: %s %s", r.Method, r.URL.Path)
+		_, _ = w.Write([]byte("[]"))
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	return New(c, Options{Version: "test", NodeDenylist: types}), srv
+}
+
+// TestCreateFlow_RejectsDeniedNodeType covers the headline acceptance
+// criterion for issue #81: a write tool must refuse to deploy a flow
+// containing an exec node when "exec" is in the denylist. The
+// rejection has to fire BEFORE the runtime is contacted, so the
+// httptest server's `t.Errorf` in serverWithDenylist would catch any
+// leak — and it never fires, because the handler returns the typed
+// error to the MCP layer first.
+func TestCreateFlow_RejectsDeniedNodeType(t *testing.T) {
+	s, _ := serverWithDenylist(t, "exec")
+
+	res, err := s.handleCreateFlow(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"flow": `{"label":"pwn","nodes":[{"id":"e1","type":"exec","z":"pwn","x":140,"y":140,"command":"id","wires":[]}]}`,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("handleCreateFlow returned err=%v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result, got %+v", res)
+	}
+	tc, ok := res.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", res.Content[0])
+	}
+	if !strings.Contains(tc.Text, "MCP_NODE_DENYLIST") {
+		t.Errorf("error must name MCP_NODE_DENYLIST so the operator can act, got %q", tc.Text)
+	}
+	if !strings.Contains(tc.Text, `"exec"`) {
+		t.Errorf("error must echo the denied type back, got %q", tc.Text)
+	}
+}
+
+// TestCreateFlow_AllowsNonDeniedNodeType is the positive case for the
+// same denylist: an inject node is not exec/system, so the write goes
+// through to the runtime. The httptest mock returns an empty array
+// for GET /flows (the backup snapshot) and accepts the POST /flow.
+func TestCreateFlow_AllowsNonDeniedNodeType(t *testing.T) {
+	var posted bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == "POST" && r.URL.Path == "/flow":
+			posted = true
+			body, _ := io.ReadAll(r.Body)
+			if !strings.Contains(string(body), `"type":"inject"`) {
+				t.Errorf("expected the inject node type to be forwarded, got %s", body)
+			}
+			_, _ = w.Write(body)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	s := New(c, Options{Version: "test", NodeDenylist: []string{"exec"}})
+
+	res, err := s.handleCreateFlow(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"flow": `{"label":"safe","nodes":[{"id":"i1","type":"inject","z":"safe","x":140,"y":140,"wires":[]}]}`,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("handleCreateFlow returned err=%v", err)
+	}
+	if res == nil || res.IsError {
+		t.Fatalf("expected a non-error result, got %+v", res)
+	}
+	if !posted {
+		t.Error("non-denied node must reach the runtime POST /flow")
+	}
+}
+
+// TestCreateFlow_EmptyDenylistAllowsExec is the explicit opt-out:
+// MCP_NODE_DENYLIST="" translates to a Server built with no denylist,
+// and the write goes through. This is the path operators use when
+// they need exec/system intentionally.
+func TestCreateFlow_EmptyDenylistAllowsExec(t *testing.T) {
+	var posted bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == "POST" && r.URL.Path == "/flow":
+			posted = true
+			body, _ := io.ReadAll(r.Body)
+			if !strings.Contains(string(body), `"type":"exec"`) {
+				t.Errorf("expected the exec node to be forwarded under empty denylist, got %s", body)
+			}
+			_, _ = w.Write(body)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	// Empty (non-nil) NodeDenylist = "opt out" — every type is allowed.
+	s := New(c, Options{Version: "test", NodeDenylist: []string{}})
+
+	res, err := s.handleCreateFlow(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"flow": `{"label":"explicit","nodes":[{"id":"e1","type":"exec","z":"explicit","x":140,"y":140,"command":"id","wires":[]}]}`,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("handleCreateFlow returned err=%v", err)
+	}
+	if res == nil || res.IsError {
+		t.Fatalf("expected a non-error result under empty denylist, got %+v", res)
+	}
+	if !posted {
+		t.Error("exec node must reach the runtime under empty denylist")
+	}
+}
+
+// TestUpdateFlow_RejectsDeniedNodeType confirms the denylist is wired
+// into update_flow too — the issue #81 plan lists all four write
+// tools. Same shape as TestCreateFlow_RejectsDeniedNodeType, but
+// through the PUT /flow/:id path.
+func TestUpdateFlow_RejectsDeniedNodeType(t *testing.T) {
+	s, _ := serverWithDenylist(t, "exec")
+
+	res, err := s.handleUpdateFlow(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"id":   "tabA",
+			"flow": `{"label":"pwn","nodes":[{"id":"e1","type":"exec","z":"tabA","x":140,"y":140,"command":"id","wires":[]}]}`,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("handleUpdateFlow returned err=%v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result, got %+v", res)
+	}
+	tc := res.Content[0].(mcp.TextContent)
+	if !strings.Contains(tc.Text, "MCP_NODE_DENYLIST") || !strings.Contains(tc.Text, `"exec"`) {
+		t.Errorf("error must mention denylist + denied type, got %q", tc.Text)
+	}
+}
+
+// TestAddNode_RejectsDeniedNodeType covers the third write tool: a
+// single node payload (the add_node argument shape) is checked the
+// same way a flow document is.
+func TestAddNode_RejectsDeniedNodeType(t *testing.T) {
+	s, _ := serverWithDenylist(t, "exec")
+
+	res, err := s.handleAddNode(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"flow_id": "tabA",
+			"node":    map[string]any{"id": "e1", "type": "exec", "z": "tabA", "x": 140, "y": 140, "command": "id", "wires": []any{}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("handleAddNode returned err=%v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result, got %+v", res)
+	}
+	tc := res.Content[0].(mcp.TextContent)
+	if !strings.Contains(tc.Text, "MCP_NODE_DENYLIST") || !strings.Contains(tc.Text, `"exec"`) {
+		t.Errorf("error must mention denylist + denied type, got %q", tc.Text)
+	}
+}
+
+// TestSetFlows_RejectsDeniedNodeType covers the full-deployment tool:
+// the flows argument is a JSON array of flows, each of which may
+// contain nodes. A single denied node in any flow rejects the entire
+// call. This is the worst-case path because set_flows replaces the
+// whole config.
+func TestSetFlows_RejectsDeniedNodeType(t *testing.T) {
+	s, _ := serverWithDenylist(t, "exec")
+
+	res, err := s.handleSetFlows(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"flows": `[
+				{"type":"tab","id":"tabA","label":"A"},
+				{"type":"exec","id":"e1","z":"tabA","x":140,"y":140,"command":"id","wires":[]}
+			]`,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("handleSetFlows returned err=%v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result, got %+v", res)
+	}
+	tc := res.Content[0].(mcp.TextContent)
+	if !strings.Contains(tc.Text, "MCP_NODE_DENYLIST") || !strings.Contains(tc.Text, `"exec"`) {
+		t.Errorf("error must mention denylist + denied type, got %q", tc.Text)
 	}
 }
