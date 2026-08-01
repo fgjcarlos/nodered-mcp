@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -149,6 +150,19 @@ func Load() (*Config, error) {
 func (c *Config) validate() error {
 	if c.NodeRedURL == "" {
 		return errors.New("NODERED_URL is required")
+	}
+	// SSRF guard: only allow http and https schemes. Other schemes
+	// (file://, ftp://, gopher://) could turn the MCP into an SSRF
+	// proxy against the Node-RED host or its network.
+	u, err := url.Parse(c.NodeRedURL)
+	if err != nil {
+		return fmt.Errorf("NODERED_URL is not a valid URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("NODERED_URL must use http or https scheme, got %q (full value: %q)", u.Scheme, c.NodeRedURL)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("NODERED_URL must include a host, got %q", c.NodeRedURL)
 	}
 	switch c.MCPTransport {
 	case "stdio":
