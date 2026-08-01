@@ -349,6 +349,14 @@ func ConnectNodesInFlow(flow RawFlow, fromID string, port int, toID string) (Raw
 	if fromID == "" || toID == "" {
 		return nil, fmt.Errorf("both a source and a target node id are required")
 	}
+	// Wiring a node to itself is an instant infinite loop at runtime: the
+	// source fires, the wire routes the message back to the same source,
+	// which fires again, and Node-RED's event loop saturates on the first
+	// inject. Refuse it explicitly so the caller fixes the topology rather
+	// than discovering it as a runtime that hangs on deploy.
+	if fromID == toID {
+		return nil, fmt.Errorf("cannot wire node %q to itself: creates an infinite message loop", fromID)
+	}
 	if port < 0 || port > 999 {
 		return nil, fmt.Errorf("port %d is out of range (0-999); most nodes have 1 output and switch nodes have at most a few", port)
 	}

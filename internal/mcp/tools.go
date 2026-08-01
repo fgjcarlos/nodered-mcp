@@ -1020,6 +1020,9 @@ func (s *Server) handleConnectNodes(ctx context.Context, req mcp.CallToolRequest
 	if port < 0 || port > 999 {
 		return mcp.NewToolResultError(fmt.Sprintf("port %d is out of range (must be 0-999)", port)), nil
 	}
+	if fromID == toID {
+		return mcp.NewToolResultError("from_id and to_id must differ (wiring a node to itself creates an infinite message loop)"), nil
+	}
 	slog.Debug("tool: connect_nodes", "flow_id", flowID, "from", fromID, "port", port, "to", toID)
 
 	if err := s.nrClient.ConnectNodes(ctx, flowID, fromID, port, toID); err != nil {

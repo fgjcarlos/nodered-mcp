@@ -1334,3 +1334,34 @@ func TestSetFlows_RejectsDeniedNodeType(t *testing.T) {
 		t.Errorf("error must mention denylist + denied type, got %q", tc.Text)
 	}
 }
+
+// TestHandleConnectNodes_SelfLoopRejected covers the MCP-layer guard added
+// for issue #414: when from_id and to_id point at the same node, the
+// handler must reject the call with a clear error before touching the
+// runtime. The handler is invoked directly, so no httptest server is
+// needed — the guard fires before any Node-RED call.
+func TestHandleConnectNodes_SelfLoopRejected(t *testing.T) {
+	s := newTestServer(t, false)
+
+	res, err := s.handleConnectNodes(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"flow_id": "tabA",
+			"from_id": "n1",
+			"to_id":   "n1",
+			"port":    float64(0),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("handleConnectNodes returned err=%v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result for self-loop, got %+v", res)
+	}
+	tc := res.Content[0].(mcp.TextContent)
+	if !strings.Contains(tc.Text, "from_id and to_id must differ") {
+		t.Errorf("error must explain the self-loop guard, got %q", tc.Text)
+	}
+	if !strings.Contains(tc.Text, "infinite") {
+		t.Errorf("error must mention the infinite loop, got %q", tc.Text)
+	}
+}
