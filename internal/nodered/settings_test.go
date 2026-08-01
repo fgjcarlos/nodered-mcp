@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGetSettings(t *testing.T) {
@@ -309,5 +310,54 @@ func TestSearchNodes_ClampsLimitToDefault(t *testing.T) {
 	}
 	if gotSize != "10" {
 		t.Errorf("expected default size 10, got %q", gotSize)
+	}
+}
+
+// TestSearchNodes_VerifiesTLS_EvenIfNodeRedInsecure is the regression
+// test for issue #83: NODERED_INSECURE exists to tolerate a self-signed
+// cert on a local Node-RED. Before the fix, the same *http.Client was
+// reused for the outbound npm registry call, so enabling the flag also
+// disabled TLS verification for the public registry — a MITM hole on
+// the install path. This test pins the contract: when the registry
+// endpoint is served with a self-signed cert, SearchNodes fails with a
+// TLS error even though the client was built with Insecure=true.
+func TestSearchNodes_VerifiesTLS_EvenIfNodeRedInsecure(t *testing.T) {
+	// httptest.NewTLSServer presents a self-signed cert; the default
+	// http.Client (which registryClient is) refuses to talk to it.
+	registrySrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"objects":[]}`))
+	}))
+	t.Cleanup(registrySrv.Close)
+
+	// The Node-RED side does not matter for this test — only the registry
+	// transport does. Use a plain httptest server; Insecure=true is what
+	// we are asserting is *not* applied to the registry call.
+	nodeRedSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("node-red admin server should not be hit: %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(nodeRedSrv.Close)
+
+	c, err := NewClient(Options{
+		BaseURL:       nodeRedSrv.URL,
+		SearchBaseURL: registrySrv.URL,
+		Insecure:      true,
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err = c.SearchNodes(ctx, "dashboard", 5)
+	if err == nil {
+		t.Fatal("expected TLS verification error from SearchNodes against a self-signed registry, got nil")
+	}
+	msg := err.Error()
+	// Go's TLS validator emits variations of "x509: certificate signed by
+	// unknown authority" / "tls: failed to verify certificate" depending
+	// on the version and transport. Match the stable substrings: "tls" or
+	// "x509" or "certificate".
+	if !strings.Contains(msg, "tls") && !strings.Contains(msg, "x509") && !strings.Contains(msg, "certificate") {
+		t.Errorf("expected a TLS/certificate error, got: %v", err)
 	}
 }
