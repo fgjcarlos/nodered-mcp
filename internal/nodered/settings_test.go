@@ -208,11 +208,6 @@ func TestSearchNodes_ParsesRegistryResponse(t *testing.T) {
 					"date":"2026-01-15T12:00:00.000Z",
 					"links":{"npm":"https://www.npmjs.com/package/node-red-dashboard"},
 					"publisher":{"username":"dceejay"}
-				}},
-				{"package":{
-					"name":"unrelated-pkg",
-					"description":"not a node-red package",
-					"version":"1.0.0"
 				}}
 			]
 		}`))
@@ -228,7 +223,7 @@ func TestSearchNodes_ParsesRegistryResponse(t *testing.T) {
 		t.Fatalf("SearchNodes: %v", err)
 	}
 	if len(got) != 1 {
-		t.Fatalf("expected 1 hit (unrelated-pkg filtered out), got %d: %+v", len(got), got)
+		t.Fatalf("expected 1 hit, got %d: %+v", len(got), got)
 	}
 	h := got[0]
 	if h.Name != "node-red-dashboard" {
@@ -242,6 +237,60 @@ func TestSearchNodes_ParsesRegistryResponse(t *testing.T) {
 	}
 	if h.Publisher != "dceejay" {
 		t.Errorf("unexpected publisher: %q", h.Publisher)
+	}
+}
+
+func TestSearchNodes_KeepsScopedPackages(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/-/v1/search") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if !strings.Contains(r.URL.RawQuery, "keywords:node-red") {
+			t.Errorf("query should be scoped to the node-red keyword: %s", r.URL.RawQuery)
+		}
+		_, _ = w.Write([]byte(`{
+			"objects":[
+				{"package":{
+					"name":"node-red-dashboard",
+					"description":"Node-RED Dashboard 1.x",
+					"version":"3.6.0",
+					"date":"2026-01-15T12:00:00.000Z",
+					"links":{"npm":"https://www.npmjs.com/package/node-red-dashboard"},
+					"publisher":{"username":"dceejay"}
+				}},
+				{"package":{
+					"name":"@flowfuse/node-red-dashboard",
+					"description":"Node-RED Dashboard 2.0 (official)",
+					"version":"1.18.0",
+					"date":"2026-02-10T09:00:00.000Z",
+					"links":{"npm":"https://www.npmjs.com/package/@flowfuse/node-red-dashboard"},
+					"publisher":{"username":"flowfuse"}
+				}}
+			]
+		}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := NewClient(Options{BaseURL: "http://x", SearchBaseURL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.SearchNodes(context.Background(), "dashboard", 5)
+	if err != nil {
+		t.Fatalf("SearchNodes: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 hits (unscoped + scoped), got %d: %+v", len(got), got)
+	}
+	names := map[string]bool{}
+	for _, h := range got {
+		names[h.Name] = true
+	}
+	if !names["node-red-dashboard"] {
+		t.Errorf("missing unscoped node-red-dashboard in results: %+v", got)
+	}
+	if !names["@flowfuse/node-red-dashboard"] {
+		t.Errorf("missing scoped @flowfuse/node-red-dashboard in results: %+v", got)
 	}
 }
 

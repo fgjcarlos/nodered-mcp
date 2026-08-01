@@ -170,11 +170,11 @@ func (c *Client) SearchNodes(ctx context.Context, query string, limit int) ([]Se
 	out := make([]SearchResult, 0, len(raw.Objects))
 	for _, o := range raw.Objects {
 		p := o.Package
-		// Filter out packages that don't actually have the node-red keyword;
-		// the registry's text search is fuzzy and can match unrelated packages.
-		if !strings.HasPrefix(p.Name, "node-red") {
-			continue
-		}
+		// No name-prefix filter: the registry endpoint above already scopes
+		// the search to packages tagged with the "node-red" keyword. An
+		// additional HasPrefix("node-red") guard here would drop legitimate
+		// scoped packages like @flowfuse/node-red-dashboard (the official
+		// Node-RED Dashboard 2.0) for no benefit.
 		link := p.Links.NPM
 		if link == "" {
 			link = p.Links.Homepage
