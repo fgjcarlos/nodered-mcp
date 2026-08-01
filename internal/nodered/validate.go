@@ -2,7 +2,9 @@ package nodered
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
+	"strings"
 )
 
 // Structural checks over a single flow tab document.
@@ -38,6 +40,12 @@ const (
 	// node in the same document. Node-RED accepts these in silence and the
 	// flow simply never delivers to the missing endpoint.
 	IssueDanglingWire FlowIssueKind = "dangling_wire"
+	// IssueInvalidWires is a node whose "wires" field is not the shape
+	// Node-RED expects (an array of arrays of target ids). Common when an
+	// LLM hands back a single string or a number. The previous validator
+	// silently skipped such nodes, which let the corruption be written to
+	// the runtime and break every later edit through the MCP.
+	IssueInvalidWires FlowIssueKind = "invalid_wires"
 )
 
 // FlowIssue describes one structural problem in a flow document. NodeID is the
@@ -101,8 +109,26 @@ func ValidateFlow(flow RawFlow) []FlowIssue {
 	}
 	for _, collection := range [][]map[string]json.RawMessage{doc.Nodes, doc.Configs} {
 		for _, node := range collection {
+			rawWires, ok := node["wires"]
+			if !ok {
+				continue
+			}
 			wires, err := decodeWires(node)
-			if err != nil || wires == nil {
+			if err != nil {
+				// decodeWires refused the shape (e.g. wires is a JSON
+				// string instead of an array of arrays). Surfacing the
+				// problem here is the whole point of validate_flow:
+				// the previous behaviour was a silent `continue`, which
+				// let the corrupted node be written and broke every
+				// later edit.
+				issues = append(issues, FlowIssue{
+					Kind:    IssueInvalidWires,
+					NodeID:  nodeID(node),
+					Message: invalidWiresMessage(nodeID(node), rawWires),
+				})
+				continue
+			}
+			if wires == nil {
 				continue
 			}
 			src := nodeID(node)
@@ -164,4 +190,100 @@ func wireDanglingMessage(src string, port int, tgt string) string {
 		return "a wire on port " + strconv.Itoa(port) + " targets unknown node \"" + tgt + "\""
 	}
 	return "node \"" + src + "\" wires port " + strconv.Itoa(port) + " to unknown node \"" + tgt + "\"; Node-RED accepts dangling wires silently and the flow never delivers to that endpoint"
+}
+
+// ValidateFlows validates every tab in raw and aggregates the issues.
+//
+// raw is one of:
+//
+//   - a single nested tab doc (the shape ValidateFlow already accepts);
+//   - a flat array of tabs and nodes (the shape GET /flows returns).
+//
+// Issue #413: create_flow / update_flow already route their input through
+// normalizeFlowDoc, which accepts a flat-array payload and splits it into
+// per-tab documents. validate_flow used to call ValidateFlow on the raw
+// bytes, so the same flat-array payload that the write tools accept was
+// rejected here as invalid_document. This function closes that gap by
+// iterating the tabs in a flat array and validating each one.
+//
+// An empty array, or a flat array with no "type":"tab" element, falls
+// through to ValidateFlow, which reports a single invalid_document issue.
+// That keeps the "this is not a flow document" answer for genuinely
+// broken input.
+func ValidateFlows(raw RawFlow) []FlowIssue {
+	var arr []json.RawMessage
+	if err := json.Unmarshal(raw, &arr); err != nil {
+		// Not a JSON array; treat as a single tab doc.
+		return ValidateFlow(raw)
+	}
+	var tabIDs []string
+	for _, item := range arr {
+		var meta struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(item, &meta); err == nil && meta.Type == "tab" && meta.ID != "" {
+			tabIDs = append(tabIDs, meta.ID)
+		}
+	}
+	if len(tabIDs) == 0 {
+		// A flat array with no tabs is not a valid flow document; let
+		// ValidateFlow surface that as a single invalid_document issue.
+		return ValidateFlow(raw)
+	}
+	var all []FlowIssue
+	for _, id := range tabIDs {
+		nested, ok := synthesizeFlowFromFlat(raw, id)
+		if !ok {
+			all = append(all, FlowIssue{
+				Kind:    "invalid_document",
+				Message: "no tab with id \"" + id + "\" in the supplied flat flow array",
+			})
+			continue
+		}
+		all = append(all, ValidateFlow(nested)...)
+	}
+	if all == nil {
+		all = []FlowIssue{}
+	}
+	return all
+}
+
+// jsonTypeOf reports the JSON shape a raw value carries — "object", "array",
+// "string", "number", "boolean", "null", or "empty". Used to surface a useful
+// message when a node's wires field is the wrong shape (the most common case
+// is a single string like "not-an-array" produced by an LLM). It only inspects
+// the first non-whitespace byte, which is enough to disambiguate the JSON
+// grammar without paying for a full decode.
+func jsonTypeOf(raw json.RawMessage) string {
+	s := strings.TrimSpace(string(raw))
+	if len(s) == 0 {
+		return "empty"
+	}
+	switch s[0] {
+	case '{':
+		return "object"
+	case '[':
+		return "array"
+	case '"':
+		return "string"
+	case 't', 'f':
+		return "boolean"
+	case 'n':
+		return "null"
+	default:
+		return "number"
+	}
+}
+
+// invalidWiresMessage formats a FlowIssue message for a node whose wires
+// field is the wrong shape. Names the node id when one is present, and
+// always reports the actual JSON type encountered so the operator can fix
+// it without re-parsing the document.
+func invalidWiresMessage(id string, raw json.RawMessage) string {
+	got := jsonTypeOf(raw)
+	if id == "" {
+		return fmt.Sprintf("a node has invalid wires (expected array of arrays, got %s); Node-RED will reject the whole flow at deploy time", got)
+	}
+	return fmt.Sprintf("node %q has invalid wires (expected array of arrays, got %s); Node-RED will reject the whole flow at deploy time", id, got)
 }

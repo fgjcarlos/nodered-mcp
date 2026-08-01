@@ -196,6 +196,84 @@ func TestHandleGetDebugMessages_OnButUnavailable(t *testing.T) {
 	}
 }
 
+// TestHandleValidateFlow_FlatArrayInput closes issue #413: validate_flow
+// used to call ValidateFlow on the raw bytes, so a flat-array payload
+// (the same shape create_flow / update_flow accept) was rejected with
+// invalid_document. The handler now routes through ValidateFlows, which
+// iterates the tabs in a flat array and validates each one. A clean
+// flat-array payload must come back with zero issues and no
+// invalid_document mention.
+func TestHandleValidateFlow_FlatArrayInput(t *testing.T) {
+	s := newTestServer(t, false)
+
+	flat := []any{
+		map[string]any{
+			"type":  "tab",
+			"id":    "t1",
+			"label": "X",
+		},
+		map[string]any{
+			"id":    "n1",
+			"type":  "inject",
+			"z":     "t1",
+			"x":     140,
+			"y":     140,
+			"wires": []any{},
+		},
+	}
+
+	res, err := s.handleValidateFlow(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{"flow": flat}},
+	})
+	if err != nil {
+		t.Fatalf("handleValidateFlow returned an error: %v", err)
+	}
+	if res == nil || len(res.Content) == 0 {
+		t.Fatal("expected a result with content, got nil")
+	}
+	tc, ok := res.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", res.Content[0])
+	}
+	if strings.Contains(tc.Text, "invalid_document") {
+		t.Errorf("validate_flow must accept the flat-array shape, got: %q", tc.Text)
+	}
+	if !strings.Contains(tc.Text, "ok") {
+		t.Errorf("expected validate_flow to report ok on a clean flat array, got: %q", tc.Text)
+	}
+}
+
+// TestHandleValidateFlow_StillRejectsGenuinelyInvalidPayload guards
+// against the "now we always pass" regression: a tab object whose
+// "nodes" field is not an array must still surface as invalid_document,
+// because the validator cannot make sense of it.
+func TestHandleValidateFlow_StillRejectsGenuinelyInvalidPayload(t *testing.T) {
+	s := newTestServer(t, false)
+
+	bad := map[string]any{
+		"id":    "t1",
+		"label": "X",
+		"nodes": "not-an-array",
+	}
+
+	res, err := s.handleValidateFlow(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{"flow": bad}},
+	})
+	if err != nil {
+		t.Fatalf("handleValidateFlow returned an error: %v", err)
+	}
+	if res == nil || len(res.Content) == 0 {
+		t.Fatal("expected a result with content, got nil")
+	}
+	tc, ok := res.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", res.Content[0])
+	}
+	if !strings.Contains(tc.Text, "invalid_document") {
+		t.Errorf("expected validate_flow to report invalid_document for a malformed payload, got: %q", tc.Text)
+	}
+}
+
 // TestNormalizeFlowDoc covers the auto-fill guard reported in Mavis's
 // 2026-07-27 testing pass: a tab object without "nodes" must round-trip
 // with an empty array rather than bouncing off the runtime as
@@ -1332,6 +1410,44 @@ func TestSetFlows_RejectsDeniedNodeType(t *testing.T) {
 	tc := res.Content[0].(mcp.TextContent)
 	if !strings.Contains(tc.Text, "MCP_NODE_DENYLIST") || !strings.Contains(tc.Text, `"exec"`) {
 		t.Errorf("error must mention denylist + denied type, got %q", tc.Text)
+	}
+}
+
+// TestHandleValidateFlow_StringWiresReturnsIssue is the MCP-layer pin
+// for issue #415: a model that hands a node with a string-typed wires
+// field back to validate_flow used to get a misleading "0 issues" answer
+// because the validator silently skipped the bad node. The handler must
+// surface an issue that names the offending node and the JSON shape it
+// actually saw, so the model can fix the document before retrying.
+func TestHandleValidateFlow_StringWiresReturnsIssue(t *testing.T) {
+	s := newTestServer(t, false)
+
+	res, err := s.handleValidateFlow(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"flow": `{"id":"tabA","label":"Home","nodes":[{"id":"n1","type":"inject","z":"tabA","x":140,"y":140,"wires":"not-an-array"}]}`,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("handleValidateFlow returned err=%v", err)
+	}
+	if res == nil || res.IsError {
+		t.Fatalf("expected a non-error result (issues are reported in-body, not as a tool error), got %+v", res)
+	}
+	tc, ok := res.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", res.Content[0])
+	}
+	if !strings.Contains(tc.Text, `"n1"`) {
+		t.Errorf("response must name the offending node id, got %q", tc.Text)
+	}
+	if !strings.Contains(tc.Text, "invalid_wires") {
+		t.Errorf("response must mention the issue kind, got %q", tc.Text)
+	}
+	if !strings.Contains(tc.Text, "string") {
+		t.Errorf("response must mention the actual JSON type encountered, got %q", tc.Text)
+	}
+	if !strings.Contains(tc.Text, "1 issue") {
+		t.Errorf("response must report a non-zero issue count, got %q", tc.Text)
 	}
 }
 
