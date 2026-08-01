@@ -1020,6 +1020,9 @@ func (s *Server) handleConnectNodes(ctx context.Context, req mcp.CallToolRequest
 	if port < 0 || port > 999 {
 		return mcp.NewToolResultError(fmt.Sprintf("port %d is out of range (must be 0-999)", port)), nil
 	}
+	if fromID == toID {
+		return mcp.NewToolResultError("from_id and to_id must differ (wiring a node to itself creates an infinite message loop)"), nil
+	}
 	slog.Debug("tool: connect_nodes", "flow_id", flowID, "from", fromID, "port", port, "to", toID)
 
 	if err := s.nrClient.ConnectNodes(ctx, flowID, fromID, port, toID); err != nil {
@@ -1048,10 +1051,11 @@ func (s *Server) handleDeleteFlow(ctx context.Context, req mcp.CallToolRequest) 
 
 // handleValidateFlow runs the structural checks against an in-memory flow
 // document. It does not contact the runtime. The "flow" argument accepts
-// either a JSON-encoded string or a flow object directly, matching the
-// shape create_flow / update_flow accept — so a model can copy the same
-// payload it would have written, run validate_flow over it, and only call
-// the write tool after the issue list comes back empty.
+// either a JSON-encoded string, a flow object directly, or a flat array
+// of tabs and nodes — the same shapes create_flow / update_flow accept
+// — so a model can copy the same payload it would have written, run
+// validate_flow over it, and only call the write tool after the issue
+// list comes back empty.
 func (s *Server) handleValidateFlow(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	raw, err := flowParam(req, "flow")
 	if err != nil {
@@ -1059,7 +1063,7 @@ func (s *Server) handleValidateFlow(_ context.Context, req mcp.CallToolRequest) 
 	}
 	slog.Debug("tool: validate_flow")
 
-	issues := nodered.ValidateFlow(nodered.RawFlow(raw))
+	issues := nodered.ValidateFlows(nodered.RawFlow(raw))
 	resp := struct {
 		OK     bool                `json:"ok"`
 		Issues []nodered.FlowIssue `json:"issues"`
@@ -1622,10 +1626,14 @@ func prettyJSON(raw []byte) string {
 	return buf.String()
 }
 
-// flowParam reads a "flow" argument as either a JSON-encoded string or a
-// flow object. The two shapes are equivalent on the wire (Node-RED's admin
-// API wants a single flow tab as a JSON object), but accepting the object
-// directly matches how MCP clients naturally describe flows.
+// flowParam reads a "flow" argument as either a JSON-encoded string, a
+// flow object directly, or a flat array of tabs and nodes (the shape
+// GET /flows returns). All three end up as json.RawMessage the handler
+// can hand to the validator. The flat-array case is what validate_flow
+// needs to accept the same payload create_flow / update_flow already do
+// (issue #413); a flat array passed to create_flow / update_flow still
+// falls through to normalizeFlowDoc, which returns a clear "pass the
+// flow id" error when the array is supplied without one.
 func flowParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) {
 	args := req.GetArguments()
 	v, ok := args[key]
@@ -1636,7 +1644,7 @@ func flowParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) {
 	case string:
 		raw := json.RawMessage(x)
 		if !json.Valid(raw) {
-			return nil, fmt.Errorf("%q must be a JSON-encoded flow object or a flow object passed directly", key)
+			return nil, fmt.Errorf("%q must be a JSON-encoded flow document or a flow document passed directly", key)
 		}
 		return raw, nil
 	case map[string]any:
@@ -1645,8 +1653,14 @@ func flowParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) {
 			return nil, fmt.Errorf("encoding %q: %v", key, err)
 		}
 		return raw, nil
+	case []any:
+		raw, err := json.Marshal(x)
+		if err != nil {
+			return nil, fmt.Errorf("encoding %q: %v", key, err)
+		}
+		return raw, nil
 	default:
-		return nil, fmt.Errorf("%q must be a JSON-encoded flow object or a flow object passed directly", key)
+		return nil, fmt.Errorf("%q must be a JSON-encoded flow document or a flow document passed directly", key)
 	}
 }
 
