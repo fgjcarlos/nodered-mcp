@@ -135,7 +135,10 @@ func (c *Client) SearchNodes(ctx context.Context, query string, limit int) ([]Se
 	}
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	// Use the dedicated registry client: it always verifies TLS, independent
+	// of NODERED_INSECURE. Reusing httpClient here would propagate the
+	// admin-side InsecureSkipVerify to the public registry.
+	resp, err := c.registryClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("calling npm registry: %w", err)
 	}

@@ -27,8 +27,14 @@ type Client struct {
 	backupDir  string
 	// insecure is retained because the /comms WebSocket dials separately from
 	// httpClient and needs the same TLS decision.
-	insecure      bool
-	searchBaseURL string
+	insecure bool
+	// registryClient talks to the npm registry (search_nodes). It is kept
+	// separate from httpClient so the NODERED_INSECURE flag, which disables
+	// TLS verification for a local Node-RED with a self-signed cert, does NOT
+	// silently disable verification on the public registry — that would be a
+	// MITM hole on the install path. registryClient always verifies TLS.
+	registryClient *http.Client
+	searchBaseURL  string
 	// writeMu serializes the mutating endpoints (POST /flows, PUT /flow/:id,
 	// DELETE /flow/:id, POST /flows/state, the palette mutations).
 	// Multiple tools/call requests on the same MCP session were racing:
@@ -99,6 +105,13 @@ func NewClient(opts Options) (*Client, error) {
 		}
 	}
 
+	// Outbound calls to the npm registry (search_nodes) always verify TLS,
+	// regardless of NODERED_INSECURE. The insecure flag exists to tolerate a
+	// self-signed cert on a local Node-RED; reusing that transport for the
+	// public registry would silently disable verification there and open the
+	// install path to MITM. See issue #83.
+	registryClient := &http.Client{}
+
 	var auth authStrategy
 	switch {
 	case opts.Token != "":
@@ -109,14 +122,21 @@ func NewClient(opts Options) (*Client, error) {
 		auth = &noAuth{}
 	}
 
+	if opts.Insecure {
+		// Scope the warning explicitly so operators know the flag does NOT
+		// cover outbound calls (e.g. search_nodes against the npm registry).
+		slog.Warn("NODERED_INSECURE=true: TLS verification disabled for the Node-RED admin API only; outbound calls still verify TLS",
+			"scope", "node-red admin")
+	}
 	slog.Debug("nodered client created", "base_url", opts.BaseURL)
 	return &Client{
-		baseURL:       opts.BaseURL,
-		httpClient:    httpClient,
-		auth:          auth,
-		backupDir:     opts.BackupDir,
-		insecure:      opts.Insecure,
-		searchBaseURL: opts.SearchBaseURL,
+		baseURL:        opts.BaseURL,
+		httpClient:     httpClient,
+		auth:           auth,
+		backupDir:      opts.BackupDir,
+		insecure:       opts.Insecure,
+		registryClient: registryClient,
+		searchBaseURL:  opts.SearchBaseURL,
 	}, nil
 }
 
