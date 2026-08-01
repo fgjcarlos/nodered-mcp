@@ -295,6 +295,31 @@ func TestConnectNodesRejectsAPortOverTheBound(t *testing.T) {
 	}
 }
 
+// TestConnectNodesRejectsSelfWire covers issue #414: a node wired to itself
+// fires the source, the wire routes the message back to the same source, and
+// Node-RED's event loop saturates on the first deploy. The error must name
+// the symptom (infinite loop) so the caller knows what was wrong rather than
+// chasing a runtime that hangs.
+func TestConnectNodesRejectsSelfWire(t *testing.T) {
+	_, err := ConnectNodesInFlow(RawFlow(sampleTab), "n1", 0, "n1")
+	if err == nil {
+		t.Fatal("expected wiring a node to itself to be rejected")
+	}
+	if !strings.Contains(err.Error(), "infinite") && !strings.Contains(err.Error(), "to itself") {
+		t.Errorf("error should explain the infinite loop, got: %v", err)
+	}
+}
+
+// TestConnectNodesAcceptsLoopBetweenTwoDistinctNodes guards against the
+// self-loop check firing on a legitimate two-node wire. Two distinct ids are
+// the only thing the new guard cares about; if it ever short-circuits on
+// equality by accident, this regression catches it.
+func TestConnectNodesAcceptsLoopBetweenTwoDistinctNodes(t *testing.T) {
+	if _, err := ConnectNodesInFlow(RawFlow(sampleTab), "n3", 0, "n1"); err != nil {
+		t.Fatalf("wiring two distinct nodes should succeed, got: %v", err)
+	}
+}
+
 // Every edit must leave a document that still passes wire validation, which is
 // what the write path checks before it reaches Node-RED.
 func TestEditsProduceValidFlows(t *testing.T) {

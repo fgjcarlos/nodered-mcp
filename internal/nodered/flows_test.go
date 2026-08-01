@@ -148,6 +148,12 @@ func TestValidateFlowWires(t *testing.T) {
 		{"dangling wire", `{"nodes":[{"id":"a","type":"t","wires":[["ghost"]]}]}`, true},
 		{"not a flow object", `[{"id":"a"}]`, true},
 		{"invalid json", `{nope}`, true},
+		// Issue #415: the previous validator silently continued past a
+		// decodeWires error, so the write path could ship a node whose
+		// wires is a string (or number/object/bool). Both the read and
+		// write paths must refuse the document up front.
+		{"string wires", `{"nodes":[{"id":"a","type":"t","wires":"not-an-array"}]}`, true},
+		{"number wires", `{"nodes":[{"id":"a","type":"t","wires":42}]}`, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

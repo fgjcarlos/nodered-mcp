@@ -377,6 +377,12 @@ func validateFlowWires(raw RawFlow) error {
 			return fmt.Errorf("node %q wires to unknown node %q", issue.NodeID, issue.Target)
 		case "invalid_document":
 			return errors.New(issue.Message)
+		case IssueInvalidWires:
+			// A node with a malformed wires field would be written to the
+			// runtime and then break every subsequent edit through the MCP.
+			// Refuse the write up front, echoing the node id and the
+			// actual JSON shape so the operator can fix it.
+			return errors.New(issue.Message)
 		}
 	}
 	return nil

@@ -136,6 +136,106 @@ func TestValidateFlow_MalformedDocument(t *testing.T) {
 	}
 }
 
+// TestValidateFlow_FlagsStringTypedWires is the headline regression for
+// issue #415: a node whose "wires" field is a JSON string instead of an
+// array of arrays used to fall through a silent `continue` in the wire
+// loop, leaving the corruption to be written to the runtime and breaking
+// every later edit. The validator must surface an IssueInvalidWires
+// entry that names the offending node and the JSON shape it actually
+// saw, so the operator can fix it without re-parsing the document.
+func TestValidateFlow_FlagsStringTypedWires(t *testing.T) {
+	bad := `{
+	  "id":"tabA","label":"Home",
+	  "nodes":[
+	    {"id":"n1","type":"inject","z":"tabA","x":100,"y":80,"wires":"not-an-array"}
+	  ]
+	}`
+	issues := ValidateFlow(RawFlow(bad))
+
+	found := false
+	for _, issue := range issues {
+		if issue.Kind != IssueInvalidWires {
+			continue
+		}
+		if issue.NodeID != "n1" {
+			t.Errorf("expected invalid-wires issue to point at n1, got %q (issues: %+v)", issue.NodeID, issues)
+		}
+		if !strings.Contains(issue.Message, "string") {
+			t.Errorf("expected message to mention the JSON type encountered (string), got %q", issue.Message)
+		}
+		found = true
+	}
+	if !found {
+		t.Errorf("expected an invalid-wires issue for n1, got: %+v", issues)
+	}
+}
+
+// TestValidateFlow_FlagsOtherWrongShapes keeps the other branches of
+// jsonTypeOf honest: a number/object/boolean in the wires slot is the
+// same kind of corruption and must be reported the same way.
+func TestValidateFlow_FlagsOtherWrongShapes(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"number", `{"id":"t","nodes":[{"id":"n1","type":"t","x":1,"y":1,"wires":42}]}`},
+		{"object", `{"id":"t","nodes":[{"id":"n1","type":"t","x":1,"y":1,"wires":{"a":"b"}}]}`},
+		{"boolean", `{"id":"t","nodes":[{"id":"n1","type":"t","x":1,"y":1,"wires":true}]}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			issues := ValidateFlow(RawFlow(tc.body))
+			found := false
+			for _, issue := range issues {
+				if issue.Kind == IssueInvalidWires && issue.NodeID == "n1" {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("expected an invalid-wires issue for n1, got: %+v", issues)
+			}
+		})
+	}
+}
+
+// TestValidateFlow_AcceptsProperlyShapedWires is the regression pin: a
+// clean tab with proper wire arrays must continue to produce no issues,
+// otherwise the new check is over-eager and rejects real flows.
+func TestValidateFlow_AcceptsProperlyShapedWires(t *testing.T) {
+	good := `{
+	  "id":"tabA","label":"Home",
+	  "nodes":[
+	    {"id":"n1","type":"inject","z":"tabA","x":100,"y":80,"wires":[["n2"]]},
+	    {"id":"n2","type":"function","z":"tabA","x":260,"y":80,"func":"return msg;","outputs":1,"wires":[["n3"]]},
+	    {"id":"n3","type":"debug","z":"tabA","x":420,"y":80,"wires":[]}
+	  ],
+	  "configs":[
+	    {"id":"b1","type":"mqtt-broker","z":"tabA","name":"local","broker":"localhost","port":"1883"}
+	  ]
+	}`
+	issues := ValidateFlow(RawFlow(good))
+	if len(issues) != 0 {
+		t.Fatalf("expected 0 issues on properly-shaped wires, got %d: %+v", len(issues), issues)
+	}
+}
+
+// TestValidateFlow_NullWiresIsNotAnIssue guards against the new check
+// treating a legitimate "no wires" (the value is JSON null) as a
+// rejection. Nodes opt out of wiring by writing wires:null; that is a
+// valid shape and must not be flagged.
+func TestValidateFlow_NullWiresIsNotAnIssue(t *testing.T) {
+	good := `{
+	  "id":"tabA","label":"Home",
+	  "nodes":[
+	    {"id":"n1","type":"inject","z":"tabA","x":100,"y":80,"wires":null}
+	  ]
+	}`
+	issues := ValidateFlow(RawFlow(good))
+	if len(issues) != 0 {
+		t.Fatalf("expected 0 issues when wires is JSON null, got %d: %+v", len(issues), issues)
+	}
+}
+
 // The write-path guard now delegates to ValidateFlow. The error string
 // callers have always relied on ("node X wires to unknown node Y") must
 // survive the refactor.
