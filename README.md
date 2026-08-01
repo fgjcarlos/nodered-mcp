@@ -27,7 +27,7 @@ A Spanish version of this document is available at [`README.es.md`](./README.es.
 
 ## Capabilities
 
-37 tools, 3 resources, and 2 prompts. Tools are classified by risk: **read** is side-effect free, **write** mutates persisted configuration and takes a backup first, **action** has a runtime side effect that is not persisted.
+43 tools, 3 resources, and 2 prompts. Tools are classified by risk: **read** is side-effect free, **write** mutates persisted configuration and takes a backup first, **action** has a runtime side effect that is not persisted.
 
 ### Flows
 
@@ -50,6 +50,12 @@ A Spanish version of this document is available at [`README.es.md`](./README.es.
 | `inject_node` | `POST /inject/:id` | action | Fire an inject node on demand. Optional `payload` (any JSON value) overrides `msg.payload` for that one call — useful for "what if msg.payload = X?" edge cases without redeploying the node (requires Node-RED 5.x) |
 | `export_flow` | `GET /flow/:id` | read | Export a single flow tab as a JSON document, including its nodes and wires |
 | `import_flow` | `POST /flow` | write | Import a flow document previously produced by `export_flow` (or hand-written) into a new tab |
+| `list_subflows` | `GET /flow/global` | read | Every subflow definition installed on the runtime |
+| `get_subflow` | `GET /flow/global` | read | A single subflow definition by id (metadata, ports, env, internal nodes) |
+| `create_subflow` | `PUT /flow/global` | write | Install a new subflow definition |
+| `update_subflow` | `PUT /flow/global` | write | Replace an existing subflow definition |
+| `delete_subflow` | `PUT /flow/global` | write | Remove a subflow definition (the runtime does not check whether instances still reference it) |
+| `instantiate_subflow` | `PUT /flow/:id` | write | Add a new instance of a subflow to a flow tab — `type` is set to `subflow:<id>` and the caller's `params` are merged in verbatim |
 
 ### Palette
 

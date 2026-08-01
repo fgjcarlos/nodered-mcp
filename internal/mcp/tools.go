@@ -282,22 +282,133 @@ func (s *Server) registerTools() {
 	)
 	s.addWriteTool(enableFlow, s.handleEnableFlow)
 
+	// ---- subflow CRUD --------------------------------------------------
+	// Subflow definitions live in /flow/global (the admin API does not
+	// expose them through /flow/:id). All six tools go through the same
+	// nodered.Client helpers which handle the fetch-modify-PUT dance and
+	// the wire/backup guards. The descriptions call this out so a
+	// caller that wants to know why there is no direct endpoint does
+	// not have to read the source.
+	listSubflows := mcp.NewTool("list_subflows",
+		mcp.WithDescription(
+			"List every subflow definition currently installed in the "+
+				"runtime, as opaque JSON.\n\n"+
+				"Subflow definitions are not flow tabs: they live in a separate "+
+				"collection on the runtime, are not addressable by /flow/:id, "+
+				"and are not shown by list_flows (which only returns tabs and "+
+				"their contents). Use this to discover what reusable subflows "+
+				"the instance knows about, then follow up with get_subflow to "+
+				"read one, or instantiate_subflow to drop an instance into a tab. "+
+				"Read-only.",
+		),
+	)
+	s.addReadTool(listSubflows, s.handleListSubflows)
+
+	getSubflow := mcp.NewTool("get_subflow",
+		mcp.WithDescription(
+			"Fetch a single subflow definition by ID, returned as its full "+
+				"JSON document (the subflow metadata, in/out port descriptors, "+
+				"environment variables, and every node the subflow contains). "+
+				"Read-only.",
+		),
+		mcp.WithString("id", mcp.Required(),
+			mcp.Description("The subflow definition ID (as shown by list_subflows).")),
+	)
+	s.addReadTool(getSubflow, s.handleGetSubflow)
+
+	createSubflow := mcp.NewTool("create_subflow",
+		mcp.WithDescription(
+			"Install a new subflow definition. The runtime's subflow collection "+
+				"is replaced wholesale, so this tool reads the current set, "+
+				"appends the new one, and writes the lot back. A backup is taken "+
+				"first.\n\n"+
+				"Pass the full subflow JSON object: at minimum {\"id\":\"...\", "+
+				"\"type\":\"subflow\", \"name\":\"...\"} with a nodes array "+
+				"describing the internal logic. Fails with a clear error if a "+
+				"subflow with the same id already exists; use update_subflow to "+
+				"change an existing one.",
+		),
+		mcp.WithString("subflow", mcp.Required(),
+			mcp.Description("The subflow definition as a JSON object or JSON-encoded string.")),
+	)
+	s.addWriteTool(createSubflow, s.handleCreateSubflow)
+
+	updateSubflow := mcp.NewTool("update_subflow",
+		mcp.WithDescription(
+			"Replace an existing subflow definition. The runtime's subflow "+
+				"collection is replaced wholesale, so this tool reads the "+
+				"current set, swaps the named entry, and writes the lot back. "+
+				"A backup is taken first. Fails with a 404-style error if no "+
+				"subflow with the given id exists; use create_subflow for new "+
+				"ones.",
+		),
+		mcp.WithString("id", mcp.Required(),
+			mcp.Description("The subflow definition ID to replace.")),
+		mcp.WithString("subflow", mcp.Required(),
+			mcp.Description("The replacement subflow definition as a JSON object or JSON-encoded string. The id field must match the path id.")),
+	)
+	s.addWriteTool(updateSubflow, s.handleUpdateSubflow)
+
+	deleteSubflow := mcp.NewTool("delete_subflow",
+		mcp.WithDescription(
+			"Remove a subflow definition. A backup of the current config is "+
+				"taken first. Fails with a 404-style error if no subflow with "+
+				"the given id exists.\n\n"+
+				"Caveat: the runtime does not check that no instance of the "+
+				"subflow is in use before removing the definition. Any "+
+				"instance nodes left in flow tabs will point at a missing "+
+				"subflow after the next deploy — the same behaviour as the "+
+				"editor, where the operator is expected to be aware.",
+		),
+		mcp.WithString("id", mcp.Required(),
+			mcp.Description("The subflow definition ID to remove.")),
+	)
+	s.addWriteTool(deleteSubflow, s.handleDeleteSubflow)
+
+	instantiateSubflow := mcp.NewTool("instantiate_subflow",
+		mcp.WithDescription(
+			"Add a new instance of a subflow to a flow tab.\n\n"+
+				"The new node's type is set to \"subflow:<id>\" — the format the "+
+				"runtime and the editor both expect — and its z (owning tab) is "+
+				"set to flow_id. Other instance properties (name, x, y, wires, "+
+				"env, custom keys) are taken from the params argument verbatim, "+
+				"so callers can pass instance-level overrides without the MCP "+
+				"having to know about them.\n\n"+
+				"A backup is taken before the write and the wires are validated "+
+				"like any other node add. If flow_id does not exist, or "+
+				"subflow_id is not a known definition, the call fails before "+
+				"anything is written. Read /list_subflows first to discover "+
+				"available subflow ids, and /get_flow first to find tab ids.",
+		),
+		mcp.WithString("flow_id", mcp.Required(),
+			mcp.Description("The flow tab to add the instance to (from list_flows or search_flows).")),
+		mcp.WithString("subflow_id", mcp.Required(),
+			mcp.Description("The subflow definition to instantiate (from list_subflows).")),
+		mcp.WithObject("params",
+			mcp.Description("Optional instance overrides, e.g. {\"id\":\"inst1\",\"name\":\"first\",\"x\":200,\"y\":100,\"wires\":[[\"n2\"]],\"env\":[{\"name\":\"foo\",\"value\":\"bar\"}]}. A JSON-encoded string is also accepted."),
+			mcp.AdditionalProperties(true),
+		),
+	)
+	s.addWriteTool(instantiateSubflow, s.handleInstantiateSubflow)
+
 	// ---- inject_node ---------------------------------------------------
 	injectNode := mcp.NewTool("inject_node",
 		mcp.WithDescription(
 			"Manually fire an inject node by its ID (POST /inject/:id), kicking "+
 				"off a flow on demand without opening the editor.\n\n"+
-				"Pass an optional `payload` (any JSON value) to override what the inject "+
-				"sends downstream. The payload becomes the inject's `msg.payload` — "+
-				"use it for \"what if msg.payload equals this?\" edge cases "+
-				"(commissioning, replay, error reproduction) without redeploying the "+
-				"node. When omitted, the inject fires with whatever the node is "+
-				"configured to send.",
+				"By default the inject fires with whatever the node was configured "+
+				"to send (its payload, topic, etc.). Pass `payload` to override "+
+				"the message: the runtime forwards the body to node.receive when "+
+				"it carries the magic __user_inject_props__ trigger, so an "+
+				"empty array there means \"use this body as msg\" — perfect for "+
+				"commissioning a flow with a specific input (\"what happens if "+
+				"msg.payload = 'foo'?\"). The payload is sent as a JSON object "+
+				"or JSON-encoded string; anything json.Unmarshal accepts.",
 		),
 		mcp.WithString("id", mcp.Required(),
 			mcp.Description("The ID of the inject node to trigger.")),
 		mcp.WithObject("payload",
-			mcp.Description("Optional override for msg.payload. Any JSON value (object, array, string, number, bool, null). Omit to fire with the node's configured payload. Requires Node-RED 5.x — older releases silently ignore the body."),
+			mcp.Description("Optional. The msg payload to send through the inject. A JSON object (e.g. {\"foo\":1}) or a JSON-encoded string (e.g. \"42\" or \"[1,2,3]\"). Omit to fire the inject with its configured payload."),
 			mcp.AdditionalProperties(true),
 		),
 	)
@@ -998,66 +1109,295 @@ func (s *Server) handleEnableFlow(ctx context.Context, req mcp.CallToolRequest) 
 	return mcp.NewToolResultText(fmt.Sprintf("Flow %q enabled (a backup was taken first).", id)), nil
 }
 
-// handleInjectNode triggers an inject node. With no payload it fires the
-// inject with its configured properties (POST /inject/:id, no body); with
-// a payload it wraps that payload in the __user_inject_props__ envelope
-// Node-RED 5.x expects and posts the body so msg.payload lands as the
-// supplied value downstream. The wrap is mechanical — set_context uses
-// the same plumbing with a fixed payload.
+// handleInjectNode triggers an inject node, optionally with a custom
+// payload.
+//
+// The no-payload path is the original behaviour: InjectNode looks up
+// the node's type first (issue #43/#56) and refuses to fire anything
+// that is not type:"inject", so the operator sees a typed error
+// instead of a phantom success.
+//
+// The with-payload path goes through InjectNodeWithBody (added by
+// issue #52 for set_context) with the magic __user_inject_props__
+// trigger that makes Node-RED 5.x forward the body to node.receive.
+// The trigger's value is the inject's per-call prop override list;
+// an empty array means "use this body as msg", which is what we
+// want when the operator is commissioning a flow with a specific
+// input. Anything else the caller put in the payload (topic,
+// headers, custom keys) round-trips through as part of msg.
 func (s *Server) handleInjectNode(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	id, err := req.RequireString("id")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	payload, payloadPresent := req.GetArguments()["payload"]
-	slog.Debug("tool: inject_node", "id", id, "has_payload", payloadPresent)
+	slog.Debug("tool: inject_node", "id", id)
 
-	if payloadPresent {
-		body, err := injectPayloadEnvelope(payload)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		if err := s.nrClient.InjectNodeWithBody(ctx, id, body); err != nil {
+	// Look at the args map directly so we can tell "key not present"
+	// (no payload supplied — original behaviour) from "key present
+	// but empty" (caller passed a payload that happens to encode to
+	// an empty object). GetArguments returns the whole map; an
+	// absent key means nil.
+	args := req.GetArguments()
+	rawPayload, hasPayload := args["payload"]
+	if !hasPayload || rawPayload == nil {
+		if err := s.nrClient.InjectNode(ctx, id); err != nil {
 			slog.Error("inject_node failed", "error", err, "id", id)
 			return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("Inject node %q fired with override payload.", id)), nil
+		return mcp.NewToolResultText(fmt.Sprintf("Inject node %q fired.", id)), nil
 	}
 
-	if err := s.nrClient.InjectNode(ctx, id); err != nil {
+	payload, err := encodePayloadArg(rawPayload)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	// Build the wire body. The trigger must come last so a caller
+	// who literally put "__user_inject_props__" in their payload
+	// cannot shadow it (we overwrite, not merge).
+	body := buildInjectPayloadBody(payload)
+	if err := s.nrClient.InjectNodeWithBody(ctx, id, body); err != nil {
 		slog.Error("inject_node failed", "error", err, "id", id)
 		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
 	}
-	return mcp.NewToolResultText(fmt.Sprintf("Inject node %q fired.", id)), nil
+	return mcp.NewToolResultText(fmt.Sprintf("Inject node %q fired with payload.", id)), nil
 }
 
-// injectPayloadEnvelope wraps an arbitrary JSON payload in the
-// __user_inject_props__ envelope Node-RED 5.x's /inject/:id handler reads
-// to forward the body to msg.payload. The user's value becomes the
-// "v" field of the prop override; "vt":"json" tells the runtime to
-// JSON.parse the value rather than treating it as a string literal.
-//
-// ponytail: only the "payload" field is settable this way. A user who
-// needs to override msg.topic or msg.headers must do it downstream (a
-// function node reading msg.payload). Supporting arbitrary per-call
-// msg-fields would need either an envelope-shaped argument or a
-// dedicated __user_inject_props__ passthrough — both out of scope for
-// issue #54.
-func injectPayloadEnvelope(payload any) (json.RawMessage, error) {
-	envelope := struct {
-		UserProps []map[string]any `json:"__user_inject_props__"`
-	}{
-		UserProps: []map[string]any{{
-			"p":  "payload",
-			"v":  payload,
-			"vt": "json",
-		}},
+// encodePayloadArg normalises a payload argument that arrived as
+// either a JSON object (map[string]any) or a JSON-encoded string
+// into a single json.RawMessage. Anything else is a caller mistake
+// and gets a typed error before the runtime is touched.
+func encodePayloadArg(v any) (json.RawMessage, error) {
+	switch x := v.(type) {
+	case string:
+		raw := json.RawMessage(x)
+		if !json.Valid(raw) {
+			return nil, errors.New("payload must be a JSON object or a JSON-encoded string")
+		}
+		return raw, nil
+	case map[string]any:
+		out, err := json.Marshal(x)
+		if err != nil {
+			return nil, fmt.Errorf("encoding payload: %v", err)
+		}
+		return out, nil
+	case []any:
+		out, err := json.Marshal(x)
+		if err != nil {
+			return nil, fmt.Errorf("encoding payload: %v", err)
+		}
+		return out, nil
+	default:
+		return nil, errors.New("payload must be a JSON object or a JSON-encoded string")
 	}
-	out, err := json.Marshal(envelope)
+}
+
+// buildInjectPayloadBody wraps a payload into the body shape
+// Node-RED 5.x's /inject/:id handler expects. The trigger field
+// name and value are documented on Client.InjectNodeWithBody.
+func buildInjectPayloadBody(payload json.RawMessage) json.RawMessage {
+	// {"<payload fields>", "__user_inject_props__":[]}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &m); err != nil {
+		// payload is a JSON scalar or array: wrap it as a fresh object
+		// under "payload" so the caller's value still reaches the
+		// inject's msg.
+		wrapped, _ := json.Marshal(map[string]json.RawMessage{
+			"payload":               payload,
+			"__user_inject_props__": json.RawMessage(`[]`),
+		})
+		return wrapped
+	}
+	m["__user_inject_props__"] = json.RawMessage(`[]`)
+	out, err := json.Marshal(m)
 	if err != nil {
-		return nil, fmt.Errorf("encoding inject payload envelope: %w", err)
+		// Marshal of a map that already parsed cleanly cannot
+		// fail; fall back to the wrapped form so we still send
+		// something usable.
+		wrapped, _ := json.Marshal(map[string]json.RawMessage{
+			"payload":               payload,
+			"__user_inject_props__": json.RawMessage(`[]`),
+		})
+		return wrapped
 	}
-	return out, nil
+	return out
+}
+
+// handleListSubflows returns every subflow definition installed in
+// the runtime, as a JSON array.
+func (s *Server) handleListSubflows(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	slog.Debug("tool: list_subflows")
+
+	list, err := s.nrClient.ListSubflows(ctx)
+	if err != nil {
+		slog.Error("list_subflows failed", "error", err)
+		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+	}
+	// An empty list is a common answer on a fresh instance; render
+	// it as [] so callers do not have to special-case the empty
+	// string. Wrap in a top-level array for the same reason the
+	// other list endpoints do.
+	if list == nil {
+		list = nodered.SubflowList{}
+	}
+	out, err := json.MarshalIndent(list, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("encoding subflows: %v", err)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("```json\n%s\n```", string(out))), nil
+}
+
+// handleGetSubflow returns a single subflow definition by id.
+func (s *Server) handleGetSubflow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	id, err := req.RequireString("id")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	slog.Debug("tool: get_subflow", "id", id)
+
+	raw, err := s.nrClient.GetSubflow(ctx, id)
+	if err != nil {
+		slog.Error("get_subflow failed", "error", err, "id", id)
+		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("```json\n%s\n```", prettyJSON(raw))), nil
+}
+
+// handleCreateSubflow installs a new subflow definition. The subflow
+// argument accepts either a JSON object or a JSON-encoded string.
+func (s *Server) handleCreateSubflow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	raw, err := subflowParam(req, "subflow")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	slog.Debug("tool: create_subflow")
+
+	created, err := s.nrClient.CreateSubflow(ctx, raw)
+	if err != nil {
+		slog.Error("create_subflow failed", "error", err)
+		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("Subflow created (a backup was taken first).\n\n```json\n%s\n```", prettyJSON(created))), nil
+}
+
+// handleUpdateSubflow replaces a subflow definition by id. The
+// subflow argument accepts either a JSON object or a JSON-encoded
+// string; its id field must match the path id.
+func (s *Server) handleUpdateSubflow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	id, err := req.RequireString("id")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	raw, err := subflowParam(req, "subflow")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	slog.Debug("tool: update_subflow", "id", id)
+
+	if err := s.nrClient.UpdateSubflow(ctx, id, raw); err != nil {
+		slog.Error("update_subflow failed", "error", err, "id", id)
+		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("Subflow %q updated (a backup was taken first).", id)), nil
+}
+
+// handleDeleteSubflow removes a subflow definition.
+func (s *Server) handleDeleteSubflow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	id, err := req.RequireString("id")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	slog.Debug("tool: delete_subflow", "id", id)
+
+	if err := s.nrClient.DeleteSubflow(ctx, id); err != nil {
+		slog.Error("delete_subflow failed", "error", err, "id", id)
+		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("Subflow %q deleted (a backup was taken first).", id)), nil
+}
+
+// handleInstantiateSubflow adds a new instance of a subflow into a
+// flow tab. The optional params argument is the same shape an editor
+// instance node carries: id (caller-chosen, recommended), name, x,
+// y, wires, env, and any custom keys.
+func (s *Server) handleInstantiateSubflow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	flowID, err := req.RequireString("flow_id")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	subflowID, err := req.RequireString("subflow_id")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	params, err := instanceParamsParam(req, "params")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	slog.Debug("tool: instantiate_subflow", "flow_id", flowID, "subflow_id", subflowID)
+
+	node, err := s.nrClient.InstantiateSubflow(ctx, flowID, subflowID, params)
+	if err != nil {
+		slog.Error("instantiate_subflow failed", "error", err, "flow_id", flowID, "subflow_id", subflowID)
+		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf(
+		"Subflow instance added to flow %q (a backup was taken first). Wire it up with connect_nodes.\n\n```json\n%s\n```",
+		flowID, prettyJSON(node),
+	)), nil
+}
+
+// subflowParam reads a "subflow" argument as either a JSON object
+// or a JSON-encoded string. Mirrors flowParam/nodeParam for the
+// subflow-specific shape.
+func subflowParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) {
+	args := req.GetArguments()
+	v, ok := args[key]
+	if !ok {
+		return nil, fmt.Errorf("required argument %q not found", key)
+	}
+	switch x := v.(type) {
+	case string:
+		raw := json.RawMessage(x)
+		if !json.Valid(raw) {
+			return nil, fmt.Errorf("%q must be a JSON-encoded subflow object or a subflow object passed directly", key)
+		}
+		return raw, nil
+	case map[string]any:
+		raw, err := json.Marshal(x)
+		if err != nil {
+			return nil, fmt.Errorf("encoding %q: %v", key, err)
+		}
+		return raw, nil
+	default:
+		return nil, fmt.Errorf("%q must be a JSON-encoded subflow object or a subflow object passed directly", key)
+	}
+}
+
+// instanceParamsParam reads an optional "params" argument as either
+// a JSON object/array, a JSON-encoded string, or returns nil when
+// the key is absent. Used by instantiate_subflow where the caller's
+// instance overrides are optional.
+func instanceParamsParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) {
+	args := req.GetArguments()
+	v, ok := args[key]
+	if !ok || v == nil {
+		return nil, nil
+	}
+	switch x := v.(type) {
+	case string:
+		raw := json.RawMessage(x)
+		if !json.Valid(raw) {
+			return nil, fmt.Errorf("%q must be a JSON-encoded object or a JSON object passed directly", key)
+		}
+		return raw, nil
+	case map[string]any:
+		raw, err := json.Marshal(x)
+		if err != nil {
+			return nil, fmt.Errorf("encoding %q: %v", key, err)
+		}
+		return raw, nil
+	default:
+		return nil, fmt.Errorf("%q must be a JSON-encoded object or a JSON object passed directly", key)
+	}
 }
 
 // handleListNodes lists the installed palette modules.
