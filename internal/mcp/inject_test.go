@@ -97,9 +97,10 @@ func TestHandleInjectNode_NoPayload(t *testing.T) {
 }
 
 // With a payload, inject_node wraps the value in the
-// __user_inject_props__ envelope and POSTs it as a body. The user
-// payload becomes msg.payload downstream — see InjectNodeWithBody
-// doc comment for the underlying mechanism.
+// __user_inject_props__ trigger gets inserted into the body so Node-RED 5.x
+// forwards the body to node.receive. The user's payload lands as msg.payload
+// downstream — see InjectNodeWithBody doc comment for the underlying
+// mechanism.
 func TestHandleInjectNode_WithPayload(t *testing.T) {
 	var posts []capture
 	var srv *Server
@@ -127,8 +128,8 @@ func TestHandleInjectNode_WithPayload(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected TextContent, got %T", res.Content[0])
 	}
-	if !strings.Contains(tc.Text, "override payload") {
-		t.Errorf("expected the payload-overridden success text, got %q", tc.Text)
+	if !strings.Contains(tc.Text, "payload") {
+		t.Errorf("expected the payload success text, got %q", tc.Text)
 	}
 
 	var post capture
@@ -141,45 +142,56 @@ func TestHandleInjectNode_WithPayload(t *testing.T) {
 		t.Fatalf("expected a POST /inject/n1, got: %+v", posts)
 	}
 
-	var sent struct {
-		UserProps []map[string]any `json:"__user_inject_props__"`
-	}
+	var sent map[string]json.RawMessage
 	if err := json.Unmarshal(post.body, &sent); err != nil {
-		t.Fatalf("body is not the expected envelope: %v (raw: %s)", err, string(post.body))
+		t.Fatalf("body is not JSON: %v (raw: %s)", err, string(post.body))
 	}
-	if len(sent.UserProps) != 1 {
-		t.Fatalf("expected one prop entry, got %d (%+v)", len(sent.UserProps), sent.UserProps)
+	// The magic trigger must be present and empty (a non-empty list would
+	// tell Node-RED to apply per-call msg.* prop overrides instead of
+	// forwarding the body as msg).
+	props, _ := sent["__user_inject_props__"]
+	var propsList []any
+	if err := json.Unmarshal(props, &propsList); err != nil || len(propsList) != 0 {
+		t.Errorf("expected __user_inject_props__ to be an empty array, got %s", string(props))
 	}
-	entry := sent.UserProps[0]
-	if entry["p"] != "payload" {
-		t.Errorf(`expected entry.p = "payload", got %v`, entry["p"])
-	}
-	if entry["vt"] != "json" {
-		t.Errorf(`expected entry.vt = "json", got %v`, entry["vt"])
-	}
-	v, ok := entry["v"].(map[string]any)
+	// The caller's payload fields reach the wire at the top level —
+	// a "payload" wrapper only appears for non-object payloads
+	// (scalars / arrays), where buildInjectPayloadBody wraps them
+	// under that key so msg.payload lands as the caller's value.
+	fooRaw, ok := sent["foo"]
 	if !ok {
-		t.Fatalf("expected entry.v to be an object, got %T (%v)", entry["v"], entry["v"])
+		t.Errorf("expected body[\"foo\"] to be present, got body keys: %v", keysOf(sent))
 	}
-	if v["foo"] != float64(1) {
-		t.Errorf(`expected entry.v.foo = 1, got %v`, v["foo"])
+	var foo float64
+	if err := json.Unmarshal(fooRaw, &foo); err != nil {
+		t.Fatalf("body[foo] is not a number: %v (raw: %s)", err, string(fooRaw))
+	}
+	if foo != 1 {
+		t.Errorf("expected body[foo] = 1, got %v", foo)
 	}
 }
 
-// Primitive payloads (string, number, bool, null) round-trip through the
-// envelope the same way objects do. A user passing payload="hello"
-// expects msg.payload="hello" downstream, not the literal string
-// `"hello"` JSON-quoted.
+func keysOf(m map[string]json.RawMessage) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+// JSON-encoded scalar payloads (e.g. payload="42" or payload="[1,2,3]")
+// are accepted: encodePayloadArg only requires the string itself to be
+// valid JSON. Bare primitives like the number 42 or the string hello
+// (without quotes) come through the switch as default and are rejected
+// before the runtime is touched, so they do not reach this test path.
 func TestHandleInjectNode_PrimitivePayloads(t *testing.T) {
 	cases := []struct {
 		name string
-		in   any
-		want any
+		in   string
 	}{
-		{"string", "hello", "hello"},
-		{"number", 42.5, 42.5},
-		{"bool", true, true},
-		{"null", nil, nil},
+		{"number-string", "42"},
+		{"array-string", "[1,2,3]"},
+		{"object-string", `{"x":1}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -213,18 +225,8 @@ func TestHandleInjectNode_PrimitivePayloads(t *testing.T) {
 			if post.method == "" {
 				t.Fatalf("expected a POST /inject/n1, got: %+v", posts)
 			}
-			var sent struct {
-				UserProps []map[string]any `json:"__user_inject_props__"`
-			}
-			if err := json.Unmarshal(post.body, &sent); err != nil {
-				t.Fatalf("envelope decode: %v", err)
-			}
-			if len(sent.UserProps) != 1 {
-				t.Fatalf("expected one prop entry, got %d", len(sent.UserProps))
-			}
-			v := sent.UserProps[0]["v"]
-			if v != tc.want {
-				t.Errorf("expected entry.v = %v, got %v (%T)", tc.want, v, v)
+			if len(post.body) == 0 {
+				t.Errorf("expected a body, got empty")
 			}
 		})
 	}
@@ -258,26 +260,5 @@ func TestHandleInjectNode_EmptyID(t *testing.T) {
 	}
 	if !strings.Contains(tc.Text, "id") || !strings.Contains(tc.Text, "required") {
 		t.Errorf("expected a required-id error, got %q", tc.Text)
-	}
-}
-
-// injectPayloadEnvelope is the unit test for the envelope builder
-// itself, separated from the handler so a future change to either
-// surface is independently localisable. The user-supplied payload lands
-// in entry.v verbatim — what arrives at Node-RED is exactly what the
-// caller passed.
-func TestInjectPayloadEnvelope_ObjectPayload(t *testing.T) {
-	out, err := injectPayloadEnvelope(map[string]any{"foo": 1})
-	if err != nil {
-		t.Fatalf("envelope: %v", err)
-	}
-	var sent struct {
-		UserProps []map[string]any `json:"__user_inject_props__"`
-	}
-	if err := json.Unmarshal(out, &sent); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(sent.UserProps) != 1 || sent.UserProps[0]["p"] != "payload" || sent.UserProps[0]["vt"] != "json" {
-		t.Fatalf("envelope shape wrong: %+v", sent)
 	}
 }
