@@ -73,6 +73,43 @@ func TestMergeServerIntoFile_CreatesMissingFile(t *testing.T) {
 	}
 }
 
+func TestInit_WritesPlaceholderUnderWrite(t *testing.T) {
+	dir := t.TempDir()
+	var path string
+	switch runtime.GOOS {
+	case "windows":
+		t.Setenv("APPDATA", dir)
+		path = filepath.Join(dir, "Claude", "claude_desktop_config.json")
+	case "darwin":
+		t.Setenv("HOME", dir)
+		path = filepath.Join(dir, "Library", "Application Support", "Claude", "claude_desktop_config.json")
+	case "plan9":
+		t.Setenv("home", dir)
+		path = filepath.Join(dir, "lib", "Claude", "claude_desktop_config.json")
+	default:
+		t.Setenv("XDG_CONFIG_HOME", dir)
+		path = filepath.Join(dir, "Claude", "claude_desktop_config.json")
+	}
+
+	const literalToken = "supersecret-test-token-12345"
+	env := buildEnv("http://localhost:1880", literalToken, "backups")
+	client := mcpClient{key: "claude-desktop", name: "Claude Desktop"}
+	if err := writeClientConfig(client, "/bin/nodered-mcp", env, "http://localhost:1880", literalToken, "backups"); err != nil {
+		t.Fatalf("writeClientConfig: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read written config: %v", err)
+	}
+	if !strings.Contains(string(data), `"NODERED_TOKEN": "<NODERED_TOKEN>"`) {
+		t.Errorf("written config must contain the token placeholder:\n%s", data)
+	}
+	if strings.Contains(string(data), literalToken) {
+		t.Errorf("written config leaked the literal token:\n%s", data)
+	}
+}
+
 func TestRenderConfig_ClaudeDesktop(t *testing.T) {
 	out := renderConfig("claude-desktop", "/path/to/nodered-mcp", "http://localhost:7880", "", "backups")
 
@@ -104,25 +141,37 @@ func TestRenderConfig_ClaudeDesktop(t *testing.T) {
 }
 
 func TestRenderConfig_VSCodeUsesServersKey(t *testing.T) {
-	out := renderConfig("vscode", "/bin/nodered-mcp", "http://localhost:1880", "tok", "backups")
+	const literalToken = "supersecret-test-token-12345"
+	out := renderConfig("vscode", "/bin/nodered-mcp", "http://localhost:1880", literalToken, "backups")
 	if !strings.Contains(out, `"servers"`) {
 		t.Errorf("VS Code snippet must use the 'servers' root key:\n%s", out)
 	}
 	if strings.Contains(out, `"mcpServers"`) {
 		t.Errorf("VS Code snippet must not use 'mcpServers':\n%s", out)
 	}
-	if !strings.Contains(out, `"NODERED_TOKEN": "tok"`) {
-		t.Errorf("non-empty token must appear in env:\n%s", out)
+	// A Node-RED admin token can authorize dangerous deployments, so rendered output must only contain a placeholder.
+	if !strings.Contains(out, `"NODERED_TOKEN": "<NODERED_TOKEN>"`) {
+		t.Errorf("non-empty token must render as a placeholder:\n%s", out)
+	}
+	if strings.Contains(out, literalToken) {
+		t.Errorf("rendered config leaked the literal token:\n%s", out)
 	}
 }
 
-func TestRenderConfig_ClaudeCodeIsCommand(t *testing.T) {
-	out := renderConfig("claude-code", "/bin/nodered-mcp", "http://localhost:1880", "", "custom-backups")
+func TestInit_RendersPlaceholderForClaudeCode(t *testing.T) {
+	const literalToken = "supersecret-test-token-12345"
+	out := renderConfig("claude-code", "/bin/nodered-mcp", "http://localhost:1880", literalToken, "custom-backups")
 	if !strings.HasPrefix(out, "claude mcp add nodered") {
 		t.Errorf("expected a `claude mcp add` command, got:\n%s", out)
 	}
 	if !strings.Contains(out, "-e NODERED_URL=http://localhost:1880") {
 		t.Errorf("URL flag missing:\n%s", out)
+	}
+	if !strings.Contains(out, "-e NODERED_TOKEN="+tokenPlaceholder) {
+		t.Errorf("token flag must contain the placeholder:\n%s", out)
+	}
+	if strings.Contains(out, literalToken) {
+		t.Errorf("rendered command leaked the literal token:\n%s", out)
 	}
 	if !strings.Contains(out, "-e NODERED_BACKUP_DIR=custom-backups") {
 		t.Errorf("custom backup dir should be included:\n%s", out)

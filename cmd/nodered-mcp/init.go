@@ -10,6 +10,8 @@ import (
 	"strings"
 )
 
+const tokenPlaceholder = "<NODERED_TOKEN>"
+
 // mcpClient is one MCP client we can generate config for.
 type mcpClient struct {
 	key  string
@@ -55,7 +57,7 @@ func detectClients(all bool) []mcpClient {
 func runInit(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	all := fs.Bool("all", false, "show every known client, not just detected ones")
-	write := fs.Bool("write", false, "write the config into the client instead of printing it")
+	write := fs.Bool("write", false, "write config with a token placeholder (use shell env, OS keychain, or edit it)")
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return nil
@@ -90,6 +92,9 @@ func runInit(args []string) error {
 
 	fmt.Fprintf(os.Stderr, "\n--- %s: %s ---\n", target.name, target.note)
 	fmt.Println(renderConfig(target.key, bin, url, token, backupDir))
+	if token != "" {
+		printTokenPlaceholderNote(target.key)
+	}
 	return nil
 }
 
@@ -102,6 +107,9 @@ func writeClientConfig(c mcpClient, bin string, env map[string]string, url, toke
 	if !ok {
 		fmt.Fprintf(os.Stderr, "\n--- %s: %s ---\n", c.name, c.note)
 		fmt.Println(renderConfig(c.key, bin, url, token, backupDir))
+		if token != "" {
+			printTokenPlaceholderNote(c.key)
+		}
 		fmt.Fprintf(os.Stderr, "\n(--write isn't supported for %s — paste/run the above)\n", c.name)
 		return nil
 	}
@@ -109,8 +117,23 @@ func writeClientConfig(c mcpClient, bin string, env map[string]string, url, toke
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "✓ wrote 'nodered' server to %s\n", path)
+	if _, ok := env["NODERED_TOKEN"]; ok {
+		printTokenPlaceholderNote(c.key)
+	}
 	fmt.Fprintln(os.Stderr, "  (previous file saved as .bak) — restart the client to load it.")
 	return nil
+}
+
+func printTokenPlaceholderNote(clientKey string) {
+	fmt.Fprintln(os.Stderr)
+	if clientKey == "claude-code" {
+		fmt.Fprintln(os.Stderr, "# Set the token in your shell before running:")
+		fmt.Fprintln(os.Stderr, "#   export NODERED_TOKEN=<your-token-here>")
+		return
+	}
+	fmt.Fprintln(os.Stderr, "# Token placeholder inserted. Either:")
+	fmt.Fprintln(os.Stderr, "#   1. Set NODERED_TOKEN in your shell / OS keychain before starting the MCP, or")
+	fmt.Fprintf(os.Stderr, "#   2. Open the config and replace %q with your token.\n", tokenPlaceholder)
 }
 
 // writableTarget returns the config file and root key for clients that can be
@@ -142,7 +165,7 @@ func mergeServerIntoFile(path, rootKey, bin string, env map[string]string) error
 	if servers == nil {
 		servers = map[string]any{}
 	}
-	servers["nodered"] = map[string]any{"command": bin, "env": env}
+	servers["nodered"] = map[string]any{"command": bin, "env": envWithTokenPlaceholder(env)}
 	root[rootKey] = servers
 	return writeJSONObject(path, root)
 }
@@ -182,8 +205,7 @@ func readJSONObject(path string) (map[string]any, error) {
 //   - The new file is written atomically via atomicWriteFile: a
 //     partially-written config cannot replace a valid one if the
 //     process is killed mid-write.
-//   - The final file is owner-only (0o600). Generated client config
-//     may carry NODERED_TOKEN.
+//   - The final file is owner-only (0o600).
 func writeJSONObject(path string, m map[string]any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
@@ -193,11 +215,11 @@ func writeJSONObject(path string, m map[string]any) error {
 			return fmt.Errorf("backup existing config to %q: %w", path+".bak", err)
 		}
 	}
-	out, err := json.MarshalIndent(m, "", "  ")
+	out, err := marshalIndentedJSON(m)
 	if err != nil {
 		return err
 	}
-	return atomicWriteFile(path, append(out, '\n'), 0o600)
+	return atomicWriteFile(path, out, 0o600)
 }
 
 // atomicWriteFile writes data to path atomically: it stages a
@@ -306,9 +328,31 @@ func buildEnv(url, token, backupDir string) map[string]string {
 	return env
 }
 
+func envWithTokenPlaceholder(env map[string]string) map[string]string {
+	out := make(map[string]string, len(env))
+	for key, value := range env {
+		out[key] = value
+	}
+	if _, ok := out["NODERED_TOKEN"]; ok {
+		out["NODERED_TOKEN"] = tokenPlaceholder
+	}
+	return out
+}
+
+func marshalIndentedJSON(value any) ([]byte, error) {
+	var out strings.Builder
+	encoder := json.NewEncoder(&out)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(value); err != nil {
+		return nil, err
+	}
+	return []byte(out.String()), nil
+}
+
 // renderConfig returns the ready-to-paste config for the given client.
 func renderConfig(key, bin, url, token, backupDir string) string {
-	env := buildEnv(url, token, backupDir)
+	env := envWithTokenPlaceholder(buildEnv(url, token, backupDir))
 
 	if key == "claude-code" {
 		var b strings.Builder
@@ -332,6 +376,6 @@ func renderConfig(key, bin, url, token, backupDir string) string {
 			"nodered": map[string]any{"command": bin, "env": env},
 		},
 	}
-	out, _ := json.MarshalIndent(doc, "", "  ") // map keys are sorted → deterministic
-	return string(out)
+	out, _ := marshalIndentedJSON(doc)
+	return strings.TrimSuffix(string(out), "\n")
 }
