@@ -351,6 +351,8 @@ nodered-mcp version            print the version
 
 `--write` performs a safe merge that preserves any other servers already configured, and saves a `.bak` of the previous file. It is supported for Claude Desktop, Cursor, and Gemini CLI. For VS Code, whose configuration is workspace-scoped, and for Claude Code, which is configured through its own CLI, `init` prints the instruction instead.
 
+`init` never renders or writes the literal Node-RED token. When a token is provided, it inserts `<NODERED_TOKEN>` instead; set `NODERED_TOKEN` in the launching environment, use the operating system keychain or credential store, or replace the placeholder manually.
+
 ### The update command
 
 `update` detects how the binary was installed and upgrades it in place. The npm wrapper channel (the recommended install path) runs `npm install -g @fgjcarlos/nodered-mcp@latest` after a confirmation prompt. The Docker and standalone-binary channels print the upgrade command for the user to run themselves.
