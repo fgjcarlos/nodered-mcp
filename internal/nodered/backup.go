@@ -13,6 +13,9 @@ import (
 	"time"
 )
 
+// defaultBackupKeep is the default retention limit.
+const defaultBackupKeep = 50
+
 // snapshotSeq is a process-global monotonic counter appended to backup
 // filenames as a tie-breaker for clock collisions. The system timer on
 // Windows ticks at ~15.6ms by default, so nanosecond timestamps still
@@ -52,7 +55,50 @@ func (c *Client) snapshotFlows(ctx context.Context) (string, error) {
 	}
 
 	slog.Info("flows backup written", "file", path, "bytes", len(raw))
+
+	if c.backupKeep > 0 {
+		pruneBackups(dir, c.backupKeep)
+	}
+
 	return path, nil
+}
+
+// pruneBackups deletes the oldest backup files in dir beyond the keep limit.
+// Filenames are sorted descending (newest first) because the timestamp is
+// encoded in the name with fixed width; everything beyond position keep is
+// removed. Deletion errors are logged but do not propagate — a failure to
+// prune must never block the caller's write operation.
+func pruneBackups(dir string, keep int) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		slog.Warn("backup prune: reading dir failed", "dir", dir, "error", err)
+		return
+	}
+
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), "flows-") && strings.HasSuffix(e.Name(), ".json") {
+			names = append(names, e.Name())
+		}
+	}
+	// Sort descending: newest first (timestamp encoded in name, fixed width).
+	sort.Sort(sort.Reverse(sort.StringSlice(names)))
+
+	if len(names) <= keep {
+		return
+	}
+	toDelete := names[keep:]
+	deleted := 0
+	for _, name := range toDelete {
+		if err := os.Remove(filepath.Join(dir, name)); err != nil {
+			slog.Warn("backup prune: removing file failed", "file", name, "error", err)
+		} else {
+			deleted++
+		}
+	}
+	if deleted > 0 {
+		slog.Info("backup prune: deleted old backups", "deleted", deleted, "kept", keep)
+	}
 }
 
 // BackupInfo describes one saved flow snapshot.

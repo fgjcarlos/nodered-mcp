@@ -25,6 +25,7 @@ type Client struct {
 	httpClient *http.Client
 	auth       authStrategy
 	backupDir  string
+	backupKeep int
 	// insecure is retained because the /comms WebSocket dials separately from
 	// httpClient and needs the same TLS decision.
 	insecure bool
@@ -79,6 +80,10 @@ type Options struct {
 	// BackupDir is where flow snapshots are written before every mutating
 	// operation. Defaults to "backups" if empty.
 	BackupDir string
+	// BackupKeep is the maximum number of backup files to retain. After each
+	// successful snapshot the oldest files beyond this limit are deleted.
+	// Defaults to 50; set to 0 to disable pruning.
+	BackupKeep int
 	// SearchBaseURL is the npm-compatible registry searched by SearchNodes.
 	// Defaults to "https://registry.npmjs.org" if empty. Set this to a
 	// private registry mirror (e.g. an internal Verdaccio) when needed.
@@ -129,11 +134,16 @@ func NewClient(opts Options) (*Client, error) {
 			"scope", "node-red admin")
 	}
 	slog.Debug("nodered client created", "base_url", opts.BaseURL)
+	bk := opts.BackupKeep
+	if bk == 0 {
+		bk = defaultBackupKeep
+	}
 	return &Client{
 		baseURL:        opts.BaseURL,
 		httpClient:     httpClient,
 		auth:           auth,
 		backupDir:      opts.BackupDir,
+		backupKeep:     bk,
 		insecure:       opts.Insecure,
 		registryClient: registryClient,
 		searchBaseURL:  opts.SearchBaseURL,
@@ -232,7 +242,9 @@ func (c *Client) doURL(ctx context.Context, method, u, errorPath string, body in
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("calling %s %s: %w", method, u, err)
+		// Wrap as a connectivity error with the redacted base URL, not the full
+		// request URL which may contain a query-string token.
+		return fmt.Errorf("cannot reach Node-RED at %s: %w", redactURL(u), err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -329,4 +341,17 @@ func (c *Client) getRaw(ctx context.Context, path string) ([]byte, error) {
 		}
 	}
 	return respBody, nil
+}
+
+// redactURL strips the query string and userinfo from a URL to avoid leaking
+// tokens that may be embedded as query parameters. Returns "[unparseable URL]"
+// when the input cannot be parsed.
+func redactURL(u string) string {
+	parsed, err := url.Parse(u)
+	if err != nil {
+		return "[unparseable URL]"
+	}
+	parsed.RawQuery = ""
+	parsed.User = nil
+	return parsed.String()
 }

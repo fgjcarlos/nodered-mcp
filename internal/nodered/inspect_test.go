@@ -176,3 +176,19 @@ func TestSearchFlowsNoMatch(t *testing.T) {
 		t.Errorf("expected no matches, got %d/%d", len(matches), total)
 	}
 }
+
+// Issue #102: type filter must be case-insensitive.
+func TestSearchFlows_TypeFilterCaseInsensitive(t *testing.T) {
+	_, base := SearchFlows(RawFlow(sampleFlows), "", "inject", 20)
+	_, upper := SearchFlows(RawFlow(sampleFlows), "", "Inject", 20)
+	_, allCaps := SearchFlows(RawFlow(sampleFlows), "", "INJECT", 20)
+	if base == 0 {
+		t.Fatal("expected at least one inject node in the fixture")
+	}
+	if upper != base {
+		t.Errorf("type=Inject got %d, want %d (same as type=inject)", upper, base)
+	}
+	if allCaps != base {
+		t.Errorf("type=INJECT got %d, want %d (same as type=inject)", allCaps, base)
+	}
+}

@@ -376,3 +376,31 @@ func TestInjectNodeWithBody_PropagatesAPIErrors(t *testing.T) {
 		t.Errorf("expected 404, got %d", apiErr.StatusCode)
 	}
 }
+
+// TestRedactURL covers the security helper added by issue #110: connectivity
+// errors must not include query strings or userinfo that may contain tokens.
+func TestRedactURL(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{
+			input: "http://host:1880/path?token=secret",
+			want:  "http://host:1880/path",
+		},
+		{
+			input: "https://user:pass@host/path",
+			want:  "https://host/path",
+		},
+		{
+			input: "http://host:1880/path",
+			want:  "http://host:1880/path",
+		},
+	}
+	for _, tc := range tests {
+		got := redactURL(tc.input)
+		if got != tc.want {
+			t.Errorf("redactURL(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}

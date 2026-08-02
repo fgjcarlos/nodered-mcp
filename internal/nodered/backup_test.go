@@ -207,3 +207,80 @@ func TestSnapshotFlows_FileAndDirModeOwnerOnly(t *testing.T) {
 		t.Errorf("backup file perm: expected 0o600, got %04o", fp)
 	}
 }
+
+// TestSnapshotFlows_RetentionPrunesOldBackups covers issue #109: with keep=3
+// and 5 snapshots written, only the 3 most recent files must remain.
+func TestSnapshotFlows_RetentionPrunesOldBackups(t *testing.T) {
+	const keep = 3
+	const total = 5
+
+	dir := t.TempDir()
+	backupDir := filepath.Join(dir, "backups")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c, _ := NewClient(Options{BaseURL: srv.URL, BackupDir: backupDir, BackupKeep: keep})
+	ctx := context.Background()
+
+	for i := 0; i < total; i++ {
+		if _, err := c.snapshotFlows(ctx); err != nil {
+			t.Fatalf("snapshotFlows %d: %v", i, err)
+		}
+	}
+
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	for _, e := range entries {
+		if !e.IsDir() {
+			count++
+		}
+	}
+	if count != keep {
+		t.Errorf("expected %d backup files after retention prune, got %d", keep, count)
+	}
+}
+
+// TestSnapshotFlows_ZeroKeepDisablesRetention covers issue #109: when
+// BackupKeep is -1 (the sentinel that config maps from NODERED_BACKUP_KEEP=0),
+// all backups must be retained (no pruning).
+func TestSnapshotFlows_ZeroKeepDisablesRetention(t *testing.T) {
+	const total = 10
+
+	dir := t.TempDir()
+	backupDir := filepath.Join(dir, "backups")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(srv.Close)
+
+	// BackupKeep=-1 is the opt-out sentinel (NODERED_BACKUP_KEEP=0 from config).
+	c, _ := NewClient(Options{BaseURL: srv.URL, BackupDir: backupDir, BackupKeep: -1})
+	ctx := context.Background()
+
+	for i := 0; i < total; i++ {
+		if _, err := c.snapshotFlows(ctx); err != nil {
+			t.Fatalf("snapshotFlows %d: %v", i, err)
+		}
+	}
+
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	for _, e := range entries {
+		if !e.IsDir() {
+			count++
+		}
+	}
+	if count != total {
+		t.Errorf("expected all %d backup files with keep disabled, got %d", total, count)
+	}
+}

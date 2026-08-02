@@ -141,27 +141,29 @@ func serve(args []string) error {
 	setupLogger(cfg.MCPLogLevel)
 
 	nrClient, err := nodered.NewClient(nodered.Options{
-		BaseURL:   cfg.NodeRedURL,
-		Token:     cfg.NodeRedToken,
-		Username:  cfg.NodeRedUsername,
-		Password:  cfg.NodeRedPassword,
-		Insecure:  cfg.NodeRedInsecure,
-		BackupDir: cfg.NodeRedBackupDir,
+		BaseURL:    cfg.NodeRedURL,
+		Token:      cfg.NodeRedToken,
+		Username:   cfg.NodeRedUsername,
+		Password:   cfg.NodeRedPassword,
+		Insecure:   cfg.NodeRedInsecure,
+		BackupDir:  cfg.NodeRedBackupDir,
+		BackupKeep: cfg.NodeRedBackupKeep,
 	})
 	if err != nil {
 		return fmt.Errorf("creating nodered client: %w", err)
 	}
 
 	srv := mcpserver.New(nrClient, mcpserver.Options{
-		Version:               resolveVersion(),
-		ReadOnly:              cfg.MCPReadOnly,
-		DebugStream:           cfg.MCPDebugStream,
-		NodeDenylist:          cfg.NodeDenylist,
-		HTTPMaxBody:           cfg.MCPHTTPMaxBody,
-		AllowInsecureLoopback: cfg.MCPAllowInsecureLoopback,
-		HTTPRatePerSec:        cfg.MCPHTTPRatePerSec,
-		HTTPRateBurst:         cfg.MCPHTTPRateBurst,
-		HTTPRateDisabled:      cfg.MCPHTTPRateDisabled,
+		Version:                resolveVersion(),
+		ReadOnly:               cfg.MCPReadOnly,
+		DebugStream:            cfg.MCPDebugStream,
+		NodeDenylist:           cfg.NodeDenylist,
+		HTTPMaxBody:            cfg.MCPHTTPMaxBody,
+		AllowInsecureLoopback:  cfg.MCPAllowInsecureLoopback,
+		HTTPRatePerSec:         cfg.MCPHTTPRatePerSec,
+		HTTPRateBurst:          cfg.MCPHTTPRateBurst,
+		HTTPRateDisabled:       cfg.MCPHTTPRateDisabled,
+		ListFlowsFullThreshold: cfg.MCPListFlowsFullThreshold,
 	})
 	if cfg.MCPTransport == "http" {
 		// SECURITY (issue #89): the loopback bind path below is the

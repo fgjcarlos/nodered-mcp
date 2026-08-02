@@ -437,3 +437,31 @@ func TestEmptyConfigsKeyIsOmitted(t *testing.T) {
 		t.Errorf("an empty configs array should be omitted: %s", got)
 	}
 }
+
+// Issue #101: add_node must reject a node with an empty or null type.
+func TestAddNode_RejectsEmptyType(t *testing.T) {
+	_, err := AddNodeToFlow(RawFlow(sampleTab), json.RawMessage(`{"id":"n9","type":"","z":"tabA","x":100,"y":200,"wires":[]}`))
+	if err == nil {
+		t.Fatal("expected an error for empty type, got nil")
+	}
+	if !strings.Contains(err.Error(), "type") {
+		t.Errorf("error should mention type, got: %v", err)
+	}
+}
+
+func TestAddNode_RejectsNullType(t *testing.T) {
+	_, err := AddNodeToFlow(RawFlow(sampleTab), json.RawMessage(`{"id":"n9","type":null,"z":"tabA","x":100,"y":200,"wires":[]}`))
+	if err == nil {
+		t.Fatal("expected an error for null type, got nil")
+	}
+	if !strings.Contains(err.Error(), "type") {
+		t.Errorf("error should mention type, got: %v", err)
+	}
+}
+
+func TestAddNode_AcceptsValidType(t *testing.T) {
+	_, err := AddNodeToFlow(RawFlow(sampleTab), json.RawMessage(`{"id":"n9","type":"inject","z":"tabA","x":100,"y":200,"wires":[]}`))
+	if err != nil {
+		t.Fatalf("expected no error for valid type, got: %v", err)
+	}
+}

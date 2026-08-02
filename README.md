@@ -191,10 +191,10 @@ When `adminAuth` is enabled the same token authenticates the WebSocket. It needs
 
 ### Prompts
 
-| Name | Description |
-|---|---|
-| `explain_flow` | Describe what a flow does, its triggers, and its external dependencies |
-| `generate_flow` | Build a flow from a natural-language description |
+| Name | Arguments | Description |
+|---|---|---|
+| `explain_flow` | `flow_id` (required) | Explain what a flow does, its triggers, and which external systems it talks to |
+| `generate_flow` | `description` (required) | Generate a Node-RED flow from a plain-English description |
 
 ## Safety model
 
