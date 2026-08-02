@@ -1134,15 +1134,56 @@ func (s *Server) handleInjectNode(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	if id == "" {
+		// Reject before any HTTP call — the underlying InjectNode
+		// refuses empty ids too, but doing it here keeps the
+		// validation error surfaced before the disabled/lookup
+		// checks (which would otherwise race to "node not found").
+		return mcp.NewToolResultError("id is required"), nil
+	}
 	slog.Debug("tool: inject_node", "id", id)
 
 	// Look at the args map directly so we can tell "key not present"
 	// (no payload supplied — original behaviour) from "key present
 	// but empty" (caller passed a payload that happens to encode to
 	// an empty object). GetArguments returns the whole map; an
-	// absent key means nil.
+	// absent key means nil. Payload validation is pure (no HTTP)
+	// and runs first so a malformed payload never reaches the
+	// runtime.
 	args := req.GetArguments()
 	rawPayload, hasPayload := args["payload"]
+	var payload json.RawMessage
+	if hasPayload && rawPayload != nil {
+		encoded, encErr := encodePayloadArg(rawPayload)
+		if encErr != nil {
+			return mcp.NewToolResultError(encErr.Error()), nil
+		}
+		payload = encoded
+	}
+
+	// Reject disabled candidates before touching the wire. The
+	// admin /inject/:id endpoint accepts the call regardless and
+	// returns success — the runtime then silently drops the
+	// message when the node or its tab is disabled. Issue #104
+	// caught a model disabling a tab and then injecting a node
+	// inside it: the fire "succeeded" while nothing happened
+	// downstream. Look up the target so the operator sees a typed
+	// error naming the actual cause.
+	lookup, found, lookupErr := s.nrClient.LookupInjectTarget(ctx, id)
+	if lookupErr != nil {
+		slog.Error("inject_node lookup failed", "error", lookupErr, "id", id)
+		return mcp.NewToolResultError(fmt.Sprintf("looking up node %q: %v", id, lookupErr)), nil
+	}
+	if !found {
+		return mcp.NewToolResultError(fmt.Sprintf("node %q not found in any tab", id)), nil
+	}
+	if lookup.Disabled {
+		return mcp.NewToolResultError(fmt.Sprintf("node %q is disabled", id)), nil
+	}
+	if lookup.TabDisabled {
+		return mcp.NewToolResultError(fmt.Sprintf("node %q is in a disabled tab", id)), nil
+	}
+
 	if !hasPayload || rawPayload == nil {
 		if err := s.nrClient.InjectNode(ctx, id); err != nil {
 			slog.Error("inject_node failed", "error", err, "id", id)
@@ -1151,10 +1192,6 @@ func (s *Server) handleInjectNode(ctx context.Context, req mcp.CallToolRequest) 
 		return mcp.NewToolResultText(fmt.Sprintf("Inject node %q fired.", id)), nil
 	}
 
-	payload, err := encodePayloadArg(rawPayload)
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
 	// Build the wire body. The trigger must come last so a caller
 	// who literally put "__user_inject_props__" in their payload
 	// cannot shadow it (we overwrite, not merge).

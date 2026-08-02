@@ -56,10 +56,12 @@ func TestHandleInjectNode_NoPayload(t *testing.T) {
 	var got *capture
 	srv, got = injectServer(t, func(w http.ResponseWriter, r *http.Request) {
 		posts = append(posts, *got)
-		// GET /flow/:id returns a single inject node so the type check passes.
-		if r.Method == http.MethodGet {
+		// GET /flows (the disabled-and-type lookup introduced by
+		// #104 and #43) returns the active configuration as a
+		// flat array: the inject node and its owning tab.
+		if r.Method == http.MethodGet && r.URL.Path == "/flows" {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"id":"n1","type":"inject","z":"t","name":"tick","wires":[],"x":1,"y":1}`))
+			_, _ = w.Write([]byte(`[{"id":"t","type":"tab","label":"Home"},{"id":"n1","type":"inject","z":"t","name":"tick","wires":[],"x":1,"y":1}]`))
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -107,9 +109,9 @@ func TestHandleInjectNode_WithPayload(t *testing.T) {
 	var got *capture
 	srv, got = injectServer(t, func(w http.ResponseWriter, r *http.Request) {
 		posts = append(posts, *got)
-		if r.Method == http.MethodGet {
+		if r.Method == http.MethodGet && r.URL.Path == "/flows" {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"id":"n1","type":"inject","z":"t","wires":[],"x":1,"y":1}`))
+			_, _ = w.Write([]byte(`[{"id":"t","type":"tab"},{"id":"n1","type":"inject","z":"t","wires":[],"x":1,"y":1}]`))
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -200,8 +202,8 @@ func TestHandleInjectNode_PrimitivePayloads(t *testing.T) {
 			var got *capture
 			srv, got = injectServer(t, func(w http.ResponseWriter, r *http.Request) {
 				posts = append(posts, *got)
-				if r.Method == http.MethodGet {
-					_, _ = w.Write([]byte(`{"id":"n1","type":"inject","z":"t","wires":[],"x":1,"y":1}`))
+				if r.Method == http.MethodGet && r.URL.Path == "/flows" {
+					_, _ = w.Write([]byte(`[{"id":"t","type":"tab"},{"id":"n1","type":"inject","z":"t","wires":[],"x":1,"y":1}]`))
 					return
 				}
 				w.WriteHeader(http.StatusOK)

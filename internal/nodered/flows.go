@@ -314,6 +314,62 @@ func (c *Client) nodeType(ctx context.Context, id string) (string, bool, error) 
 	return "", false, nil
 }
 
+// InjectLookup is the disabled-relevant subset of a node plus the
+// disabled flag of its owning tab (if any). It is the answer to
+// "could the runtime fire this?" — the admin /inject/:id endpoint
+// always says yes, but the runtime silently drops the message when
+// the node or its tab is disabled. The MCP uses this to surface that
+// case as a typed error instead of letting the operator see a
+// phantom success.
+type InjectLookup struct {
+	Type        string
+	Disabled    bool
+	HasTab      bool
+	TabDisabled bool
+}
+
+// LookupInjectTarget walks GET /flows and returns the disabled flags
+// for the node with the given id and the tab that owns it. The
+// boolean return is "node found" — true even for nodes whose tab is
+// missing (HasTab=false), so a config node is distinguishable from a
+// genuine miss.
+//
+// A failed HTTP call returns (zero, false, err). A successful call
+// for an unknown id returns (zero, false, nil) — the operator sees
+// the call surface as "not found", not as a transport error.
+//
+// Cost: one GET /flows. InjectNode already pays one for its own
+// type check (the audit of #43 set that path), so the helper makes
+// each inject_node call do two GETs. Acceptable for a non-hot-path
+// tool; cache if a future audit flags latency.
+func (c *Client) LookupInjectTarget(ctx context.Context, id string) (InjectLookup, bool, error) {
+	raw, err := c.ListFlows(ctx)
+	if err != nil {
+		return InjectLookup{}, false, fmt.Errorf("looking up inject target %q: %w", id, err)
+	}
+	items := extractFlowArray(raw)
+	byID, _, _ := containers(items)
+	for _, item := range items {
+		var m nodeMeta
+		if json.Unmarshal(item, &m) != nil {
+			continue
+		}
+		if m.Type == "tab" || m.Type == "subflow" {
+			continue
+		}
+		if m.ID != id {
+			continue
+		}
+		lookup := InjectLookup{Type: m.Type, Disabled: m.Disabled}
+		if owner, ok := byID[m.Z]; ok {
+			lookup.HasTab = true
+			lookup.TabDisabled = owner.Disabled
+		}
+		return lookup, true, nil
+	}
+	return InjectLookup{}, false, nil
+}
+
 // FlowTabCount returns how many flow tabs (objects with "type":"tab") appear
 // in a raw GET /flows response. It tolerates both the bare-array (API v1) and
 // the {"flows":[...]} envelope (API v2). Returns 0 on any parse failure.
