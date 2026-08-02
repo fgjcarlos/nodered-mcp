@@ -8,6 +8,45 @@ import (
 	"testing"
 )
 
+func TestNodePathEscaping(t *testing.T) {
+	tests := []struct {
+		name   string
+		module string
+		set    string
+		want   string
+	}{
+		{name: "module", module: "node-red-dashboard", want: "/nodes/node-red-dashboard"},
+		{name: "module and set", module: "node-red-dashboard", set: "set-name", want: "/nodes/node-red-dashboard/set-name"},
+		{name: "scoped module", module: "@flowfuse/node-red-dashboard", want: "/nodes/%40flowfuse%2Fnode-red-dashboard"},
+		{name: "path traversal", module: "../flows", want: "/nodes/..%2Fflows"},
+		{name: "space", module: "a b", want: "/nodes/a%20b"},
+		{name: "quotes", module: "name\"with\"quotes", want: "/nodes/name%22with%22quotes"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := nodeInfoPath(tt.module, tt.set); got != tt.want {
+				t.Errorf("nodeInfoPath(%q, %q) = %q, want %q", tt.module, tt.set, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetNodeInfo_EscapesModuleName(t *testing.T) {
+	var gotRequestURI string
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotRequestURI = r.RequestURI
+		_, _ = w.Write([]byte(`{"name":"@flowfuse/node-red-dashboard"}`))
+	})
+
+	if _, err := c.GetNodeInfo(context.Background(), "@flowfuse/node-red-dashboard"); err != nil {
+		t.Fatalf("GetNodeInfo: %v", err)
+	}
+	if gotRequestURI != "/nodes/%40flowfuse%2Fnode-red-dashboard" {
+		t.Errorf("expected escaped request URI, got %s", gotRequestURI)
+	}
+}
+
 func TestInstallNode(t *testing.T) {
 	var gotPath, gotMethod string
 	var gotBody map[string]string

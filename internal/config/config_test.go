@@ -246,3 +246,68 @@ func TestLoad_NodeRedURL_RejectsNonHTTPSchemes(t *testing.T) {
 		})
 	}
 }
+
+// TestLoad_HTTPMaxBody_Default covers issue #86: with no env var set,
+// the HTTP body cap must default to 32 MiB — generous enough for the
+// largest legitimate MCP request, tight enough to make a memory
+// exhaustion attack expensive.
+func TestLoad_HTTPMaxBody_Default(t *testing.T) {
+	prev, hadPrev := os.LookupEnv("MCP_HTTP_MAX_BODY")
+	os.Unsetenv("MCP_HTTP_MAX_BODY")
+	t.Cleanup(func() {
+		if hadPrev {
+			os.Setenv("MCP_HTTP_MAX_BODY", prev)
+		} else {
+			os.Unsetenv("MCP_HTTP_MAX_BODY")
+		}
+	})
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MCPHTTPMaxBody != 32<<20 {
+		t.Errorf("expected default HTTPMaxBody=32 MiB, got %d", cfg.MCPHTTPMaxBody)
+	}
+}
+
+// TestLoad_HTTPMaxBody_FromEnv covers the parse path: an operator who
+// wants a different ceiling sets MCP_HTTP_MAX_BODY in bytes.
+func TestLoad_HTTPMaxBody_FromEnv(t *testing.T) {
+	t.Setenv("MCP_HTTP_MAX_BODY", "1048576")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MCPHTTPMaxBody != 1048576 {
+		t.Errorf("expected HTTPMaxBody=1048576, got %d", cfg.MCPHTTPMaxBody)
+	}
+}
+
+// TestLoad_HTTPMaxBody_RejectsBadValue locks in the validation rule:
+// zero, negative, or unparseable values must abort startup rather than
+// silently fall back to the default — the same "no silent fallback" rule
+// the read-only test enforces.
+func TestLoad_HTTPMaxBody_RejectsBadValue(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+	}{
+		{"zero", "0"},
+		{"negative", "-1"},
+		{"non-numeric", "fifty-megabytes"},
+		{"empty-after-spaces", "   "},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("MCP_HTTP_MAX_BODY", tc.value)
+			_, err := Load()
+			if err == nil {
+				t.Fatalf("expected error for MCP_HTTP_MAX_BODY=%q, got nil", tc.value)
+			}
+			if !strings.Contains(err.Error(), "MCP_HTTP_MAX_BODY") {
+				t.Errorf("error should mention MCP_HTTP_MAX_BODY, got: %v", err)
+			}
+		})
+	}
+}

@@ -9,8 +9,15 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 )
+
+// snapshotSeq is a process-global monotonic counter appended to backup
+// filenames as a tie-breaker for clock collisions. The system timer on
+// Windows ticks at ~15.6ms by default, so nanosecond timestamps still
+// collide under burst writes; this counter makes that impossible.
+var snapshotSeq atomic.Uint64
 
 // snapshotFlows fetches the full current flow config and writes it to a
 // timestamped file under the configured backup directory, BEFORE any mutating
@@ -30,9 +37,15 @@ func (c *Client) snapshotFlows(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("backup: creating dir %q: %w", dir, err)
 	}
 
-	// ponytail: millisecond stamp; two writes in the same ms overwrite one
-	// backup. Add a counter/nanos if that ever bites.
-	name := "flows-" + time.Now().UTC().Format("20060102-150405.000") + ".json"
+	// Nanosecond stamp + per-process counter keeps concurrent snapshot
+	// writes from overwriting one another — millisecond resolution was
+	// the source of #98. The counter is the real collision guard: on
+	// Windows the system timer ticks at ~15.6ms by default, so even
+	// nanosecond stamps collide under burst writes (CI run 30749881857
+	// saw 50 concurrent snapshots collapse to 20 files).
+	seq := snapshotSeq.Add(1)
+	name := fmt.Sprintf("flows-%s-%06d.json",
+		time.Now().UTC().Format("20060102-150405.000000000"), seq)
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		return "", fmt.Errorf("backup: writing %q: %w", path, err)

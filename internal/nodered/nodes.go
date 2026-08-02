@@ -3,12 +3,26 @@ package nodered
 import (
 	"context"
 	"errors"
+	"net/url"
+	"strings"
 	"time"
 )
 
 // installTimeout bounds install/uninstall calls. npm runs under the hood and
 // can take well over the default read timeout, so these get their own budget.
 const installTimeout = 5 * time.Minute
+
+// nodeInfoPath builds the per-module admin API path, escaping both the
+// module name and any optional node set so a crafted name cannot alter the
+// resolved path. Symmetrically scoped package names like @scope/name
+// are encoded as %40scope%2Fname, which the admin API decodes back.
+func nodeInfoPath(module, set string) string {
+	p := "/nodes/" + strings.ReplaceAll(url.PathEscape(module), "@", "%40")
+	if set != "" {
+		p += "/" + strings.ReplaceAll(url.PathEscape(set), "@", "%40")
+	}
+	return p
+}
 
 // ListNodes returns the set of node modules installed in the running
 // Node-RED instance. This is what the editor shows in the palette.
@@ -27,7 +41,7 @@ func (c *Client) GetNodeInfo(ctx context.Context, module string) (*InstallInfo, 
 		return nil, errors.New("module name is required")
 	}
 	var info InstallInfo
-	if err := c.do(ctx, "GET", "/nodes/"+module, nil, &info); err != nil {
+	if err := c.do(ctx, "GET", nodeInfoPath(module, ""), nil, &info); err != nil {
 		return nil, err
 	}
 	return &info, nil
@@ -66,7 +80,7 @@ func (c *Client) UninstallNode(ctx context.Context, module string) error {
 	ctx, cancel := context.WithTimeout(ctx, installTimeout)
 	defer cancel()
 
-	return c.do(ctx, "DELETE", "/nodes/"+module, nil, nil)
+	return c.do(ctx, "DELETE", nodeInfoPath(module, ""), nil, nil)
 }
 
 // SetNodeEnabled enables or disables an installed module, or a single node
@@ -77,12 +91,8 @@ func (c *Client) SetNodeEnabled(ctx context.Context, module, set string, enabled
 	if module == "" {
 		return nil, errors.New("module name is required")
 	}
-	path := "/nodes/" + module
-	if set != "" {
-		path += "/" + set
-	}
 	var info InstallInfo
-	if err := c.do(ctx, "PUT", path, map[string]bool{"enabled": enabled}, &info); err != nil {
+	if err := c.do(ctx, "PUT", nodeInfoPath(module, set), map[string]bool{"enabled": enabled}, &info); err != nil {
 		return nil, err
 	}
 	return &info, nil

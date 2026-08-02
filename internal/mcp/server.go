@@ -34,6 +34,10 @@ import (
 type Server struct {
 	mcpServer *server.MCPServer
 	nrClient  *nodered.Client
+	// opts preserves the knobs that have to survive New() and surface again
+	// later (runHTTP needs HTTPMaxBody to wrap the mux). Storing the whole
+	// struct avoids a long argument list that has to grow with every knob.
+	opts Options
 	// readOnly withholds every tool that mutates the Node-RED instance.
 	readOnly bool
 	// debugStream remembers whether the operator opted in to opening the
@@ -92,7 +96,19 @@ type Options struct {
 	// every node type is allowed. See config.Load for the
 	// operator-facing toggle MCP_NODE_DENYLIST (issue #81).
 	NodeDenylist []string
+	// HTTPMaxBody caps the size of a single HTTP request body, in
+	// bytes. Zero is treated as the 32 MiB default by runHTTP. The
+	// bound is enforced at the mux via http.MaxBytesHandler so a
+	// hostile client cannot stream an unbounded payload over one
+	// connection (issue #86).
+	HTTPMaxBody int
 }
+
+// defaultHTTPMaxBody is the fallback for the per-request body cap when
+// the operator does not set HTTPMaxBody. 32 MiB fits the largest
+// legitimate MCP request (set_flows on a sizable flow set) while making
+// a memory-exhaustion attack expensive.
+const defaultHTTPMaxBody = 32 << 20
 
 // buildDenylist turns a slice of node types into a closure the write
 // tools can call per-node. The closure form lets tests inject any
@@ -150,6 +166,7 @@ func New(nrClient *nodered.Client, opts Options) *Server {
 	srv := &Server{
 		mcpServer:   s,
 		nrClient:    nrClient,
+		opts:        opts,
 		readOnly:    opts.ReadOnly,
 		debugStream: opts.DebugStream,
 		denylist:    buildDenylist(opts.NodeDenylist),
@@ -466,7 +483,30 @@ func (s *Server) runHTTP(ctx context.Context, addr, token string, verifier *oaut
 	// wrappers make the failure mode visible in the server logs.
 	mux.Handle("/mcp", logRequests(recoverPanics(authMW(mcpHTTP))))
 
-	httpServer.Handler = mux
+	// Issue #86: cap the body of every HTTP request. Without this a single
+	// hostile client can stream an unbounded payload over one connection
+	// and exhaust memory. We use a two-layer guard rather than the stdlib's
+	// MaxBytesHandler alone:
+	//
+	//   1. If Content-Length is set above the cap, reject with 413
+	//      immediately. This is the fast path for an attacker who announces
+	//      a giant payload and saves the bandwidth.
+	//   2. Otherwise wrap the body with http.MaxBytesReader so a chunked-
+	//      encoded body that grows past the cap is also rejected.
+	//
+	// MaxBytesHandler is the stdlib's recommended idiom but in Go 1.18+ it
+	// only wraps the body — the response code depends on what the inner
+	// handler writes when its read fails, and mcp-go's transport maps that
+	// to a generic 400 PARSE_ERROR. Pre-checking Content-Length gives us a
+	// clean 413 for the common case while keeping MaxBytesReader as the
+	// safety net for chunked bodies.
+	maxBody := s.opts.HTTPMaxBody
+	if maxBody <= 0 {
+		maxBody = defaultHTTPMaxBody
+	}
+	handler := maxBodyHandler(int64(maxBody), mux)
+
+	httpServer.Handler = handler
 
 	s.startDebugTail(ctx)
 
@@ -501,4 +541,32 @@ func authModeLabel(token string, verifier *oauth.Verifier) string {
 		return "oauth"
 	}
 	return "none"
+}
+
+// maxBodyHandler wraps next so a request whose body exceeds maxN bytes
+// is rejected with 413 (Request Entity Too Large). The check is two-
+// layered:
+//
+//  1. If Content-Length is set above the cap, reject immediately
+//     without reading the body. This is the fast path for an attacker
+//     who announces a giant payload.
+//  2. Otherwise wrap the body with http.MaxBytesReader so a chunked-
+//     encoded body that grows past the cap is rejected at read time
+//     rather than silently buffered.
+//
+// The function exists because http.MaxBytesHandler (the stdlib's
+// recommended idiom) only wraps the body in Go 1.18+; the response
+// code then depends on what the inner handler does on read error, and
+// mcp-go's streamable HTTP transport maps that to a 400 PARSE_ERROR —
+// a generic "client messed up" rather than the "body too large" the
+// operator (and the issue #86 spec) want to see in their logs.
+func maxBodyHandler(maxN int64, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ContentLength > maxN {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxN)
+		next.ServeHTTP(w, r)
+	})
 }
