@@ -675,8 +675,12 @@ func (s *Server) registerTools() {
 	// ---- get_flows_state ----------------------------------------------
 	getFlowsState := mcp.NewTool("get_flows_state",
 		mcp.WithDescription(
+			// Node-RED 5.x GET /flows/state returns only {"state":"start"} or
+			// {"state":"stop"} — no per-flow detail. Node-RED may add per-flow
+			// state in a future version; update this description when that ships.
 			"Read the current runtime state of Node-RED: whether the flows are "+
-				"started or stopped, plus a per-flow breakdown. Read-only.",
+				"started or stopped. Node-RED 5.x returns only "+
+				"{\"state\":\"start\"} or {\"state\":\"stop\"} — no per-flow detail. Read-only.",
 		),
 	)
 	s.addReadTool(getFlowsState, s.handleGetFlowsState)
