@@ -1870,3 +1870,99 @@ func TestHandleInjectNode_ActiveNodeFires(t *testing.T) {
 		t.Errorf("expected POST /inject/n1, got %+v", posts)
 	}
 }
+
+// TestHandleGetContext_NonExistentNodeId covers issue #105: when Node-RED
+// returns {} for an unknown node id, get_context must surface a clear error
+// rather than silently reporting "no context stored".
+func TestHandleGetContext_NonExistentNodeId(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/context/"):
+			// Node-RED returns HTTP 200 {} for unknown ids.
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			// Flows list has no matching node.
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"type":"tab","id":"tab1","label":"T"}]`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	s := New(c, Options{Version: "test"})
+
+	res, handlerErr := s.handleGetContext(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"scope": "node",
+			"id":    "nonexistent-id",
+		}},
+	})
+	if handlerErr != nil {
+		t.Fatalf("handleGetContext returned unexpected Go error: %v", handlerErr)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result for unknown node id, got %+v", res)
+	}
+	tc, ok := res.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", res.Content[0])
+	}
+	if !strings.Contains(tc.Text, "not found") {
+		t.Errorf("expected 'not found' in error, got %q", tc.Text)
+	}
+}
+
+// TestHandleGetContext_ExistingNodeWithNoContext covers issue #105: when the
+// node exists in the deployment but has no context stored, the handler must
+// return the empty-context success message — not an error.
+func TestHandleGetContext_ExistingNodeWithNoContext(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/context/"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			// Flows list DOES contain the node.
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[
+				{"type":"tab","id":"tab1","label":"T"},
+				{"type":"inject","id":"n1","z":"tab1","x":100,"y":100,"wires":[]}
+			]`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	s := New(c, Options{Version: "test"})
+
+	res, handlerErr := s.handleGetContext(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"scope": "node",
+			"id":    "n1",
+		}},
+	})
+	if handlerErr != nil {
+		t.Fatalf("handleGetContext returned unexpected Go error: %v", handlerErr)
+	}
+	if res == nil || res.IsError {
+		t.Fatalf("expected success for existing node with no context, got %+v", res)
+	}
+	tc, ok := res.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", res.Content[0])
+	}
+	if !strings.Contains(tc.Text, "No context values") {
+		t.Errorf("expected empty-context message, got %q", tc.Text)
+	}
+}

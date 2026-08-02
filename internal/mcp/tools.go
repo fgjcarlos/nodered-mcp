@@ -84,7 +84,9 @@ func (s *Server) registerTools() {
 				"WARNING: this tool can deploy any node type the Node-RED instance has "+
 				"installed, including exec/system nodes that execute shell commands on "+
 				"the Node-RED host. The MCP server blocks a configurable set of node "+
-				"types (MCP_NODE_DENYLIST, default: exec,system); see SECURITY.md.",
+				"types (MCP_NODE_DENYLIST, default: exec,system); see SECURITY.md.\n\n"+
+				"A backup of the current configuration is taken automatically before the "+
+				"write and can be restored with restore_backup.",
 		),
 		mcp.WithString("flow", mcp.Required(),
 			mcp.Description("The flow document as a JSON string.")),
@@ -113,8 +115,9 @@ func (s *Server) registerTools() {
 			"Create a new flow tab from an editor clipboard JSON document. The "+
 				"argument shape is the same one export_flow returns: a single-element "+
 				"array whose element is the flow tab. Only one tab per call — split "+
-				"multi-tab pastes by hand. A backup of the current config is taken "+
-				"before the write. Returns the runtime-assigned id of the new tab.",
+				"multi-tab pastes by hand. Returns the runtime-assigned id of the new tab.\n\n"+
+				"A backup of the current configuration is taken automatically before the "+
+				"write and can be restored with restore_backup.",
 		),
 		mcp.WithString("clipboard", mcp.Required(),
 			mcp.Description("Editor clipboard JSON: a single-element array containing the flow tab. Either the raw array or a JSON-encoded string is accepted.")),
@@ -126,12 +129,13 @@ func (s *Server) registerTools() {
 		mcp.WithDescription(
 			"Replace an existing flow tab with a new JSON document (PUT semantics: "+
 				"the whole flow is replaced). Read the flow first with get_flow, modify "+
-				"it, and send it back intact — every node field is preserved. A backup "+
-				"of the current config is taken before the write.\n\n"+
+				"it, and send it back intact — every node field is preserved.\n\n"+
 				"WARNING: this tool can deploy any node type, including exec/system "+
 				"nodes that execute shell commands on the Node-RED host. The MCP "+
 				"server blocks a configurable set of node types (MCP_NODE_DENYLIST, "+
-				"default: exec,system); see SECURITY.md.",
+				"default: exec,system); see SECURITY.md.\n\n"+
+				"A backup of the current configuration is taken automatically before the "+
+				"write and can be restored with restore_backup.",
 		),
 		mcp.WithString("id", mcp.Required(),
 			mcp.Description("The flow tab ID to replace.")),
@@ -146,14 +150,16 @@ func (s *Server) registerTools() {
 			"Add one node to an existing flow tab, without touching any other node.\n\n"+
 				"Prefer this over update_flow: rewriting a whole tab means reproducing "+
 				"every node exactly, and any field not reproduced is destroyed. This "+
-				"appends and leaves the rest of the tab byte-for-byte identical. A backup "+
-				"is taken and the wires are validated before the write.\n\n"+
+				"appends and leaves the rest of the tab byte-for-byte identical. The "+
+				"wires are validated before the write.\n\n"+
 				"The node needs at least an id and a type. Wire it up afterwards with "+
 				"connect_nodes rather than hand-writing the wires array.\n\n"+
 				"WARNING: this tool can deploy any node type, including exec/system "+
 				"nodes that execute shell commands on the Node-RED host. The MCP "+
 				"server blocks a configurable set of node types (MCP_NODE_DENYLIST, "+
-				"default: exec,system); see SECURITY.md.",
+				"default: exec,system); see SECURITY.md.\n\n"+
+				"A backup of the current configuration is taken automatically before the "+
+				"write and can be restored with restore_backup.",
 		),
 		mcp.WithString("flow_id", mcp.Required(),
 			mcp.Description("The flow tab to add the node to (from list_flows or search_flows).")),
@@ -172,8 +178,10 @@ func (s *Server) registerTools() {
 				"untouched, including ones specific to that node type. This is the safe "+
 				"way to retune a node: change an MQTT topic, an HTTP url, a function "+
 				"body, or a name without risking the rest of the flow.\n\n"+
-				"A node's id cannot be changed, because the wires reference it. A backup "+
-				"is taken and the wires are validated before the write.",
+				"A node's id cannot be changed, because the wires reference it. The "+
+				"wires are validated before the write.\n\n"+
+				"A backup of the current configuration is taken automatically before the "+
+				"write and can be restored with restore_backup.",
 		),
 		mcp.WithString("flow_id", mcp.Required(),
 			mcp.Description("The flow tab that owns the node.")),
@@ -2489,7 +2497,18 @@ func (s *Server) handleGetContext(ctx context.Context, req mcp.CallToolRequest) 
 	}
 	// An empty store is a legitimate answer and a common one. Saying so beats
 	// returning "{}" and letting the model read it as a failure.
-	if s := strings.TrimSpace(string(raw)); s == "" || s == "{}" || s == `{"memory":{}}` {
+	if trimmed := strings.TrimSpace(string(raw)); trimmed == "" || trimmed == "{}" || trimmed == `{"memory":{}}` {
+		// For node/flow scope, verify the id actually exists so a typo'd id
+		// surfaces as "not found" rather than silently looking like empty context.
+		// (Node-RED returns HTTP 200 {} for any unknown id — issue #105.)
+		if (scope == "node" || scope == "flow") && id != "" {
+			exists, lookupErr := s.nrClient.NodeExists(ctx, id)
+			if lookupErr == nil && !exists {
+				return mcp.NewToolResultError(fmt.Sprintf(
+					"%s id %q not found in current deployment", scope, id,
+				)), nil
+			}
+		}
 		return mcp.NewToolResultText(fmt.Sprintf(
 			"No context values are set for scope %q%s.", scope, describeContextTarget(id, key),
 		)), nil
