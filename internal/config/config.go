@@ -58,6 +58,17 @@ type Config struct {
 	// server start. Defaults to false because the tail crashes some
 	// Node-RED versions (see #17). Set true to enable debug streaming.
 	MCPDebugStream bool
+	// MCPAllowInsecureLoopback silences the startup warning emitted when
+	// the HTTP transport comes up on a loopback bind with no token and
+	// no OAuth verifier. The default (false) always warns, because the
+	// loopback-only assumption is silently broken by a reverse-proxy
+	// deployment (nginx / Caddy / Traefik forwarding to 127.0.0.1) —
+	// see issue #89. Operators who understand the trap and have
+	// upstream auth (mTLS at the proxy, IP allowlist, etc.) can set
+	// MCP_ALLOW_INSECURE_LOOPBACK=1 to acknowledge the risk and silence
+	// the warning. This flag does NOT weaken any guard; it only stops
+	// the nag at startup.
+	MCPAllowInsecureLoopback bool
 	// NodeDenylist is the set of node types the MCP write tools must refuse
 	// to deploy. The default ("exec,system") defends against RCE on the
 	// Node-RED host (issue #81): callers of create_flow / update_flow /
@@ -125,6 +136,17 @@ func Load() (*Config, error) {
 	}
 	cfg.MCPDebugStream = debugStream
 
+	// Issue #89: opt-out for the loopback-without-token warning. The
+	// option is intentionally separate from MCP_HTTP_TOKEN / OAuth so
+	// operators who intentionally expose the transport (e.g. behind a
+	// reverse proxy with upstream auth) can keep the rest of the
+	// config clean and still silence the nag at startup.
+	allowInsecureLoopback, err := strconv.ParseBool(getEnv("MCP_ALLOW_INSECURE_LOOPBACK", "false"))
+	if err != nil {
+		return nil, fmt.Errorf("parsing MCP_ALLOW_INSECURE_LOOPBACK: %w", err)
+	}
+	cfg.MCPAllowInsecureLoopback = allowInsecureLoopback
+
 	// Issue #86: cap the HTTP request body so a hostile client cannot
 	// stream an unbounded payload over one connection. 32 MiB comfortably
 	// fits the largest legitimate MCP request (set_flows on a sizable
@@ -161,6 +183,7 @@ func Load() (*Config, error) {
 		"oauth_issuer", cfg.OAuthIssuer != "",
 		"read_only", cfg.MCPReadOnly,
 		"debug_stream", cfg.MCPDebugStream,
+		"allow_insecure_loopback", cfg.MCPAllowInsecureLoopback,
 	)
 
 	return cfg, nil

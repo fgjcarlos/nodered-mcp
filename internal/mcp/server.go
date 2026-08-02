@@ -102,6 +102,16 @@ type Options struct {
 	// hostile client cannot stream an unbounded payload over one
 	// connection (issue #86).
 	HTTPMaxBody int
+	// AllowInsecureLoopback silences the startup warning emitted when
+	// the HTTP transport comes up on a loopback bind with no token
+	// and no OAuth verifier (issue #89). It does NOT change any auth
+	// decision: the pass-through middleware is still installed and
+	// config.validate still requires a token on non-loopback binds.
+	// Operators who intentionally deploy behind a reverse proxy with
+	// upstream auth (mTLS at the proxy, IP allowlist, etc.) can set
+	// this to true to acknowledge the loopback-without-token trade-
+	// off and stop the nag on every restart.
+	AllowInsecureLoopback bool
 }
 
 // defaultHTTPMaxBody is the fallback for the per-request body cap when
@@ -468,6 +478,17 @@ func (s *Server) runHTTP(ctx context.Context, addr, token string, verifier *oaut
 		// Loopback bind: no auth, but the mux must still be reached --
 		// use a pass-through middleware rather than nil so the
 		// handler below can wrap unconditionally.
+		//
+		// SECURITY (issue #89): the loopback check assumes the listen
+		// address is reachable only from this host. A common
+		// deployment is "nginx / Caddy / Traefik reverse-proxying
+		// 127.0.0.1:8090" — every connection the proxy accepts
+		// arrives on 127.0.0.1, so this branch silently bypasses auth
+		// for anyone who can reach the proxy. The startup warning
+		// emitted below calls out the trap; the
+		// AllowInsecureLoopback option lets operators who know they
+		// have upstream auth (mTLS at the proxy, IP allowlist, etc.)
+		// silence the nag without weakening any guard.
 		authMW = func(next http.Handler) http.Handler { return next }
 	default:
 		// config.validate should have caught this. Fail loudly rather
@@ -517,8 +538,31 @@ func (s *Server) runHTTP(ctx context.Context, addr, token string, verifier *oaut
 		"addr", addr, "endpoint", "/mcp",
 		"auth_mode", authModeLabel(token, verifier))
 	if token == "" && verifier == nil {
-		slog.Warn("http transport has no authentication; it is only safe because the " +
-			"listen address is loopback-only")
+		// Issue #89: loopback-without-token is the configuration a
+		// reverse-proxy deployment silently lands on. The bind is on
+		// 127.0.0.1, so this branch is "safe" by the loopback rule —
+		// but the proxy is what makes the port reachable from the
+		// network, so any client that can reach the proxy can call
+		// any tool with no credentials. Surface that explicitly so
+		// the operator has a chance to notice before a deploy. The
+		// AllowInsecureLoopback opt-out is for operators who have
+		// upstream auth (mTLS at the proxy, IP allowlist, etc.) and
+		// do not want the nag on every restart; it does not change
+		// any auth decision.
+		if s.opts.AllowInsecureLoopback {
+			slog.Warn("http transport has no authentication on loopback (operator-acknowledged)",
+				"addr", addr,
+				"acknowledged_via", "AllowInsecureLoopback=true",
+				"risk", "anyone able to reach this address — including a reverse proxy forwarding to 127.0.0.1 — can call any tool without credentials",
+				"mitigation", "ensure upstream auth (mTLS at the proxy, IP allowlist, or another layer) covers every path to the listener",
+			)
+		} else {
+			slog.Warn("http transport has no authentication; loopback bind assumed safe",
+				"addr", addr,
+				"risk", "this assumes no reverse proxy (nginx/Caddy/Traefik) is forwarding external traffic to this address; a proxy makes 127.0.0.1 reachable from the network and bypasses auth for every client that can reach the proxy",
+				"mitigation", "set MCP_HTTP_TOKEN (or configure MCP_OAUTH_ISSUER + MCP_OAUTH_AUDIENCE) for real auth, or set MCP_ALLOW_INSECURE_LOOPBACK=1 to acknowledge upstream-only auth and silence this warning",
+			)
+		}
 	}
 	select {
 	case err := <-errCh:
