@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -619,6 +621,87 @@ func TestSetContext_HappyPathAndHelperReuse(t *testing.T) {
 	}
 	if !bytes.Contains(injected[1], []byte(`"value":99`)) {
 		t.Errorf("second inject body missing value:99: %s", injected[1])
+	}
+}
+
+func TestRestoreBackup_ClearsSetContextHelper(t *testing.T) {
+	backupDir := t.TempDir()
+	liveFlow := []byte(`{"id":"runtime_helper_tab","label":"__mcp_context_helper__","nodes":[]}`)
+	var restoredBody []byte
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			_, _ = w.Write([]byte(`[{"type":"tab","id":"other","label":"Other","nodes":[]}]`))
+		case r.Method == "POST" && r.URL.Path == "/flow":
+			liveFlow = []byte(`{"id":"runtime_helper_tab","label":"__mcp_context_helper__","nodes":[]}`)
+			_, _ = w.Write(liveFlow)
+		case r.Method == "GET" && r.URL.Path == "/flow/runtime_helper_tab":
+			_, _ = w.Write(liveFlow)
+		case r.Method == "PUT" && r.URL.Path == "/flow/runtime_helper_tab":
+			var err error
+			liveFlow, err = io.ReadAll(r.Body)
+			if err != nil {
+				t.Errorf("reading flow update: %v", err)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == "POST" && r.URL.Path == "/flows":
+			var err error
+			restoredBody, err = io.ReadAll(r.Body)
+			if err != nil {
+				t.Errorf("reading restore body: %v", err)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/inject/"):
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: backupDir})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	s := New(c, Options{Version: "test"})
+
+	setResult, err := s.handleSetContext(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"scope": "global",
+			"key":   "foo",
+			"value": "1",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("handleSetContext returned err=%v", err)
+	}
+	if setResult == nil || setResult.IsError {
+		t.Fatalf("set_context failed: %+v", setResult)
+	}
+	if s.ctxHelper == nil || s.ctxHelper.flowID == "" {
+		t.Fatalf("set_context did not provision a helper: %+v", s.ctxHelper)
+	}
+
+	backupName := "flows-restore.json"
+	if err := os.WriteFile(filepath.Join(backupDir, backupName), []byte(`[{"type":"tab","id":"restored","label":"Restored","nodes":[]}]`), 0o600); err != nil {
+		t.Fatalf("write restore backup: %v", err)
+	}
+
+	restoreResult, err := s.handleRestoreBackup(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{"backup": backupName}},
+	})
+	if err != nil {
+		t.Fatalf("handleRestoreBackup returned err=%v", err)
+	}
+	if restoreResult == nil || restoreResult.IsError {
+		t.Fatalf("restore_backup failed: %+v", restoreResult)
+	}
+	if s.ctxHelper != nil {
+		t.Fatalf("restore_backup retained stale set_context helper: %+v", s.ctxHelper)
+	}
+	if !bytes.Contains(restoredBody, []byte(`"id":"restored"`)) {
+		t.Errorf("restore_backup did not deploy the selected backup: %s", restoredBody)
 	}
 }
 

@@ -1610,6 +1610,9 @@ func (s *Server) handleRestoreBackup(ctx context.Context, req mcp.CallToolReques
 		slog.Error("restore_backup failed", "error", err, "backup", name)
 		return mcp.NewToolResultError(fmt.Sprintf("restoring: %v", err)), nil
 	}
+	if s.ctxHelper != nil {
+		s.ctxHelper = nil
+	}
 	return mcp.NewToolResultText(fmt.Sprintf("Restored flow config from %q (current state was backed up first).", name)), nil
 }
 
