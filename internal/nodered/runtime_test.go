@@ -147,3 +147,20 @@ func TestGetContextRejectsPathInjectionInKey(t *testing.T) {
 		t.Fatal("expected a traversal in the key to be rejected")
 	}
 }
+
+// Issue #103: percent-encoded characters must be rejected by checkPathSegment.
+func TestCheckPathSegment_RejectsPercent(t *testing.T) {
+	for _, v := range []string{"%2F", "%2f", "%00"} {
+		if err := checkPathSegment("key", v); err == nil {
+			t.Errorf("expected checkPathSegment to reject %q, got nil", v)
+		}
+	}
+}
+
+func TestCheckPathSegment_AcceptsClean(t *testing.T) {
+	for _, v := range []string{"myKey", "node-1"} {
+		if err := checkPathSegment("key", v); err != nil {
+			t.Errorf("expected checkPathSegment to accept %q, got: %v", v, err)
+		}
+	}
+}

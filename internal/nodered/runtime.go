@@ -96,8 +96,8 @@ func (c *Client) GetContext(ctx context.Context, scope, id, key string) (Context
 // substituted into. A key of "../../flows" would otherwise read a different
 // endpoint entirely — and these values can come straight from a model.
 func checkPathSegment(what, v string) error {
-	if strings.ContainsAny(v, `/\`) || strings.Contains(v, "..") {
-		return fmt.Errorf("%s must be a single path segment, got %q", what, v)
+	if strings.ContainsAny(v, `/\%`) || v == ".." || v == "." {
+		return fmt.Errorf("%s must be a single path segment (must not contain /, \\, %%, or be . or ..), got %q", what, v)
 	}
 	return nil
 }
