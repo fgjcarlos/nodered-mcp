@@ -21,12 +21,15 @@ type RawFlow = json.RawMessage
 // NodeModuleInfo describes a single installed node module, as returned
 // by GET /nodes. Read-only palette metadata — never written back, so a
 // typed view is fine here.
+//
+// `User` distinguishes a user-installed module from one bundled with
+// Node-RED (`Local`). Both fields are emitted by the runtime.
 type NodeModuleInfo struct {
 	ID      string   `json:"id"`
 	Name    string   `json:"name"`
 	Version string   `json:"version"`
 	Local   bool     `json:"local"`
-	Users   []string `json:"users,omitempty"`
+	User    bool     `json:"user,omitempty"`
 	Types   []string `json:"types,omitempty"`
 	Loaded  bool     `json:"loaded"`
 	Enabled bool     `json:"enabled"`
@@ -34,8 +37,18 @@ type NodeModuleInfo struct {
 }
 
 // InstallInfo is the payload returned by GET /nodes/:module.
+//
+// `Local` is true for modules shipped with Node-RED, `User` for modules
+// installed by the user from npm. `Path` is the on-disk location of the
+// module. `Plugins` is the raw array returned by the runtime — its shape
+// is not stable across Node-RED versions, so we preserve it as
+// RawMessage and let callers parse what they need.
 type InstallInfo struct {
 	Name    string           `json:"name"`
-	Version string           `json:"version"`
-	Nodes   []NodeModuleInfo `json:"nodes,omitempty"`
+	Version string           `json:"version,omitempty"`
+	Local   bool             `json:"local,omitempty"`
+	User    bool             `json:"user,omitempty"`
+	Path    string           `json:"path,omitempty"`
+	Plugins json.RawMessage  `json:"plugins,omitempty"`
+	Nodes   []NodeModuleInfo `json:"nodes"`
 }
