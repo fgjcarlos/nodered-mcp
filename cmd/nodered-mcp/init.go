@@ -65,12 +65,7 @@ func runInit(args []string) error {
 		return err
 	}
 
-	// The config must point at the real binary — this is what prevents the
-	// stale-path "spawn ENOENT" failure.
-	bin, err := os.Executable()
-	if err != nil || bin == "" {
-		bin = "nodered-mcp"
-	}
+	bin := executablePath()
 
 	in := bufio.NewScanner(os.Stdin)
 	url := ask(in, "Node-RED URL", "http://localhost:1880")
@@ -96,6 +91,36 @@ func runInit(args []string) error {
 		printTokenPlaceholderNote(target.key)
 	}
 	return nil
+}
+
+// executablePath returns the path to write into the generated MCP config.
+//
+// On Linux, os.Executable resolves symlinks and returns the real target path.
+// If a package manager installs the binary as a symlink
+// (e.g. /usr/local/bin/nodered-mcp → /usr/local/lib/.../nodered-mcp), the
+// config would embed the versioned target path. After an upgrade the target is
+// replaced while the symlink stays — the old config then points at a missing
+// file (silent "spawn ENOENT").
+//
+// We therefore check whether the executable path is itself a symlink and
+// prefer the stable symlink path. If os.Readlink fails (the path is not a
+// symlink, or is inaccessible), we fall back to the resolved path as-is.
+func executablePath() string {
+	bin, err := os.Executable()
+	if err != nil || bin == "" {
+		return "nodered-mcp" // last resort: must be on PATH
+	}
+	// Prefer the symlink path so the config survives package-manager upgrades
+	// that replace the target binary without changing the symlink name.
+	if dir := filepath.Dir(bin); dir != "." {
+		if link, lerr := os.Readlink(bin); lerr == nil {
+			if !filepath.IsAbs(link) {
+				link = filepath.Join(dir, link)
+			}
+			return link
+		}
+	}
+	return bin
 }
 
 // writeClientConfig merges the 'nodered' server into the client's config file

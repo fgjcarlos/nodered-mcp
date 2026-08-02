@@ -63,11 +63,13 @@ La versión en inglés de este documento está en [`README.md`](./README.md).
 |---|---|---|---|
 | `list_nodes` | `GET /nodes` | read | Módulos instalados, versiones y estado de activación |
 | `get_node_info` | `GET /nodes/:module` | read | Metadatos de un módulo instalado |
-| `search_nodes` | registro npm | read | Buscar en el catálogo público antes de instalar |
+| `search_nodes` | registro npm | read | Buscar en el catálogo público antes de instalar ¹ |
 | `install_node` | `POST /nodes` | write | Instalar un módulo desde npm |
 | `uninstall_node` | `DELETE /nodes/:module` | write | Eliminar un módulo instalado |
 | `enable_node` | `PUT /nodes/:module[/:set]` | write | Activar un módulo o uno de sus node sets |
 | `disable_node` | `PUT /nodes/:module[/:set]` | write | Desactivar sin desinstalar |
+
+¹ `search_nodes` requiere acceso de red saliente al registro npm (`https://registry.npmjs.org` o `NODERED_SEARCH_BASE_URL` si está configurado).
 
 ### Runtime y recuperación
 
@@ -209,8 +211,8 @@ Los resources y los prompts siguen disponibles: los tres resources son vistas de
 
 | Modo | Tools | Resources | Prompts |
 |---|---|---|---|
-| por defecto | 37 | 3 | 2 |
-| `--read-only` | 14 | 3 | 2 |
+| por defecto | 43 | 3 | 2 |
+| `--read-only` | 20 | 3 | 2 |
 
 ## Requisitos
 
@@ -488,7 +490,7 @@ Para la variante de transporte HTTP, usa `type: "remote"` con `url` y `headers`:
 }
 ```
 
-Reinicia OpenCode tras editar. Las 37 tools deberían aparecer bajo el servidor `nodered`.
+Reinicia OpenCode tras editar. Las 43 tools deberían aparecer bajo el servidor `nodered`.
 
 ### Pi (pi-mono)
 
@@ -518,7 +520,7 @@ Después escribe `~/.pi/agent/mcp.json` (global) o `./.pi/mcp.json` (local del p
 
 `lifecycle: "keep-alive"` es lo recomendado para nodered-mcp: reconecta automáticamente tras un reinicio de Node-RED, lo cual importa porque Node-RED se reinicia durante los despliegues de flows. El `lazy` por defecto solo conecta en la primera llamada a una tool y desconecta tras inactividad, lo que puede enmascarar problemas de conexión.
 
-Dentro de Pi, ejecuta `/reload` para recargar la configuración, luego `mcp({ connect: "nodered" })` para verificar la conexión y `mcp({ server: "nodered" })` para listar las 37 tools.
+Dentro de Pi, ejecuta `/reload` para recargar la configuración, luego `mcp({ connect: "nodered" })` para verificar la conexión y `mcp({ server: "nodered" })` para listar las 43 tools.
 
 Para la variante de transporte HTTP:
 
@@ -551,7 +553,12 @@ Arranca el servidor una vez y apunta el cliente al endpoint en lugar de a un com
 
 Omite el bloque `headers` solo si el servidor escucha en loopback y corre sin token.
 
-Reinicia el cliente tras conectar. Deberían aparecer las 37 tools.
+Reinicia el cliente tras conectar. Deberían aparecer las 43 tools.
+
+## Limitaciones conocidas
+
+### Los valores de credenciales son redactados
+La API de administración de Node-RED nunca devuelve valores de credenciales en las respuestas de flujos. Los campos que almacenan credenciales (contraseñas, tokens, claves API guardadas en propiedades de nodos) aparecen como cadenas vacías. El servidor MCP no dispone de herramientas de gestión de credenciales.
 
 ## Resolución de problemas
 
@@ -616,7 +623,7 @@ Las tareas pendientes se registran en [`issues/`](./issues/README.md) hasta que 
 | v0.2 | Transporte streamable HTTP, CLI con flags y subcomandos | Publicada |
 | v0.3 | Gestión de la palette: instalar, desinstalar, activar, desactivar | Publicada |
 | v0.4 | `search_nodes`, ajustes y estado del runtime — 19 tools, 3 resources, 2 prompts | Publicada |
-| v0.5 | Modo de solo lectura, lecturas eficientes en contexto, diagnóstico, contexto, stream de debug, edición granular de nodos, `diff_flows`, autenticación bearer HTTP — 37 tools | Publicada |
+| v0.5 | Modo de solo lectura, lecturas eficientes en contexto, diagnóstico, contexto, stream de debug, edición granular de nodos, `diff_flows`, autenticación bearer HTTP — 43 tools | Publicada |
 | v0.6 | Resource Server OAuth 2.1 para conectores web alojados | Publicada |
 | v0.7 | Caché local de consultas | Prevista |
 
