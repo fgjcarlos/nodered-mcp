@@ -1966,3 +1966,130 @@ func TestHandleGetContext_ExistingNodeWithNoContext(t *testing.T) {
 		t.Errorf("expected empty-context message, got %q", tc.Text)
 	}
 }
+
+// buildFlowsJSON returns a GET /flows response whose non-tab nodes total n.
+// One tab + n inject nodes.
+func buildFlowsJSON(t *testing.T, n int) []byte {
+	t.Helper()
+	type node struct {
+		Type string `json:"type"`
+		ID   string `json:"id"`
+		Z    string `json:"z,omitempty"`
+	}
+	nodes := make([]node, 0, n+1)
+	nodes = append(nodes, node{Type: "tab", ID: "tab1"})
+	for i := 0; i < n; i++ {
+		nodes = append(nodes, node{Type: "inject", ID: fmt.Sprintf("n%d", i), Z: "tab1"})
+	}
+	b, err := json.Marshal(nodes)
+	if err != nil {
+		t.Fatalf("buildFlowsJSON: %v", err)
+	}
+	return b
+}
+
+func newListFlowsServer(t *testing.T, flows []byte, threshold int) *Server {
+	t.Helper()
+	nrSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && r.URL.Path == "/flows" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(flows)
+			return
+		}
+		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(nrSrv.Close)
+	c, err := nodered.NewClient(nodered.Options{BaseURL: nrSrv.URL})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	return New(c, Options{Version: "test", ListFlowsFullThreshold: threshold})
+}
+
+// TestHandleListFlows_FullDetailAboveThresholdBlocked: >threshold nodes, no
+// force → warning returned, not the full payload.
+func TestHandleListFlows_FullDetailAboveThresholdBlocked(t *testing.T) {
+	flows := buildFlowsJSON(t, 201)
+	s := newListFlowsServer(t, flows, 200)
+
+	res, err := s.handleListFlows(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"detail": "full",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res == nil || len(res.Content) == 0 {
+		t.Fatal("expected a result")
+	}
+	tc, ok := res.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", res.Content[0])
+	}
+	if !strings.Contains(tc.Text, "may exhaust the model context") {
+		t.Errorf("expected threshold warning, got %q", tc.Text)
+	}
+	if strings.Contains(tc.Text, "```json") {
+		t.Errorf("should not return full JSON when blocked, got %q", tc.Text)
+	}
+}
+
+// TestHandleListFlows_FullDetailAboveThresholdForced: >threshold nodes,
+// force=true → full response returned.
+func TestHandleListFlows_FullDetailAboveThresholdForced(t *testing.T) {
+	flows := buildFlowsJSON(t, 201)
+	s := newListFlowsServer(t, flows, 200)
+
+	res, err := s.handleListFlows(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"detail": "full",
+			"force":  true,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res == nil || len(res.Content) == 0 {
+		t.Fatal("expected a result")
+	}
+	tc, ok := res.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", res.Content[0])
+	}
+	if strings.Contains(tc.Text, "may exhaust the model context") {
+		t.Errorf("force=true should bypass the warning, got %q", tc.Text)
+	}
+	if !strings.Contains(tc.Text, "```json") {
+		t.Errorf("expected full JSON, got %q", tc.Text)
+	}
+}
+
+// TestHandleListFlows_FullDetailBelowThreshold: <threshold nodes, no force
+// → full response returned, no safeguard triggered.
+func TestHandleListFlows_FullDetailBelowThreshold(t *testing.T) {
+	flows := buildFlowsJSON(t, 5)
+	s := newListFlowsServer(t, flows, 200)
+
+	res, err := s.handleListFlows(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"detail": "full",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res == nil || len(res.Content) == 0 {
+		t.Fatal("expected a result")
+	}
+	tc, ok := res.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", res.Content[0])
+	}
+	if strings.Contains(tc.Text, "may exhaust the model context") {
+		t.Errorf("below threshold should not warn, got %q", tc.Text)
+	}
+	if !strings.Contains(tc.Text, "```json") {
+		t.Errorf("expected full JSON for small flow, got %q", tc.Text)
+	}
+}

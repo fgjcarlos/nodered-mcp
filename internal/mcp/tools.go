@@ -35,12 +35,19 @@ func (s *Server) registerTools() {
 				"specific nodes, follow up with search_flows (find nodes anywhere) or "+
 				"get_flow (fetch one tab in full). Pass detail=\"full\" only when you "+
 				"genuinely need every node of every tab at once — on a real instance "+
-				"that response is very large.",
+				"that response is very large.\n\n"+
+				"### Working with large instances\n\n"+
+				"When detail=\"full\" and the instance has more nodes than the configured "+
+				"threshold (default 200), the tool returns a warning instead of the full "+
+				"payload to protect the model context window. Pass force=true to override "+
+				"the guard, or use get_flow to fetch one tab at a time.",
 		),
 		mcp.WithString("detail",
 			mcp.Description("\"summary\" (default) for the compact map, or \"full\" for the entire raw flow config."),
 			mcp.Enum("summary", "full"),
 		),
+		mcp.WithBoolean("force",
+			mcp.Description("Set to true to bypass the node-count safeguard when using detail=\"full\". Use with caution on large deployments.")),
 	)
 	s.addReadTool(listFlows, s.handleListFlows)
 
@@ -785,7 +792,8 @@ func (s *Server) handleListFlows(ctx context.Context, req mcp.CallToolRequest) (
 	if detail != "summary" && detail != "full" {
 		return mcp.NewToolResultError(fmt.Sprintf("detail must be \"summary\" or \"full\", got %q", detail)), nil
 	}
-	slog.Debug("tool: list_flows", "detail", detail)
+	force := req.GetBool("force", false)
+	slog.Debug("tool: list_flows", "detail", detail, "force", force)
 
 	raw, err := s.nrClient.ListFlows(ctx)
 	if err != nil {
@@ -797,6 +805,14 @@ func (s *Server) handleListFlows(ctx context.Context, req mcp.CallToolRequest) (
 	}
 
 	if detail == "full" {
+		nodeCount := nodered.SummarizeFlows(raw).TotalNodes
+		if !force && nodeCount > s.listFlowsFullThreshold {
+			return mcp.NewToolResultText(fmt.Sprintf(
+				"This flow config has %d nodes which may exhaust the model context. "+
+					"Pass force=true to retrieve it anyway, or use get_flow to fetch one tab at a time.",
+				nodeCount,
+			)), nil
+		}
 		return mcp.NewToolResultText(fmt.Sprintf(
 			"Found %d flow tab(s) in Node-RED (full configuration).\n\n```json\n%s\n```",
 			nodered.FlowTabCount(raw), prettyJSON(raw),

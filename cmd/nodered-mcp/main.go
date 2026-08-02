@@ -154,15 +154,16 @@ func serve(args []string) error {
 	}
 
 	srv := mcpserver.New(nrClient, mcpserver.Options{
-		Version:               resolveVersion(),
-		ReadOnly:              cfg.MCPReadOnly,
-		DebugStream:           cfg.MCPDebugStream,
-		NodeDenylist:          cfg.NodeDenylist,
-		HTTPMaxBody:           cfg.MCPHTTPMaxBody,
-		AllowInsecureLoopback: cfg.MCPAllowInsecureLoopback,
-		HTTPRatePerSec:        cfg.MCPHTTPRatePerSec,
-		HTTPRateBurst:         cfg.MCPHTTPRateBurst,
-		HTTPRateDisabled:      cfg.MCPHTTPRateDisabled,
+		Version:                resolveVersion(),
+		ReadOnly:               cfg.MCPReadOnly,
+		DebugStream:            cfg.MCPDebugStream,
+		NodeDenylist:           cfg.NodeDenylist,
+		HTTPMaxBody:            cfg.MCPHTTPMaxBody,
+		AllowInsecureLoopback:  cfg.MCPAllowInsecureLoopback,
+		HTTPRatePerSec:         cfg.MCPHTTPRatePerSec,
+		HTTPRateBurst:          cfg.MCPHTTPRateBurst,
+		HTTPRateDisabled:       cfg.MCPHTTPRateDisabled,
+		ListFlowsFullThreshold: cfg.MCPListFlowsFullThreshold,
 	})
 	if cfg.MCPTransport == "http" {
 		// SECURITY (issue #89): the loopback bind path below is the
