@@ -370,6 +370,29 @@ func (c *Client) LookupInjectTarget(ctx context.Context, id string) (InjectLooku
 	return InjectLookup{}, false, nil
 }
 
+// NodeExists reports whether a node or flow-tab with the given id appears
+// anywhere in the current deployment. It calls ListFlows and scans the flat
+// array returned. Returns (false, nil) for an unknown id (not a transport
+// error); (false, err) when the HTTP call itself fails.
+//
+// Used by handleGetContext to distinguish "id not found" (user typo) from
+// "id exists but has no context stored" (legitimate empty answer).
+func (c *Client) NodeExists(ctx context.Context, id string) (bool, error) {
+	raw, err := c.ListFlows(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, item := range extractFlowArray(raw) {
+		var m struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(item, &m) == nil && m.ID == id {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // FlowTabCount returns how many flow tabs (objects with "type":"tab") appear
 // in a raw GET /flows response. It tolerates both the bare-array (API v1) and
 // the {"flows":[...]} envelope (API v2). Returns 0 on any parse failure.

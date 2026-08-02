@@ -72,6 +72,12 @@ type Server struct {
 	// Stored as a closure so tests can swap in any predicate.
 	denylist func(string) bool
 
+	// listFlowsFullThreshold is the node-count limit for list_flows
+	// detail="full". If the total node count exceeds this value and the
+	// caller has not passed force=true, the handler returns a warning
+	// instead of the full payload (issue #111).
+	listFlowsFullThreshold int
+
 	tools     []mcp.Tool
 	resources []mcp.Resource
 	prompts   []mcp.Prompt
@@ -125,6 +131,10 @@ type Options struct {
 	// true, runHTTP installs a pass-through middleware in place of the
 	// limiter. Off by default — the limiter is the safe choice.
 	HTTPRateDisabled bool
+	// ListFlowsFullThreshold is the maximum node count that
+	// list_flows detail="full" returns without an explicit force=true
+	// override. Zero is treated as the default (200). Issue #111.
+	ListFlowsFullThreshold int
 }
 
 // defaultHTTPMaxBody is the fallback for the per-request body cap when
@@ -205,6 +215,13 @@ func New(nrClient *nodered.Client, opts Options) *Server {
 		readOnly:    opts.ReadOnly,
 		debugStream: opts.DebugStream,
 		denylist:    buildDenylist(opts.NodeDenylist),
+	}
+
+	// Issue #111: apply the threshold, falling back to 200 when zero.
+	if opts.ListFlowsFullThreshold > 0 {
+		srv.listFlowsFullThreshold = opts.ListFlowsFullThreshold
+	} else {
+		srv.listFlowsFullThreshold = 200
 	}
 
 	// The debug tail is best-effort and opt-in. A Node-RED that is
