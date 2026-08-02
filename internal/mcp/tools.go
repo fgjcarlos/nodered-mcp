@@ -1,3 +1,5 @@
+// Error convention: fmt.Errorf("<verb> <noun>: %w", err) for wrapped errors; %v only for non-error interpolation.
+
 package mcp
 
 import (
@@ -780,7 +782,9 @@ func (s *Server) registerTools() {
 			"Search the public npm registry for node-red-* modules (uses the same "+
 				"endpoint as flows.nodered.org). Returns name, version, description and "+
 				"link per hit. Use this before install_node when you don't know the exact "+
-				"npm package name. Read-only.",
+				"npm package name. Read-only. "+
+				"Requires outbound network access to the npm registry "+
+				"(https://registry.npmjs.org or NODERED_SEARCH_BASE_URL if set).",
 		),
 		mcp.WithString("query", mcp.Required(),
 			mcp.Description("Free-text search, e.g. \"dashboard\", \"mqtt\", \"modbus\".")),
@@ -1796,7 +1800,7 @@ func nodeParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) {
 	case map[string]any:
 		raw, err := json.Marshal(x)
 		if err != nil {
-			return nil, fmt.Errorf("encoding %q: %v", key, err)
+			return nil, fmt.Errorf("encoding %q: %w", key, err)
 		}
 		return raw, nil
 	default:
@@ -1846,7 +1850,7 @@ func normalizeFlowDoc(raw json.RawMessage, flowID string, fillNodes bool) (noder
 			}
 			out, err := json.Marshal(doc)
 			if err != nil {
-				return nil, fmt.Errorf("re-encoding flow document: %v", err)
+				return nil, fmt.Errorf("re-encoding flow document: %w", err)
 			}
 			return nodered.RawFlow(out), nil
 		}
@@ -1856,7 +1860,7 @@ func normalizeFlowDoc(raw json.RawMessage, flowID string, fillNodes bool) (noder
 	// every node whose z references it.
 	var flat []json.RawMessage
 	if err := json.Unmarshal(raw, &flat); err != nil {
-		return nil, fmt.Errorf("flow document is not a JSON object or flow array: %v", err)
+		return nil, fmt.Errorf("flow document is not a JSON object or flow array: %w", err)
 	}
 	if flowID == "" {
 		return nil, fmt.Errorf(
@@ -1885,13 +1889,13 @@ func normalizeFlowDoc(raw json.RawMessage, flowID string, fillNodes bool) (noder
 	}
 	encodedNodes, err := json.Marshal(nodes)
 	if err != nil {
-		return nil, fmt.Errorf("re-encoding nodes: %v", err)
+		return nil, fmt.Errorf("re-encoding nodes: %w", err)
 	}
 	out["nodes"] = encodedNodes
 	if len(configs) > 0 {
 		encodedConfigs, err := json.Marshal(configs)
 		if err != nil {
-			return nil, fmt.Errorf("re-encoding configs: %v", err)
+			return nil, fmt.Errorf("re-encoding configs: %w", err)
 		}
 		out["configs"] = encodedConfigs
 	}
@@ -1899,7 +1903,7 @@ func normalizeFlowDoc(raw json.RawMessage, flowID string, fillNodes bool) (noder
 
 	encoded, err := json.Marshal(out)
 	if err != nil {
-		return nil, fmt.Errorf("re-encoding flow document: %v", err)
+		return nil, fmt.Errorf("re-encoding flow document: %w", err)
 	}
 	return nodered.RawFlow(encoded), nil
 }
@@ -1973,7 +1977,7 @@ func isJSONNull(raw json.RawMessage) bool {
 func normalizeFlowsArray(raw json.RawMessage) ([]json.RawMessage, error) {
 	var flows []json.RawMessage
 	if err := json.Unmarshal(raw, &flows); err != nil {
-		return nil, fmt.Errorf("flows is not a JSON array: %v", err)
+		return nil, fmt.Errorf("flows is not a JSON array: %w", err)
 	}
 	if len(flows) == 0 {
 		return nil, fmt.Errorf("flows must contain at least one flow")

@@ -48,6 +48,11 @@ branch.
   squash-merges; the contributor's job is to keep the branch current
   when it falls behind.
 
+### Error wrapping
+
+Use `fmt.Errorf("<verb> <noun>: %w", err)` to preserve the error chain.
+Use `%v` only for non-error values. Never wrap an `error` with `%v`.
+
 ### What the CI gate covers
 
 `.github/workflows/ci.yml` (runs on every push and PR):
