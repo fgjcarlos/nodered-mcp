@@ -553,6 +553,11 @@ Omite el bloque `headers` solo si el servidor escucha en loopback y corre sin to
 
 Reinicia el cliente tras conectar. Deberían aparecer las 37 tools.
 
+## Limitaciones conocidas
+
+### Los valores de credenciales son redactados
+La API de administración de Node-RED nunca devuelve valores de credenciales en las respuestas de flujos. Los campos que almacenan credenciales (contraseñas, tokens, claves API guardadas en propiedades de nodos) aparecen como cadenas vacías. El servidor MCP no dispone de herramientas de gestión de credenciales.
+
 ## Resolución de problemas
 
 **No aparecen las tools.** Comprueba que el binario esté en el `PATH`, o usa una ruta absoluta en `command`. En Windows, escapa las barras invertidas: `C:\\ruta\\nodered-mcp.exe`. Ejecutar `nodered-mcp init` resuelve la ruta por ti.

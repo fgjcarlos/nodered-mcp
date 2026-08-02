@@ -583,6 +583,11 @@ On startup the server fetches `<issuer>/.well-known/openid-configuration` to dis
 
 Configuring both `MCP_HTTP_TOKEN` and `MCP_OAUTH_ISSUER` is a configuration error and the server refuses to start.
 
+## Known limitations
+
+### Credential values are redacted
+Node-RED's admin API never returns credential values in flow responses. Fields that hold credentials (passwords, tokens, API keys stored in node properties) appear as empty strings. The MCP server has no credential-management tools.
+
 ## Troubleshooting
 
 **Tools do not appear.** Confirm the binary is on the `PATH`, or use an absolute path in `command`. On Windows, escape the backslashes: `C:\\path\\nodered-mcp.exe`. Running `nodered-mcp init` resolves the path for you.

@@ -40,7 +40,9 @@ func (s *Server) registerTools() {
 				"When detail=\"full\" and the instance has more nodes than the configured "+
 				"threshold (default 200), the tool returns a warning instead of the full "+
 				"payload to protect the model context window. Pass force=true to override "+
-				"the guard, or use get_flow to fetch one tab at a time.",
+				"the guard, or use get_flow to fetch one tab at a time.\n\n"+
+				"Note: Node-RED redacts credential values in API responses; credential "+
+				"fields are present but their values are always empty strings.",
 		),
 		mcp.WithString("detail",
 			mcp.Description("\"summary\" (default) for the compact map, or \"full\" for the entire raw flow config."),
@@ -75,7 +77,9 @@ func (s *Server) registerTools() {
 	getFlow := mcp.NewTool("get_flow",
 		mcp.WithDescription(
 			"Fetch a single Node-RED flow tab by its ID, returned as its full "+
-				"JSON document (tab metadata plus every node it owns).",
+				"JSON document (tab metadata plus every node it owns). "+
+				"Note: Node-RED redacts credential values in API responses; credential "+
+				"fields are present but their values are always empty strings.",
 		),
 		mcp.WithString("id", mcp.Required(),
 			mcp.Description("The flow tab ID (as shown by list_flows).")),
@@ -1262,13 +1266,13 @@ func encodePayloadArg(v any) (json.RawMessage, error) {
 	case map[string]any:
 		out, err := json.Marshal(x)
 		if err != nil {
-			return nil, fmt.Errorf("encoding payload: %v", err)
+			return nil, fmt.Errorf("encoding payload: %w", err)
 		}
 		return out, nil
 	case []any:
 		out, err := json.Marshal(x)
 		if err != nil {
-			return nil, fmt.Errorf("encoding payload: %v", err)
+			return nil, fmt.Errorf("encoding payload: %w", err)
 		}
 		return out, nil
 	default:
@@ -1449,7 +1453,7 @@ func subflowParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) 
 	case map[string]any:
 		raw, err := json.Marshal(x)
 		if err != nil {
-			return nil, fmt.Errorf("encoding %q: %v", key, err)
+			return nil, fmt.Errorf("encoding %q: %w", key, err)
 		}
 		return raw, nil
 	default:
@@ -1477,7 +1481,7 @@ func instanceParamsParam(req mcp.CallToolRequest, key string) (json.RawMessage, 
 	case map[string]any:
 		raw, err := json.Marshal(x)
 		if err != nil {
-			return nil, fmt.Errorf("encoding %q: %v", key, err)
+			return nil, fmt.Errorf("encoding %q: %w", key, err)
 		}
 		return raw, nil
 	default:
@@ -1734,13 +1738,13 @@ func flowParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) {
 	case map[string]any:
 		raw, err := json.Marshal(x)
 		if err != nil {
-			return nil, fmt.Errorf("encoding %q: %v", key, err)
+			return nil, fmt.Errorf("encoding %q: %w", key, err)
 		}
 		return raw, nil
 	case []any:
 		raw, err := json.Marshal(x)
 		if err != nil {
-			return nil, fmt.Errorf("encoding %q: %v", key, err)
+			return nil, fmt.Errorf("encoding %q: %w", key, err)
 		}
 		return raw, nil
 	default:
@@ -1766,7 +1770,7 @@ func flowsParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) {
 	case []any:
 		raw, err := json.Marshal(x)
 		if err != nil {
-			return nil, fmt.Errorf("encoding %q: %v", key, err)
+			return nil, fmt.Errorf("encoding %q: %w", key, err)
 		}
 		return raw, nil
 	default:
