@@ -63,11 +63,13 @@ A Spanish version of this document is available at [`README.es.md`](./README.es.
 |---|---|---|---|
 | `list_nodes` | `GET /nodes` | read | Installed node modules, versions, and enabled state |
 | `get_node_info` | `GET /nodes/:module` | read | Metadata for one installed module |
-| `search_nodes` | npm registry | read | Search the public catalogue before installing |
+| `search_nodes` | npm registry | read | Search the public catalogue before installing ¹ |
 | `install_node` | `POST /nodes` | write | Install a module from npm |
 | `uninstall_node` | `DELETE /nodes/:module` | write | Remove an installed module |
 | `enable_node` | `PUT /nodes/:module[/:set]` | write | Enable a module or one of its node sets |
 | `disable_node` | `PUT /nodes/:module[/:set]` | write | Disable without uninstalling |
+
+¹ `search_nodes` requires outbound network access to the npm registry (`https://registry.npmjs.org` or `NODERED_SEARCH_BASE_URL` if set).
 
 ### Runtime and recovery
 
@@ -224,8 +226,8 @@ Resources and prompts remain available: all three resources are read-only views,
 
 | Mode | Tools | Resources | Prompts |
 |---|---|---|---|
-| default | 37 | 3 | 2 |
-| `--read-only` | 14 | 3 | 2 |
+| default | 43 | 3 | 2 |
+| `--read-only` | 20 | 3 | 2 |
 
 ## Requirements
 
@@ -503,7 +505,7 @@ For the HTTP transport variant, use `type: "remote"` with `url` and `headers`:
 }
 ```
 
-Restart OpenCode after editing. All 37 tools should appear under the `nodered` server.
+Restart OpenCode after editing. All 43 tools should appear under the `nodered` server.
 
 ### Pi (pi-mono)
 
@@ -533,7 +535,7 @@ Then write `~/.pi/agent/mcp.json` (global) or `./.pi/mcp.json` (project-local). 
 
 `lifecycle: "keep-alive"` is recommended for nodered-mcp: it reconnects automatically after a Node-RED restart, which matters because Node-RED bounces during flow deployments. The default `lazy` only connects on the first tool call and disconnects after idle, which can mask connection issues.
 
-Inside Pi, run `/reload` to pick up the config, then `mcp({ connect: "nodered" })` to verify the connection and `mcp({ server: "nodered" })` to list the 37 tools.
+Inside Pi, run `/reload` to pick up the config, then `mcp({ connect: "nodered" })` to verify the connection and `mcp({ server: "nodered" })` to list the 43 tools.
 
 For the HTTP transport variant:
 
@@ -566,7 +568,7 @@ Start the server once, then point the client at the endpoint rather than at a co
 
 Drop the `headers` block only if the server is bound to loopback and running without a token.
 
-Restart the client after connecting. All 37 tools should appear.
+Restart the client after connecting. All 43 tools should appear.
 
 ### OAuth (alternative to the bearer token)
 
@@ -651,7 +653,7 @@ Work items are tracked in [`issues/`](./issues/README.md) until the repository m
 | v0.2 | Streamable HTTP transport, CLI with flags and subcommands | Released |
 | v0.3 | Palette management: install, uninstall, enable, disable | Released |
 | v0.4 | `search_nodes`, settings and runtime state — 19 tools, 3 resources, 2 prompts | Released |
-| v0.5 | Read-only mode, context-efficient reads, diagnostics, context, the debug stream, granular node editing, `diff_flows`, HTTP bearer auth — 37 tools | Released |
+| v0.5 | Read-only mode, context-efficient reads, diagnostics, context, the debug stream, granular node editing, `diff_flows`, HTTP bearer auth — 43 tools | Released |
 | v0.6 | OAuth 2.1 Resource Server for hosted web connectors | Released |
 | v0.7 | Local query cache | Planned |
 

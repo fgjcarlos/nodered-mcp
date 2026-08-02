@@ -70,6 +70,16 @@ If your PR adds a new tool, the tool must be wired through `internal/mcp/tools.g
 show up in the §5 catalog in `PLAN.md`, and not regress the read/write
 counts already documented there.
 
+### Keeping tool counts accurate
+
+Run `go test ./internal/mcp/ -run TestFull` to verify the total tool count and
+`go test ./internal/mcp/ -run TestReadOnly` to verify the read-only subset.
+
+When adding or removing tools, update the counts in `README.md` and `README.es.md`
+to match. The constants `totalTools` and the `readOnlyTools` slice in
+`internal/mcp/tools_test.go` are the source of truth; the README tables must
+mirror them.
+
 ## Release process
 
 The release pipeline is fully tag-driven. The maintainer does the
