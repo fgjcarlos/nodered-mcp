@@ -242,7 +242,9 @@ func (c *Client) doURL(ctx context.Context, method, u, errorPath string, body in
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("calling %s %s: %w", method, u, err)
+		// Wrap as a connectivity error with the redacted base URL, not the full
+		// request URL which may contain a query-string token.
+		return fmt.Errorf("cannot reach Node-RED at %s: %w", redactURL(u), err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -339,4 +341,17 @@ func (c *Client) getRaw(ctx context.Context, path string) ([]byte, error) {
 		}
 	}
 	return respBody, nil
+}
+
+// redactURL strips the query string and userinfo from a URL to avoid leaking
+// tokens that may be embedded as query parameters. Returns "[unparseable URL]"
+// when the input cannot be parsed.
+func redactURL(u string) string {
+	parsed, err := url.Parse(u)
+	if err != nil {
+		return "[unparseable URL]"
+	}
+	parsed.RawQuery = ""
+	parsed.User = nil
+	return parsed.String()
 }
