@@ -1607,6 +1607,42 @@ func TestSetFlows_RejectsDeniedNodeType(t *testing.T) {
 	}
 }
 
+// TestHandleSetFlows_NonTabOnlyRejected is the MCP-layer regression
+// pin for issue #106: an array of orphan nodes (no tab entry) used to
+// pass through normalizeFlowsArray and deploy, leaving the runtime
+// with zero tabs. The handler must reject it before any Node-RED call.
+func TestHandleSetFlows_NonTabOnlyRejected(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("server should not be called for a no-tab flows array: %s %s", r.Method, r.URL.Path)
+		_, _ = w.Write([]byte("[]"))
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	s := New(c, Options{Version: "test"})
+
+	res, err := s.handleSetFlows(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"flows": `[
+				{"id":"orphan","type":"inject","name":"o","topic":"t","payload":"p","payloadType":"str","repeat":"","crontab":"","once":false,"onceDelay":0.1,"x":140,"y":140,"wires":[]}
+			]`,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("handleSetFlows returned err=%v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result, got %+v", res)
+	}
+	tc := res.Content[0].(mcp.TextContent)
+	if !strings.Contains(tc.Text, `"tab"`) {
+		t.Errorf("error must mention tab requirement, got %q", tc.Text)
+	}
+}
+
 // TestHandleValidateFlow_StringWiresReturnsIssue is the MCP-layer pin
 // for issue #415: a model that hands a node with a string-typed wires
 // field back to validate_flow used to get a misleading "0 issues" answer

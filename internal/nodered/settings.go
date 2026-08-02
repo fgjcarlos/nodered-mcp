@@ -1,6 +1,7 @@
 package nodered
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -80,6 +81,21 @@ func (c *Client) SetFlows(ctx context.Context, flows []json.RawMessage) error {
 	defer c.writeGuard()()
 	if len(flows) == 0 {
 		return errors.New("flows: at least one element is required")
+	}
+	// Issue #106: Node-RED accepts a non-empty flows array that contains
+	// zero tab entries (e.g. one orphan inject node) and deploys it,
+	// leaving the runtime with no tabs and a node that has nowhere to
+	// live. Reject the input before taking a backup or contacting the
+	// runtime so the user's existing tab structure is preserved.
+	hasTab := false
+	for _, f := range flows {
+		if bytes.Contains(bytes.ToLower(f), []byte(`"type":"tab"`)) {
+			hasTab = true
+			break
+		}
+	}
+	if !hasTab {
+		return errors.New(`flows: array must contain at least one element with type "tab"; received only non-tab entries`)
 	}
 	ctx, cancel := context.WithTimeout(ctx, settingsStateTimeout)
 	defer cancel()
