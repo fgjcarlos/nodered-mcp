@@ -413,7 +413,10 @@ func (s *Server) registerTools() {
 	// ---- inject_node ---------------------------------------------------
 	injectNode := mcp.NewTool("inject_node",
 		mcp.WithDescription(
-			"Manually fire an inject node by its ID (POST /inject/:id), kicking "+
+			"WARNING: executes the live Node-RED flow and may trigger real external "+
+				"side effects (HTTP requests, MQTT publishes, database writes, email, etc.). "+
+				"Do not use on production flows without operator confirmation.\n\n"+
+				"Manually fire an inject node by its ID (POST /inject/:id), kicking "+
 				"off a flow on demand without opening the editor.\n\n"+
 				"By default the inject fires with whatever the node was configured "+
 				"to send (its payload, topic, etc.). Pass `payload` to override "+
