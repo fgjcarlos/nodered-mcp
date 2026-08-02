@@ -273,6 +273,66 @@ func TestValidateFlow_EmptyIsNonNil(t *testing.T) {
 	}
 }
 
+// TestValidateFlow_BadZ covers issue #99 on the read-only validator: a
+// node whose z references a tab or node that does not exist in this
+// document must be flagged with IssueBadZ. The flag is what the
+// validate_flow tool reports to the model, and the same flag is what the
+// update_flow / set_flows write path rejects via validateFlowWires.
+func TestValidateFlow_BadZ(t *testing.T) {
+	bad := `{
+		"id":"tabA","label":"Home",
+		"nodes":[
+			{"id":"n1","type":"inject","z":"ghost","x":100,"y":80,"wires":[]}
+		]
+	}`
+	issues := ValidateFlow(RawFlow(bad))
+
+	found := false
+	for _, issue := range issues {
+		if issue.Kind != IssueBadZ {
+			continue
+		}
+		if issue.NodeID != "n1" {
+			t.Errorf("expected bad_z issue to point at n1, got %q (issues: %+v)", issue.NodeID, issues)
+		}
+		if !strings.Contains(issue.Message, `z="ghost"`) {
+			t.Errorf("expected message to name the bad z, got %q", issue.Message)
+		}
+		found = true
+	}
+	if !found {
+		t.Errorf("expected an IssueBadZ for n1, got: %+v", issues)
+	}
+}
+
+// TestValidateFlow_BadZAlsoRejectedByWritePath is the wire-up test for
+// issue #99: the validator and the update_flow write path must agree, so
+// a flow the validator flags must also be refused by validateZRefsInFlow
+// (which is what update_flowLocked calls before HTTP). Returns nil for
+// create_flow, since Node-RED assigns the new tab id on POST and the
+// caller cannot know it in advance.
+func TestValidateFlow_BadZAlsoRejectedByWritePath(t *testing.T) {
+	bad := `{
+		"id":"tabA","label":"Home",
+		"nodes":[
+			{"id":"n1","type":"inject","z":"ghost","x":100,"y":80,"wires":[]}
+		]
+	}`
+	// update_flow path: the supplied tab id is "tabA"; the node's z
+	// "ghost" names neither that tab nor an existing node.
+	err := validateZRefsInFlow(RawFlow(bad), "tabA")
+	if err == nil {
+		t.Fatal("expected validateZRefsInFlow to refuse a bad z, got nil")
+	}
+	if !strings.Contains(err.Error(), `z="ghost"`) {
+		t.Errorf("expected error to name the bad z, got: %v", err)
+	}
+	// create_flow path: validateZRefsInFlow is not called, so the same
+	// payload does not fail at this guard. Node-RED assigns the tab id
+	// on POST and rewrites z to match — the z-check is only meaningful
+	// when the tab id is known up front.
+}
+
 // SetDisabledInFlow round-trips: a tab read from the runtime, flipped to
 // disabled, encoded back. The only field that changed is "disabled".
 func TestSetDisabledInFlow_FlipsAndRoundtrips(t *testing.T) {

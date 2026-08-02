@@ -311,3 +311,99 @@ func TestLoad_HTTPMaxBody_RejectsBadValue(t *testing.T) {
 		})
 	}
 }
+
+// TestLoad_HTTPRate_Defaults covers issue #90: with no env vars set,
+// the per-IP rate limit must default to 1 req/s with a burst of 10 —
+// tight enough to defeat brute-force, loose enough to let a normal
+// agent loop through.
+func TestLoad_HTTPRate_Defaults(t *testing.T) {
+	t.Setenv("MCP_HTTP_RATE_PER_SEC", "")
+	t.Setenv("MCP_HTTP_RATE_BURST", "")
+	t.Setenv("MCP_HTTP_RATE_DISABLED", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MCPHTTPRatePerSec != 1.0 {
+		t.Errorf("expected default rate=1.0 req/s, got %v", cfg.MCPHTTPRatePerSec)
+	}
+	if cfg.MCPHTTPRateBurst != 10 {
+		t.Errorf("expected default burst=10, got %d", cfg.MCPHTTPRateBurst)
+	}
+	if cfg.MCPHTTPRateDisabled {
+		t.Error("expected rate limit enabled by default")
+	}
+}
+
+// TestLoad_HTTPRate_FromEnv covers the parse paths: an operator who
+// wants a different refill rate or bucket size sets the corresponding
+// env var. The disabled flag must be off by default and turn on with
+// the canonical truthy value.
+func TestLoad_HTTPRate_FromEnv(t *testing.T) {
+	t.Setenv("MCP_HTTP_RATE_PER_SEC", "5")
+	t.Setenv("MCP_HTTP_RATE_BURST", "25")
+	t.Setenv("MCP_HTTP_RATE_DISABLED", "true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MCPHTTPRatePerSec != 5.0 {
+		t.Errorf("expected rate=5.0 req/s, got %v", cfg.MCPHTTPRatePerSec)
+	}
+	if cfg.MCPHTTPRateBurst != 25 {
+		t.Errorf("expected burst=25, got %d", cfg.MCPHTTPRateBurst)
+	}
+	if !cfg.MCPHTTPRateDisabled {
+		t.Error("expected MCPHTTPRateDisabled=true after MCP_HTTP_RATE_DISABLED=true")
+	}
+}
+
+// TestLoad_HTTPRate_RejectsBadValues is the validation counterpart:
+// zero, negative, or unparseable rate/burst values must abort startup
+// rather than silently fall back to defaults — silent fallbacks would
+// defeat the whole point of an explicit operator override (issue #90).
+func TestLoad_HTTPRate_RejectsBadValues(t *testing.T) {
+	cases := []struct {
+		name    string
+		perSec  string
+		burst   string
+		wantEnv string // which env var the error should mention
+	}{
+		{"zero-rate", "0", "", "MCP_HTTP_RATE_PER_SEC"},
+		{"negative-rate", "-1", "", "MCP_HTTP_RATE_PER_SEC"},
+		{"non-numeric-rate", "fast", "", "MCP_HTTP_RATE_PER_SEC"},
+		{"zero-burst", "", "0", "MCP_HTTP_RATE_BURST"},
+		{"negative-burst", "", "-5", "MCP_HTTP_RATE_BURST"},
+		{"non-numeric-burst", "", "ten", "MCP_HTTP_RATE_BURST"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("MCP_HTTP_RATE_PER_SEC", tc.perSec)
+			t.Setenv("MCP_HTTP_RATE_BURST", tc.burst)
+			_, err := Load()
+			if err == nil {
+				t.Fatalf("expected error for perSec=%q burst=%q, got nil", tc.perSec, tc.burst)
+			}
+			if !strings.Contains(err.Error(), tc.wantEnv) {
+				t.Errorf("error should mention %s, got: %v", tc.wantEnv, err)
+			}
+		})
+	}
+}
+
+// TestLoad_HTTPRate_RejectsUnparseableDisabled covers the disabled
+// flag's parse path: a misspelled value (anything strconv.ParseBool
+// rejects) must abort startup rather than silently leave the limiter
+// on when the operator asked for it off.
+func TestLoad_HTTPRate_RejectsUnparseableDisabled(t *testing.T) {
+	t.Setenv("MCP_HTTP_RATE_DISABLED", "off")
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for MCP_HTTP_RATE_DISABLED=off, got nil")
+	}
+	if !strings.Contains(err.Error(), "MCP_HTTP_RATE_DISABLED") {
+		t.Errorf("error should mention MCP_HTTP_RATE_DISABLED, got: %v", err)
+	}
+}
