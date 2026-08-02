@@ -28,8 +28,8 @@ type Config struct {
 	// NodeRedBackupKeep is the maximum number of backup files to retain.
 	// Defaults to 50. Set NODERED_BACKUP_KEEP=0 to disable pruning.
 	NodeRedBackupKeep int
-	MCPLogLevel      string
-	MCPTransport     string
+	MCPLogLevel       string
+	MCPTransport      string
 	// MCPHTTPAddr is the listen address for the "http" transport
 	// (host:port). Ignored when MCPTransport is "stdio".
 	MCPHTTPAddr string
@@ -96,6 +96,13 @@ type Config struct {
 	// commands as the Node-RED process. Operators who genuinely need those
 	// node types can opt out with MCP_NODE_DENYLIST="" — see SECURITY.md.
 	NodeDenylist []string
+	// MCPListFlowsFullThreshold is the maximum number of nodes that
+	// list_flows detail="full" will return without an explicit force=true
+	// override. Defaults to 200. Configurable via
+	// MCP_LIST_FLOWS_FULL_THRESHOLD. A deployment with hundreds of nodes
+	// can exhaust the model's context window if the full config is dumped
+	// unconditionally (issue #111).
+	MCPListFlowsFullThreshold int
 }
 
 // defaultNodeDenylist is the set of node types the MCP write tools refuse
@@ -130,11 +137,11 @@ func Load() (*Config, error) {
 		NodeRedUsername:  os.Getenv("NODERED_USERNAME"),
 		NodeRedPassword:  os.Getenv("NODERED_PASSWORD"),
 		NodeRedBackupDir: getEnv("NODERED_BACKUP_DIR", "backups"),
-		MCPLogLevel:      strings.ToLower(getEnv("MCP_LOG_LEVEL", "info")),		MCPTransport:     strings.ToLower(getEnv("MCP_TRANSPORT", "stdio")),
-		MCPHTTPAddr:      getEnv("MCP_HTTP_ADDR", ":8090"),
-		MCPHTTPToken:     os.Getenv("MCP_HTTP_TOKEN"),
-		OAuthIssuer:      os.Getenv("MCP_OAUTH_ISSUER"),
-		OAuthAudience:    os.Getenv("MCP_OAUTH_AUDIENCE"),
+		MCPLogLevel:      strings.ToLower(getEnv("MCP_LOG_LEVEL", "info")), MCPTransport: strings.ToLower(getEnv("MCP_TRANSPORT", "stdio")),
+		MCPHTTPAddr:   getEnv("MCP_HTTP_ADDR", ":8090"),
+		MCPHTTPToken:  os.Getenv("MCP_HTTP_TOKEN"),
+		OAuthIssuer:   os.Getenv("MCP_OAUTH_ISSUER"),
+		OAuthAudience: os.Getenv("MCP_OAUTH_AUDIENCE"),
 	}
 
 	insecure, err := strconv.ParseBool(getEnv("NODERED_INSECURE", "false"))
@@ -233,6 +240,19 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("parsing MCP_HTTP_RATE_DISABLED: %w", err)
 	}
 	cfg.MCPHTTPRateDisabled = rateDisabled
+
+	// Issue #111: soft threshold for list_flows detail="full". Default 200
+	// nodes; beyond that the response risks exhausting the model context
+	// window. Operators can raise or lower the limit via
+	// MCP_LIST_FLOWS_FULL_THRESHOLD.
+	cfg.MCPListFlowsFullThreshold = 200
+	if v := os.Getenv("MCP_LIST_FLOWS_FULL_THRESHOLD"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return nil, fmt.Errorf("MCP_LIST_FLOWS_FULL_THRESHOLD must be a positive integer, got %q", v)
+		}
+		cfg.MCPListFlowsFullThreshold = n
+	}
 
 	if err := cfg.validate(); err != nil {
 		return nil, err
