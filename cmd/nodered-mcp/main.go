@@ -159,6 +159,9 @@ func serve(args []string) error {
 		NodeDenylist:          cfg.NodeDenylist,
 		HTTPMaxBody:           cfg.MCPHTTPMaxBody,
 		AllowInsecureLoopback: cfg.MCPAllowInsecureLoopback,
+		HTTPRatePerSec:        cfg.MCPHTTPRatePerSec,
+		HTTPRateBurst:         cfg.MCPHTTPRateBurst,
+		HTTPRateDisabled:      cfg.MCPHTTPRateDisabled,
 	})
 	if cfg.MCPTransport == "http" {
 		// SECURITY (issue #89): the loopback bind path below is the

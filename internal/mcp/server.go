@@ -20,6 +20,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"golang.org/x/time/rate"
 
 	"github.com/fgjcarlos/nodered-mcp/internal/config"
 	"github.com/fgjcarlos/nodered-mcp/internal/nodered"
@@ -112,6 +113,18 @@ type Options struct {
 	// this to true to acknowledge the loopback-without-token trade-
 	// off and stop the nag on every restart.
 	AllowInsecureLoopback bool
+	// HTTPRatePerSec is the steady-state per-source-IP request rate
+	// the HTTP transport allows (req/s). Zero falls back to
+	// defaultHTTPRatePerSec. See internal/mcp/http_ratelimit.go for
+	// the middleware that enforces it (issue #90).
+	HTTPRatePerSec float64
+	// HTTPRateBurst is the per-source-IP burst size. Zero falls back to
+	// defaultHTTPRateBurst (issue #90).
+	HTTPRateBurst int
+	// HTTPRateDisabled opts out of the rate limiter entirely. When
+	// true, runHTTP installs a pass-through middleware in place of the
+	// limiter. Off by default — the limiter is the safe choice.
+	HTTPRateDisabled bool
 }
 
 // defaultHTTPMaxBody is the fallback for the per-request body cap when
@@ -119,6 +132,18 @@ type Options struct {
 // legitimate MCP request (set_flows on a sizable flow set) while making
 // a memory-exhaustion attack expensive.
 const defaultHTTPMaxBody = 32 << 20
+
+// defaultHTTPRatePerSec is the steady-state per-source-IP request rate
+// the HTTP transport allows when the operator does not set
+// HTTPRatePerSec. 1 req/s is tight enough to make brute-force expensive
+// and loose enough that a legit agent loop is unaffected (issue #90).
+const defaultHTTPRatePerSec = 1.0
+
+// defaultHTTPRateBurst is the per-source-IP bucket size when the
+// operator does not set HTTPRateBurst. A burst of 10 covers a typical
+// agent loop (initialize + a few tool calls in flight) without making
+// brute-force cheap (issue #90).
+const defaultHTTPRateBurst = 10
 
 // buildDenylist turns a slice of node types into a closure the write
 // tools can call per-node. The closure form lets tests inject any
@@ -436,26 +461,19 @@ func (s *Server) RunHTTP(addr, token string, verifier *oauth.Verifier) error {
 	return s.runHTTP(ctx, addr, token, verifier)
 }
 
-// runHTTP is the testable inner loop. It owns the server lifecycle but
-// not the shutdown signal — that decision lives in RunHTTP, where the
-// signal handling is also documented. The split keeps the smoke test
-// honest (real http.Server, real mcp-go, real timeout configuration)
-// without giving up the operator-facing signal contract.
+// runHTTP is the testable inner loop: real http.Server, real mcp-go,
+// real timeout configuration. The handler chain itself lives in
+// buildHTTPHandler so tests can drive the same chain via httptest
+// without binding a TCP port.
 func (s *Server) runHTTP(ctx context.Context, addr, token string, verifier *oauth.Verifier) error {
-	// The http.Server is created first and handed to mcp-go, so the MCP
-	// handler can be wrapped in auth while mcp-go keeps owning the listener
-	// lifecycle — including closing sessions on shutdown.
-	//
 	// Timeouts: ReadHeaderTimeout closes the Slowloris window. ReadTimeout
 	// and IdleTimeout cap stuck connections. WriteTimeout is deliberately
 	// left at zero because mcp-go's Streamable HTTP transport serves
 	// long-lived SSE responses (text/event-stream via http.Flusher); a
 	// global WriteTimeout would kill the SSE stream before it has a chance
-	// to deliver. mcp-go v0.57.0 (server/streamable_http_handle.go:120)
-	// checks for Flusher support and 405s if the writer is non-streaming,
-	// so the underlying writer on /mcp is SSE-capable. Tightening
-	// WriteTimeout would require a second http.Server with its own mux
-	// around the SSE path; that's a larger refactor and out of scope here.
+	// to deliver. Tightening WriteTimeout would require a second http.Server
+	// with its own mux around the SSE path; that's a larger refactor and
+	// out of scope here.
 	//
 	// ponytail: WriteTimeout=0 is the intentional ceiling for SSE; a
 	// per-handler deadline is the upgrade path if a future tool ever
@@ -468,65 +486,10 @@ func (s *Server) runHTTP(ctx context.Context, addr, token string, verifier *oaut
 	mcpHTTP := server.NewStreamableHTTPServer(s.mcpServer,
 		server.WithStreamableHTTPServer(httpServer))
 
-	var authMW func(http.Handler) http.Handler
-	switch {
-	case token != "":
-		authMW = func(next http.Handler) http.Handler { return requireBearer(token, next) }
-	case verifier != nil:
-		authMW = func(next http.Handler) http.Handler { return oauth.RequireOAuth(verifier, next) }
-	case config.IsLoopbackAddr(addr):
-		// Loopback bind: no auth, but the mux must still be reached --
-		// use a pass-through middleware rather than nil so the
-		// handler below can wrap unconditionally.
-		//
-		// SECURITY (issue #89): the loopback check assumes the listen
-		// address is reachable only from this host. A common
-		// deployment is "nginx / Caddy / Traefik reverse-proxying
-		// 127.0.0.1:8090" — every connection the proxy accepts
-		// arrives on 127.0.0.1, so this branch silently bypasses auth
-		// for anyone who can reach the proxy. The startup warning
-		// emitted below calls out the trap; the
-		// AllowInsecureLoopback option lets operators who know they
-		// have upstream auth (mTLS at the proxy, IP allowlist, etc.)
-		// silence the nag without weakening any guard.
-		authMW = func(next http.Handler) http.Handler { return next }
-	default:
-		// config.validate should have caught this. Fail loudly rather
-		// than come up without authentication.
-		return errors.New("mcp: RunHTTP called without token or OAuth verifier")
+	handler, err := s.buildHTTPHandler(addr, token, verifier, mcpHTTP)
+	if err != nil {
+		return err
 	}
-
-	mux := http.NewServeMux()
-	// Wrap the handler with logging and panic recovery. mcp-go's streamable
-	// HTTP transport does not log requests on its own, so a handler that
-	// silently aborts (panic, internal error before write) leaves no trace
-	// — the client sees ECONNRESET and the operator sees nothing. These two
-	// wrappers make the failure mode visible in the server logs.
-	mux.Handle("/mcp", logRequests(recoverPanics(authMW(mcpHTTP))))
-
-	// Issue #86: cap the body of every HTTP request. Without this a single
-	// hostile client can stream an unbounded payload over one connection
-	// and exhaust memory. We use a two-layer guard rather than the stdlib's
-	// MaxBytesHandler alone:
-	//
-	//   1. If Content-Length is set above the cap, reject with 413
-	//      immediately. This is the fast path for an attacker who announces
-	//      a giant payload and saves the bandwidth.
-	//   2. Otherwise wrap the body with http.MaxBytesReader so a chunked-
-	//      encoded body that grows past the cap is also rejected.
-	//
-	// MaxBytesHandler is the stdlib's recommended idiom but in Go 1.18+ it
-	// only wraps the body — the response code depends on what the inner
-	// handler writes when its read fails, and mcp-go's transport maps that
-	// to a generic 400 PARSE_ERROR. Pre-checking Content-Length gives us a
-	// clean 413 for the common case while keeping MaxBytesReader as the
-	// safety net for chunked bodies.
-	maxBody := s.opts.HTTPMaxBody
-	if maxBody <= 0 {
-		maxBody = defaultHTTPMaxBody
-	}
-	handler := maxBodyHandler(int64(maxBody), mux)
-
 	httpServer.Handler = handler
 
 	s.startDebugTail(ctx)
@@ -573,6 +536,94 @@ func (s *Server) runHTTP(ctx context.Context, addr, token string, verifier *oaut
 		defer cancel()
 		return mcpHTTP.Shutdown(shutdownCtx)
 	}
+}
+
+// runHTTP is the testable inner loop. It owns the server lifecycle but
+// not the shutdown signal — that decision lives in RunHTTP, where the
+// signal handling is also documented. The split keeps the smoke test
+// honest (real http.Server, real mcp-go, real timeout configuration)
+// without giving up the operator-facing signal contract.
+func (s *Server) buildHTTPHandler(addr, token string, verifier *oauth.Verifier, mcpHandler http.Handler) (http.Handler, error) {
+	// Build the full handler chain (auth -> mux -> body cap -> rate limit)
+	// so it is the same when bound to a real TCP listener or driven via
+	// httptest in tests. No IO happens here. mcpHandler is the mcp-go
+	// streamable HTTP wrapper constructed by runHTTP (and by tests); passing
+	// it in avoids coupling buildHTTPHandler to that particular mcp-go API.
+
+	var authMW func(http.Handler) http.Handler
+	switch {
+	case token != "":
+		authMW = func(next http.Handler) http.Handler { return requireBearer(token, next) }
+	case verifier != nil:
+		authMW = func(next http.Handler) http.Handler { return oauth.RequireOAuth(verifier, next) }
+	case config.IsLoopbackAddr(addr):
+		// Loopback bind: no auth, but the mux must still be reached --
+		// use a pass-through middleware rather than nil so the
+		// handler below can wrap unconditionally.
+		//
+		// SECURITY (issue #89): the loopback check assumes the listen
+		// address is reachable only from this host. A common
+		// deployment is "nginx / Caddy / Traefik reverse-proxying
+		// 127.0.0.1:8090" — every connection the proxy accepts
+		// arrives on 127.0.0.1, so this branch silently bypasses auth
+		// for anyone who can reach the proxy. The startup warning
+		// emitted in runHTTP calls out the trap; the
+		// AllowInsecureLoopback option lets operators who know they
+		// have upstream auth (mTLS at the proxy, IP allowlist, etc.)
+		// silence the nag without weakening any guard.
+		authMW = func(next http.Handler) http.Handler { return next }
+	default:
+		// config.validate should have caught this. Fail loudly rather
+		// than come up without authentication.
+		return nil, errors.New("mcp: RunHTTP called without token or OAuth verifier")
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle("/mcp", logRequests(recoverPanics(authMW(mcpHandler))))
+
+	// Issue #86: cap the body of every HTTP request. Without this a single
+	// hostile client can stream an unbounded payload over one connection
+	// and exhaust memory. We use a two-layer guard rather than the stdlib's
+	// MaxBytesHandler alone:
+	//
+	//   1. If Content-Length is set above the cap, reject with 413
+	//      immediately. This is the fast path for an attacker who announces
+	//      a giant payload and saves the bandwidth.
+	//   2. Otherwise wrap the body with http.MaxBytesReader so a chunked-
+	//      encoded body that grows past the cap is also rejected.
+	//
+	// MaxBytesHandler is the stdlib's recommended idiom but in Go 1.18+ it
+	// only wraps the body — the response code depends on what the inner
+	// handler writes when its read fails, and mcp-go's transport maps that
+	// to a generic 400 PARSE_ERROR. Pre-checking Content-Length gives us a
+	// clean 413 for the common case while keeping MaxBytesReader as the
+	// safety net for chunked bodies.
+	maxBody := s.opts.HTTPMaxBody
+	if maxBody <= 0 {
+		maxBody = defaultHTTPMaxBody
+	}
+
+	// Issue #90: per-source-IP token-bucket rate limit. Applied AFTER
+	// the body cap (so the cheap size check still fires first) but
+	// BEFORE auth (so an attacker brute-forcing a bearer or hammering
+	// an unauthenticated loopback bind is throttled). When the
+	// operator opts out via HTTPRateDisabled (env
+	// MCP_HTTP_RATE_DISABLED=true), we install a pass-through
+	// middleware so the rest of the wiring does not have to branch.
+	rateMW := func(next http.Handler) http.Handler { return next }
+	if !s.opts.HTTPRateDisabled {
+		perSec := s.opts.HTTPRatePerSec
+		if perSec <= 0 {
+			perSec = defaultHTTPRatePerSec
+		}
+		burst := s.opts.HTTPRateBurst
+		if burst <= 0 {
+			burst = defaultHTTPRateBurst
+		}
+		limiter := newPerIPLimiter(rate.Limit(perSec), burst)
+		rateMW = func(next http.Handler) http.Handler { return rateLimitByIP(limiter, next) }
+	}
+	return maxBodyHandler(int64(maxBody), rateMW(mux)), nil
 }
 
 // authModeLabel returns "bearer" or "oauth" for the startup log line so

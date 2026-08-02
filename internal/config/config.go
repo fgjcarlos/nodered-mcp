@@ -40,6 +40,23 @@ type Config struct {
 	// over one connection and exhaust memory — the bound is enforced at
 	// the http.Server via MaxBytesHandler before any handler runs.
 	MCPHTTPMaxBody int
+	// MCPHTTPRatePerSec is the steady-state per-source-IP request rate
+	// (requests/sec) the HTTP transport allows. Defaults to 1.0; tune via
+	// MCP_HTTP_RATE_PER_SEC. The bucket refills at this rate so a legit
+	// agent that occasionally bursts can still get work done; a flooder
+	// gets throttled. Issue #90.
+	MCPHTTPRatePerSec float64
+	// MCPHTTPRateBurst is the bucket size (max concurrent requests in a
+	// single burst) the rate limiter allows per source IP. Defaults to 10;
+	// tune via MCP_HTTP_RATE_BURST. A burst of 10 covers a typical agent
+	// loop (initialize + a few tool calls in flight) without making
+	// brute-force cheap.
+	MCPHTTPRateBurst int
+	// MCPHTTPRateDisabled opts out of the rate limiter entirely. Set
+	// MCP_HTTP_RATE_DISABLED=true for tests, local sandboxes, or any
+	// other deployment where the operator is providing throttling at a
+	// different layer. Default is to enforce.
+	MCPHTTPRateDisabled bool
 	// OAuthIssuer is the URL of an external OAuth 2.1 / OpenID Connect
 	// identity provider. When set, every HTTP request must carry a
 	// JWT-bearer issued by it, signed by a key advertised at
@@ -169,6 +186,34 @@ func Load() (*Config, error) {
 	} else {
 		cfg.NodeDenylist = append([]string(nil), defaultNodeDenylist...)
 	}
+
+	// Issue #90: per-source-IP token-bucket rate limit. Default 1 req/s
+	// with a burst of 10 — tight enough to make brute-force expensive,
+	// loose enough that a legit agent loop (initialize + a handful of
+	// tool calls) is unaffected. Operators tune via MCP_HTTP_RATE_PER_SEC
+	// and MCP_HTTP_RATE_BURST, or opt out entirely with
+	// MCP_HTTP_RATE_DISABLED=true.
+	cfg.MCPHTTPRatePerSec = 1.0
+	if v := os.Getenv("MCP_HTTP_RATE_PER_SEC"); v != "" {
+		n, err := strconv.ParseFloat(v, 64)
+		if err != nil || n <= 0 {
+			return nil, fmt.Errorf("MCP_HTTP_RATE_PER_SEC must be a positive number, got %q", v)
+		}
+		cfg.MCPHTTPRatePerSec = n
+	}
+	cfg.MCPHTTPRateBurst = 10
+	if v := os.Getenv("MCP_HTTP_RATE_BURST"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return nil, fmt.Errorf("MCP_HTTP_RATE_BURST must be a positive integer, got %q", v)
+		}
+		cfg.MCPHTTPRateBurst = n
+	}
+	rateDisabled, err := strconv.ParseBool(getEnv("MCP_HTTP_RATE_DISABLED", "false"))
+	if err != nil {
+		return nil, fmt.Errorf("parsing MCP_HTTP_RATE_DISABLED: %w", err)
+	}
+	cfg.MCPHTTPRateDisabled = rateDisabled
 
 	if err := cfg.validate(); err != nil {
 		return nil, err
