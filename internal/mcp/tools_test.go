@@ -1711,3 +1711,36 @@ func TestHandleConnectNodes_SelfLoopRejected(t *testing.T) {
 		t.Errorf("error must mention the infinite loop, got %q", tc.Text)
 	}
 }
+
+// TestHandleUpdateFlow_BadZRejected mirrors the underlying nodered guard
+// through the MCP layer: a flow whose node carries z referencing a non-
+// existent tab must be rejected by update_flow before any Node-RED call,
+// so the wire the model intended is not silently lost on deploy (issue
+// #99). The handler is invoked directly so no httptest server is needed
+// for the negative case — the validator fires before the runtime is hit.
+func TestHandleUpdateFlow_BadZRejected(t *testing.T) {
+	s := newTestServer(t, false)
+
+	res, err := s.handleUpdateFlow(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"id": "tabA",
+			"flow": `{
+				"id":"tabA","label":"Home",
+				"nodes":[{"id":"n1","type":"inject","z":"ghost","x":140,"y":140,"wires":[]}]
+			}`,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("handleUpdateFlow returned err=%v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result for bad z, got %+v", res)
+	}
+	tc := res.Content[0].(mcp.TextContent)
+	if !strings.Contains(tc.Text, `z="ghost"`) {
+		t.Errorf("error must name the bad z, got %q", tc.Text)
+	}
+	if !strings.Contains(tc.Text, "owning tab") {
+		t.Errorf("error must explain the z resolution rule, got %q", tc.Text)
+	}
+}

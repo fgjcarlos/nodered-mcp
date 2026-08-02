@@ -169,6 +169,16 @@ func (c *Client) updateFlowLocked(ctx context.Context, id string, flow RawFlow) 
 	if err := validateFlowWires(flow); err != nil {
 		return err
 	}
+	// Issue #99: a node whose z references neither the owning tab nor
+	// any existing node in this document is silently rewritten by Node-RED
+	// to the owning tab id, losing the wire the model intended. The
+	// create_flow path does not need this check — Node-RED assigns the
+	// new tab id on POST and rewrites z to match — so the check lives
+	// here, where the tab id is supplied by the caller, not after the
+	// shared validateFlowWires used by both write paths.
+	if err := validateZRefsInFlow(flow, id); err != nil {
+		return err
+	}
 	if _, err := c.snapshotFlows(ctx); err != nil {
 		return err
 	}
@@ -384,6 +394,33 @@ func validateFlowWires(raw RawFlow) error {
 			// actual JSON shape so the operator can fix it.
 			return errors.New(issue.Message)
 		}
+	}
+	return nil
+}
+
+// validateZRefsInFlow walks every node in flow and refuses the write
+// when any node's z references neither tabID nor any existing node in
+// the document. Node-RED silently rewrites a bad z to the owning tab id
+// on PUT, which loses the wire the model intended (issue #99). The check
+// runs only on update_flow / update_node — create_flow does not need it
+// because Node-RED assigns the new tab id and rewrites z to match on POST.
+func validateZRefsInFlow(flow RawFlow, tabID string) error {
+	doc, err := decodeFlow(flow)
+	if err != nil {
+		return err
+	}
+	for _, node := range append(append([]map[string]json.RawMessage{}, doc.Nodes...), doc.Configs...) {
+		z := stringField(node, "z")
+		if z == "" {
+			continue
+		}
+		if z == tabID {
+			continue
+		}
+		if doc.exists(z) {
+			continue
+		}
+		return errors.New(badZMessage(nodeID(node), z))
 	}
 	return nil
 }

@@ -46,6 +46,12 @@ const (
 	// silently skipped such nodes, which let the corruption be written to
 	// the runtime and break every later edit through the MCP.
 	IssueInvalidWires FlowIssueKind = "invalid_wires"
+	// IssueBadZ is a node whose "z" field references neither the owning
+	// tab nor any existing node in this document. Node-RED silently
+	// rewrites a bad z to the owning tab id, which loses the wire the
+	// model intended (issue #99). Reported on the validate_flow tool and
+	// rejected by validateFlowWires so update_flow / set_flows fail loud.
+	IssueBadZ FlowIssueKind = "bad_z"
 )
 
 // FlowIssue describes one structural problem in a flow document. NodeID is the
@@ -95,9 +101,15 @@ func ValidateFlow(flow RawFlow) []FlowIssue {
 		if issue := checkNode(node, seen, true); issue != nil {
 			issues = append(issues, *issue)
 		}
+		if issue := checkZRef(node, doc); issue != nil {
+			issues = append(issues, *issue)
+		}
 	}
 	for _, node := range doc.Configs {
 		if issue := checkNode(node, seen, false); issue != nil {
+			issues = append(issues, *issue)
+		}
+		if issue := checkZRef(node, doc); issue != nil {
 			issues = append(issues, *issue)
 		}
 	}
@@ -190,6 +202,37 @@ func wireDanglingMessage(src string, port int, tgt string) string {
 		return "a wire on port " + strconv.Itoa(port) + " targets unknown node \"" + tgt + "\""
 	}
 	return "node \"" + src + "\" wires port " + strconv.Itoa(port) + " to unknown node \"" + tgt + "\"; Node-RED accepts dangling wires silently and the flow never delivers to that endpoint"
+}
+
+// checkZRef returns an IssueBadZ if node's z field references neither the
+// owning tab nor any existing node in this document. A node with no z (an
+// empty string) is treated as valid — flows that explicitly clear z are
+// served by the rest of the rules. Mirrors the check the add / update
+// write paths run on edits so the validator and the write path agree
+// (issue #99).
+func checkZRef(node map[string]json.RawMessage, doc *flowDoc) *FlowIssue {
+	z := stringField(node, "z")
+	if z == "" {
+		return nil
+	}
+	if tabID := stringField(doc.Extra, "id"); z == tabID {
+		return nil
+	}
+	if doc.exists(z) {
+		return nil
+	}
+	return &FlowIssue{
+		Kind:    IssueBadZ,
+		NodeID:  nodeID(node),
+		Message: badZMessage(nodeID(node), z),
+	}
+}
+
+func badZMessage(id, z string) string {
+	if id == "" {
+		return fmt.Sprintf("a node references z=%q which is neither the owning tab nor an existing node in this flow: Node-RED's runtime will crash on deploy with 'Cannot read properties of undefined (reading wires)' if this is written", z)
+	}
+	return fmt.Sprintf("node %q references z=%q which is neither the owning tab nor an existing node in this flow: Node-RED's runtime will crash on deploy with 'Cannot read properties of undefined (reading wires)' if this is written", id, z)
 }
 
 // ValidateFlows validates every tab in raw and aggregates the issues.

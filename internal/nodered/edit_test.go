@@ -197,6 +197,41 @@ func TestUpdateNodeRejectsAnUnknownNode(t *testing.T) {
 	}
 }
 
+// TestUpdateNodeRejectsBadZ covers issue #99 on the update_node path: a
+// patch that rewrites z to a value that does not name the owning tab or any
+// existing node in this document is silently rewritten by Node-RED to the
+// owning tab id, losing the wire the model intended. UpdateNodeInFlow
+// must refuse the patch before the write reaches the runtime.
+func TestUpdateNodeRejectsBadZ(t *testing.T) {
+	_, err := UpdateNodeInFlow(RawFlow(sampleTab), "n1", map[string]json.RawMessage{
+		"z": json.RawMessage(`"ghost"`),
+	})
+	if err == nil {
+		t.Fatal("expected UpdateNodeInFlow to reject a patch that rewrites z to a non-existent tab")
+	}
+	if !strings.Contains(err.Error(), `z="ghost"`) {
+		t.Errorf("expected the error to name the bad z, got %q", err.Error())
+	}
+}
+
+// TestUpdateNodeAcceptsValidZ is the regression pin for the update_node
+// z check: a patch that does not touch z, or rewrites z to the owning
+// tab id, must still succeed.
+func TestUpdateNodeAcceptsValidZ(t *testing.T) {
+	// Patch does not touch z — node keeps its original z="tabA".
+	if _, err := UpdateNodeInFlow(RawFlow(sampleTab), "n1", map[string]json.RawMessage{
+		"topic": json.RawMessage(`"home/changed"`),
+	}); err != nil {
+		t.Fatalf("UpdateNodeInFlow rejected a patch that leaves z alone: %v", err)
+	}
+	// Patch rewrites z to the owning tab id — the canonical valid case.
+	if _, err := UpdateNodeInFlow(RawFlow(sampleTab), "n1", map[string]json.RawMessage{
+		"z": json.RawMessage(`"tabA"`),
+	}); err != nil {
+		t.Fatalf("UpdateNodeInFlow rejected a patch that pins z to the owning tab: %v", err)
+	}
+}
+
 func TestDeleteNodeAlsoRemovesWiresPointingAtIt(t *testing.T) {
 	got, err := DeleteNodeFromFlow(RawFlow(sampleTab), "n3")
 	if err != nil {
