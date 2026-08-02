@@ -176,10 +176,10 @@ Con `adminAuth` activo, el mismo token autentica el WebSocket. Necesita el permi
 
 ### Prompts
 
-| Nombre | Descripción |
-|---|---|
-| `explain_flow` | Describir qué hace un flow, sus disparadores y sus dependencias externas |
-| `generate_flow` | Construir un flow a partir de una descripción en lenguaje natural |
+| Nombre | Argumentos | Descripción |
+|---|---|---|
+| `explain_flow` | `flow_id` (requerido) | Explicar qué hace un flow, sus disparadores y las dependencias externas |
+| `generate_flow` | `description` (requerido) | Generar un flow de Node-RED a partir de una descripción en lenguaje natural |
 
 ## Modelo de seguridad
 
