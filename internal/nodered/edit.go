@@ -206,6 +206,9 @@ func AddNodeToFlow(flow RawFlow, node json.RawMessage) (RawFlow, error) {
 	if id == "" {
 		return nil, fmt.Errorf("node needs a non-empty id: wires reference nodes by id")
 	}
+	if t := nodeType(decoded); t == "" {
+		return nil, fmt.Errorf("node %q: type is required and must not be empty or null", id)
+	}
 	// Node-RED accepts duplicate ids and then behaves according to ordering,
 	// which is a bug that surfaces far from its cause. Check both collections:
 	// an id shared with a config node collides just as badly.
@@ -296,6 +299,13 @@ func UpdateNodeInFlow(flow RawFlow, id string, patch map[string]json.RawMessage)
 	// shows up as a flow that silently stops running.
 	if _, ok := patch["id"]; ok {
 		return nil, fmt.Errorf("a node's id cannot be changed: wires reference it")
+	}
+	// A patch that sets type to "" or null would produce a broken runtime entry.
+	if rawType, ok := patch["type"]; ok {
+		var t string
+		if json.Unmarshal(rawType, &t) != nil || t == "" {
+			return nil, fmt.Errorf("node %q: type must not be set to empty or null", id)
+		}
 	}
 
 	doc, err := decodeFlow(flow)
