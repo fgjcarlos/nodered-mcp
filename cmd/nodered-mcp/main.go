@@ -141,12 +141,13 @@ func serve(args []string) error {
 	setupLogger(cfg.MCPLogLevel)
 
 	nrClient, err := nodered.NewClient(nodered.Options{
-		BaseURL:   cfg.NodeRedURL,
-		Token:     cfg.NodeRedToken,
-		Username:  cfg.NodeRedUsername,
-		Password:  cfg.NodeRedPassword,
-		Insecure:  cfg.NodeRedInsecure,
-		BackupDir: cfg.NodeRedBackupDir,
+		BaseURL:    cfg.NodeRedURL,
+		Token:      cfg.NodeRedToken,
+		Username:   cfg.NodeRedUsername,
+		Password:   cfg.NodeRedPassword,
+		Insecure:   cfg.NodeRedInsecure,
+		BackupDir:  cfg.NodeRedBackupDir,
+		BackupKeep: cfg.NodeRedBackupKeep,
 	})
 	if err != nil {
 		return fmt.Errorf("creating nodered client: %w", err)

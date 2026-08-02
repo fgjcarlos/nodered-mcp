@@ -25,6 +25,9 @@ type Config struct {
 	NodeRedPassword  string
 	NodeRedInsecure  bool
 	NodeRedBackupDir string
+	// NodeRedBackupKeep is the maximum number of backup files to retain.
+	// Defaults to 50. Set NODERED_BACKUP_KEEP=0 to disable pruning.
+	NodeRedBackupKeep int
 	MCPLogLevel      string
 	MCPTransport     string
 	// MCPHTTPAddr is the listen address for the "http" transport
@@ -127,8 +130,7 @@ func Load() (*Config, error) {
 		NodeRedUsername:  os.Getenv("NODERED_USERNAME"),
 		NodeRedPassword:  os.Getenv("NODERED_PASSWORD"),
 		NodeRedBackupDir: getEnv("NODERED_BACKUP_DIR", "backups"),
-		MCPLogLevel:      strings.ToLower(getEnv("MCP_LOG_LEVEL", "info")),
-		MCPTransport:     strings.ToLower(getEnv("MCP_TRANSPORT", "stdio")),
+		MCPLogLevel:      strings.ToLower(getEnv("MCP_LOG_LEVEL", "info")),		MCPTransport:     strings.ToLower(getEnv("MCP_TRANSPORT", "stdio")),
 		MCPHTTPAddr:      getEnv("MCP_HTTP_ADDR", ":8090"),
 		MCPHTTPToken:     os.Getenv("MCP_HTTP_TOKEN"),
 		OAuthIssuer:      os.Getenv("MCP_OAUTH_ISSUER"),
@@ -140,6 +142,23 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("parsing NODERED_INSECURE: %w", err)
 	}
 	cfg.NodeRedInsecure = insecure
+
+	// Issue #109: NODERED_BACKUP_KEEP controls how many backup files to retain.
+	// Default 50; set to 0 to disable pruning. The zero value is resolved to
+	// the default inside nodered.NewClient, so we use -1 as the "explicitly
+	// disabled" sentinel here and translate 0-from-env to -1.
+	cfg.NodeRedBackupKeep = 0 // 0 → default (resolved by NewClient)
+	if v := os.Getenv("NODERED_BACKUP_KEEP"); v != "" {
+		n, parseErr := strconv.Atoi(v)
+		if parseErr != nil || n < 0 {
+			return nil, fmt.Errorf("NODERED_BACKUP_KEEP must be a non-negative integer, got %q", v)
+		}
+		if n == 0 {
+			cfg.NodeRedBackupKeep = -1 // explicit opt-out: pass -1 so NewClient skips pruning
+		} else {
+			cfg.NodeRedBackupKeep = n
+		}
+	}
 
 	readOnly, err := strconv.ParseBool(getEnv("MCP_READ_ONLY", "false"))
 	if err != nil {
