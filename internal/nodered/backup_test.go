@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 )
 
@@ -110,6 +111,55 @@ func TestRestoreFlows_RejectsGarbageBackup(t *testing.T) {
 	c, _ := NewClient(Options{BaseURL: "http://x", BackupDir: t.TempDir()})
 	if err := c.RestoreFlows(context.Background(), RawFlow(`"just a string"`)); err == nil {
 		t.Fatal("expected RestoreFlows to reject a backup with no flow array")
+	}
+}
+
+// TestSnapshotFlows_ConcurrentWritesHaveDistinctFilenames pins the fix for
+// #98: backup filenames used millisecond resolution, so concurrent writes
+// within the same ms silently overwrote each other (empirically: 20
+// concurrent writes produced 7 files). Nanosecond resolution makes collisions
+// vanishingly unlikely. We burst N goroutines and assert the backup dir
+// ends up with exactly N distinct files — i.e. zero collisions.
+func TestSnapshotFlows_ConcurrentWritesHaveDistinctFilenames(t *testing.T) {
+	const N = 50
+
+	dir := t.TempDir()
+	backupDir := filepath.Join(dir, "backups")
+
+	// The handler just needs to return something parseable for every GET;
+	// concurrency is what we're exercising, not the response shape.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c, _ := NewClient(Options{BaseURL: srv.URL, Token: "t", BackupDir: backupDir})
+	ctx := context.Background()
+
+	var wg sync.WaitGroup
+	errs := make(chan error, N)
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := c.snapshotFlows(ctx)
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != N {
+		t.Fatalf("expected %d distinct backups, got %d (collisions still happening)", N, len(entries))
 	}
 }
 

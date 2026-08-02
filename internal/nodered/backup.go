@@ -30,9 +30,11 @@ func (c *Client) snapshotFlows(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("backup: creating dir %q: %w", dir, err)
 	}
 
-	// ponytail: millisecond stamp; two writes in the same ms overwrite one
-	// backup. Add a counter/nanos if that ever bites.
-	name := "flows-" + time.Now().UTC().Format("20060102-150405.000") + ".json"
+	// Nanosecond stamp keeps concurrent snapshot writes from overwriting one
+	// another — millisecond resolution was the source of #98. True same-ns
+	// collisions are vanishingly unlikely on real hardware; a process-global
+	// counter remains a future-proofing option if it ever matters.
+	name := "flows-" + time.Now().UTC().Format("20060102-150405.000000000") + ".json"
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		return "", fmt.Errorf("backup: writing %q: %w", path, err)
