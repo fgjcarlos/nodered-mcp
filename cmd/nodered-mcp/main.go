@@ -155,6 +155,7 @@ func serve(args []string) error {
 		ReadOnly:     cfg.MCPReadOnly,
 		DebugStream:  cfg.MCPDebugStream,
 		NodeDenylist: cfg.NodeDenylist,
+		HTTPMaxBody:  cfg.MCPHTTPMaxBody,
 	})
 	if cfg.MCPTransport == "http" {
 		verifier, err := buildOAuthVerifier(cfg)

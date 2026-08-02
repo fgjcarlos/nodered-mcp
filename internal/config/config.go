@@ -34,6 +34,12 @@ type Config struct {
 	// the HTTP transport. Mandatory when the listen address is reachable from
 	// outside this machine; optional for a loopback bind.
 	MCPHTTPToken string
+	// MCPHTTPMaxBody is the cap on a single HTTP request body, in bytes.
+	// Defaults to 32 MiB if unset. Configurable via MCP_HTTP_MAX_BODY.
+	// Without an upper bound a client could POST a multi-gigabyte payload
+	// over one connection and exhaust memory — the bound is enforced at
+	// the http.Server via MaxBytesHandler before any handler runs.
+	MCPHTTPMaxBody int
 	// OAuthIssuer is the URL of an external OAuth 2.1 / OpenID Connect
 	// identity provider. When set, every HTTP request must carry a
 	// JWT-bearer issued by it, signed by a key advertised at
@@ -118,6 +124,19 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("parsing MCP_DEBUG_STREAM: %w", err)
 	}
 	cfg.MCPDebugStream = debugStream
+
+	// Issue #86: cap the HTTP request body so a hostile client cannot
+	// stream an unbounded payload over one connection. 32 MiB comfortably
+	// fits the largest legitimate MCP request (set_flows on a sizable
+	// instance) while making a slow-loris-style memory attack expensive.
+	cfg.MCPHTTPMaxBody = 32 << 20 // 32 MiB default
+	if v := os.Getenv("MCP_HTTP_MAX_BODY"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			return nil, fmt.Errorf("MCP_HTTP_MAX_BODY must be a positive integer (bytes), got %q", v)
+		}
+		cfg.MCPHTTPMaxBody = int(n)
+	}
 
 	// Issue #81: MCP_NODE_DENYLIST is a defense-in-depth against RCE via
 	// the Node-RED "exec" / "system" nodes (and any other shell-executing

@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -333,6 +335,117 @@ func TestNormalizeFlowDoc(t *testing.T) {
 	}
 }
 
+// TestNormalizeFlowDoc_NodesNullSubstituted covers issue #96: a flow
+// payload that explicitly serializes "nodes":null (or "configs":null)
+// must be coalesced into an empty array the same way a missing key is.
+// Node-RED's runtime rejects a null with an opaque "Cannot read
+// properties of null" error, so leaving the literal null through the
+// auto-fill block was a user-facing bug.
+func TestNormalizeFlowDoc_NodesNullSubstituted(t *testing.T) {
+	tests := []struct {
+		name        string
+		in          string
+		flowID      string
+		fill        bool
+		wantNodes   string // substring expected in normalized flow ("" = key absent)
+		wantConfigs string // substring expected in normalized flow ("" = key absent)
+	}{
+		{
+			name:      "nodes:null coalesced to []",
+			in:        `{"label":"x","nodes":null}`,
+			flowID:    "",
+			fill:      true,
+			wantNodes: `"nodes":[]`,
+		},
+		{
+			name:        "nodes:null and configs:null both coalesced",
+			in:          `{"label":"x","nodes":null,"configs":null}`,
+			flowID:      "",
+			fill:        true,
+			wantNodes:   `"nodes":[]`,
+			wantConfigs: `"configs":[]`,
+		},
+		{
+			name:        "absent nodes and configs both filled",
+			in:          `{"label":"x"}`,
+			flowID:      "",
+			fill:        true,
+			wantNodes:   `"nodes":[]`,
+			wantConfigs: `"configs":[]`,
+		},
+		{
+			name:      "real nodes array preserved, absent configs left absent",
+			in:        `{"label":"x","nodes":[{"id":"n1"}]}`,
+			flowID:    "",
+			fill:      true,
+			wantNodes: `"id":"n1"`,
+		},
+		{
+			name:      "fillNodes=false leaves null alone",
+			in:        `{"label":"x","nodes":null}`,
+			flowID:    "",
+			fill:      false,
+			wantNodes: `"nodes":null`,
+		},
+		{
+			name:      "fillNodes=false leaves absent keys absent",
+			in:        `{"label":"x"}`,
+			flowID:    "",
+			fill:      false,
+			wantNodes: "", // no nodes key in output
+		},
+		{
+			name:        "configs:null alone is coalesced",
+			in:          `{"label":"x","nodes":[{"id":"n1"}],"configs":null}`,
+			flowID:      "",
+			fill:        true,
+			wantNodes:   `"id":"n1"`,
+			wantConfigs: `"configs":[]`,
+		},
+		{
+			name:        "present configs array left intact",
+			in:          `{"label":"x","nodes":[],"configs":[{"id":"c1"}]}`,
+			flowID:      "",
+			fill:        true,
+			wantNodes:   `"nodes":[]`,
+			wantConfigs: `"id":"c1"`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := normalizeFlowDoc(json.RawMessage(tc.in), tc.flowID, tc.fill)
+			if err != nil {
+				t.Fatalf("normalizeFlowDoc: %v", err)
+			}
+			var m map[string]json.RawMessage
+			if err := json.Unmarshal(got, &m); err != nil {
+				t.Fatalf("result not a JSON object: %v\nbody: %s", err, got)
+			}
+			assertSubstring(t, "nodes", string(got), tc.wantNodes, m)
+			assertSubstring(t, "configs", string(got), tc.wantConfigs, m)
+		})
+	}
+}
+
+// assertSubstring validates a normalized flow document field. When
+// want is empty the key must be absent from the parsed object; when
+// want is set it must appear as a substring of the marshaled body.
+func assertSubstring(t *testing.T, key, body, want string, m map[string]json.RawMessage) {
+	t.Helper()
+	if want == "" {
+		if _, ok := m[key]; ok {
+			t.Errorf("expected key %q to be absent, got %s", key, body)
+		}
+		return
+	}
+	if _, ok := m[key]; !ok {
+		t.Errorf("expected key %q in normalized flow, got %s", key, body)
+	}
+	if !bytes.Contains([]byte(body), []byte(want)) {
+		t.Errorf("expected %q in normalized flow, got %s", want, body)
+	}
+}
+
 // TestNodeParam covers issue #25: add_node's `node` argument must accept
 // either a JSON-encoded string or a node object directly. Anything else
 // (number, boolean, array) is rejected with a single actionable message.
@@ -619,6 +732,87 @@ func TestSetContext_HappyPathAndHelperReuse(t *testing.T) {
 	}
 	if !bytes.Contains(injected[1], []byte(`"value":99`)) {
 		t.Errorf("second inject body missing value:99: %s", injected[1])
+	}
+}
+
+func TestRestoreBackup_ClearsSetContextHelper(t *testing.T) {
+	backupDir := t.TempDir()
+	liveFlow := []byte(`{"id":"runtime_helper_tab","label":"__mcp_context_helper__","nodes":[]}`)
+	var restoredBody []byte
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			_, _ = w.Write([]byte(`[{"type":"tab","id":"other","label":"Other","nodes":[]}]`))
+		case r.Method == "POST" && r.URL.Path == "/flow":
+			liveFlow = []byte(`{"id":"runtime_helper_tab","label":"__mcp_context_helper__","nodes":[]}`)
+			_, _ = w.Write(liveFlow)
+		case r.Method == "GET" && r.URL.Path == "/flow/runtime_helper_tab":
+			_, _ = w.Write(liveFlow)
+		case r.Method == "PUT" && r.URL.Path == "/flow/runtime_helper_tab":
+			var err error
+			liveFlow, err = io.ReadAll(r.Body)
+			if err != nil {
+				t.Errorf("reading flow update: %v", err)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == "POST" && r.URL.Path == "/flows":
+			var err error
+			restoredBody, err = io.ReadAll(r.Body)
+			if err != nil {
+				t.Errorf("reading restore body: %v", err)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/inject/"):
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: backupDir})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	s := New(c, Options{Version: "test"})
+
+	setResult, err := s.handleSetContext(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"scope": "global",
+			"key":   "foo",
+			"value": "1",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("handleSetContext returned err=%v", err)
+	}
+	if setResult == nil || setResult.IsError {
+		t.Fatalf("set_context failed: %+v", setResult)
+	}
+	if s.ctxHelper == nil || s.ctxHelper.flowID == "" {
+		t.Fatalf("set_context did not provision a helper: %+v", s.ctxHelper)
+	}
+
+	backupName := "flows-restore.json"
+	if err := os.WriteFile(filepath.Join(backupDir, backupName), []byte(`[{"type":"tab","id":"restored","label":"Restored","nodes":[]}]`), 0o600); err != nil {
+		t.Fatalf("write restore backup: %v", err)
+	}
+
+	restoreResult, err := s.handleRestoreBackup(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{"backup": backupName}},
+	})
+	if err != nil {
+		t.Fatalf("handleRestoreBackup returned err=%v", err)
+	}
+	if restoreResult == nil || restoreResult.IsError {
+		t.Fatalf("restore_backup failed: %+v", restoreResult)
+	}
+	if s.ctxHelper != nil {
+		t.Fatalf("restore_backup retained stale set_context helper: %+v", s.ctxHelper)
+	}
+	if !bytes.Contains(restoredBody, []byte(`"id":"restored"`)) {
+		t.Errorf("restore_backup did not deploy the selected backup: %s", restoredBody)
 	}
 }
 
