@@ -198,8 +198,9 @@ func (s *Server) registerTools() {
 			"Remove one node from a flow tab, and every wire pointing at it.\n\n"+
 				"Cleaning up the incoming wires matters: Node-RED accepts wires aimed at "+
 				"a node that no longer exists and simply never delivers to them, leaving "+
-				"a flow that looks intact and quietly does less than it should. A backup "+
-				"is taken before the write.",
+				"a flow that looks intact and quietly does less than it should.\n\n"+
+				"A backup of the current configuration is taken automatically before the "+
+				"write and can be restored with restore_backup.",
 		),
 		mcp.WithString("flow_id", mcp.Required(),
 			mcp.Description("The flow tab that owns the node.")),
@@ -217,7 +218,9 @@ func (s *Server) registerTools() {
 				"adding to it silently drops existing connections. This appends to the "+
 				"port you name, grows the array if that port does not exist yet (a switch "+
 				"node's later outputs), and does nothing if the connection already exists.\n\n"+
-				"Both nodes must be in the same tab. A backup is taken before the write.",
+				"Both nodes must be in the same tab.\n\n"+
+				"A backup of the current configuration is taken automatically before the "+
+				"write and can be restored with restore_backup.",
 		),
 		mcp.WithString("flow_id", mcp.Required(),
 			mcp.Description("The flow tab holding both nodes.")),
@@ -233,8 +236,9 @@ func (s *Server) registerTools() {
 	// ---- delete_flow ---------------------------------------------------
 	deleteFlow := mcp.NewTool("delete_flow",
 		mcp.WithDescription(
-			"Delete a flow tab and all its nodes. A backup of the current config "+
-				"is taken first so the delete can be rolled back.",
+			"Delete a flow tab and all its nodes.\n\n"+
+				"A backup of the current configuration is taken automatically before the "+
+				"write and can be restored with restore_backup.",
 		),
 		mcp.WithString("id", mcp.Required(),
 			mcp.Description("The flow tab ID to delete.")),
@@ -270,8 +274,10 @@ func (s *Server) registerTools() {
 	disableFlow := mcp.NewTool("disable_flow",
 		mcp.WithDescription(
 			"Stop a flow tab from running without deleting it. Flips the tab's "+
-				"\"disabled\" flag via PUT /flow/:id; a backup is taken first. The tab "+
-				"stays in the editor and can be re-enabled with enable_flow.",
+				"\"disabled\" flag via PUT /flow/:id. The tab stays in the editor "+
+				"and can be re-enabled with enable_flow.\n\n"+
+				"A backup of the current configuration is taken automatically before the "+
+				"write and can be restored with restore_backup.",
 		),
 		mcp.WithString("id", mcp.Required(),
 			mcp.Description("The flow tab ID to disable (as shown by list_flows).")),
@@ -281,9 +287,10 @@ func (s *Server) registerTools() {
 	enableFlow := mcp.NewTool("enable_flow",
 		mcp.WithDescription(
 			"Re-enable a previously disabled flow tab. Flips the tab's "+
-				"\"disabled\" flag back to false via PUT /flow/:id; a backup is taken "+
-				"first. The tab starts running again with whatever nodes were already "+
-				"on it — no redeploy needed.",
+				"\"disabled\" flag back to false via PUT /flow/:id. The tab starts "+
+				"running again with whatever nodes were already on it — no redeploy needed.\n\n"+
+				"A backup of the current configuration is taken automatically before the "+
+				"write and can be restored with restore_backup.",
 		),
 		mcp.WithString("id", mcp.Required(),
 			mcp.Description("The flow tab ID to enable (as shown by list_flows).")),
@@ -328,13 +335,14 @@ func (s *Server) registerTools() {
 		mcp.WithDescription(
 			"Install a new subflow definition. The runtime's subflow collection "+
 				"is replaced wholesale, so this tool reads the current set, "+
-				"appends the new one, and writes the lot back. A backup is taken "+
-				"first.\n\n"+
+				"appends the new one, and writes the lot back.\n\n"+
 				"Pass the full subflow JSON object: at minimum {\"id\":\"...\", "+
 				"\"type\":\"subflow\", \"name\":\"...\"} with a nodes array "+
 				"describing the internal logic. Fails with a clear error if a "+
 				"subflow with the same id already exists; use update_subflow to "+
-				"change an existing one.",
+				"change an existing one.\n\n"+
+				"A backup of the current configuration is taken automatically before the "+
+				"write and can be restored with restore_backup.",
 		),
 		mcp.WithString("subflow", mcp.Required(),
 			mcp.Description("The subflow definition as a JSON object or JSON-encoded string.")),
@@ -346,9 +354,10 @@ func (s *Server) registerTools() {
 			"Replace an existing subflow definition. The runtime's subflow "+
 				"collection is replaced wholesale, so this tool reads the "+
 				"current set, swaps the named entry, and writes the lot back. "+
-				"A backup is taken first. Fails with a 404-style error if no "+
-				"subflow with the given id exists; use create_subflow for new "+
-				"ones.",
+				"Fails with a 404-style error if no subflow with the given id "+
+				"exists; use create_subflow for new ones.\n\n"+
+				"A backup of the current configuration is taken automatically before the "+
+				"write and can be restored with restore_backup.",
 		),
 		mcp.WithString("id", mcp.Required(),
 			mcp.Description("The subflow definition ID to replace.")),
@@ -359,14 +368,15 @@ func (s *Server) registerTools() {
 
 	deleteSubflow := mcp.NewTool("delete_subflow",
 		mcp.WithDescription(
-			"Remove a subflow definition. A backup of the current config is "+
-				"taken first. Fails with a 404-style error if no subflow with "+
+			"Remove a subflow definition. Fails with a 404-style error if no subflow with "+
 				"the given id exists.\n\n"+
 				"Caveat: the runtime does not check that no instance of the "+
 				"subflow is in use before removing the definition. Any "+
 				"instance nodes left in flow tabs will point at a missing "+
 				"subflow after the next deploy — the same behaviour as the "+
-				"editor, where the operator is expected to be aware.",
+				"editor, where the operator is expected to be aware.\n\n"+
+				"A backup of the current configuration is taken automatically before the "+
+				"write and can be restored with restore_backup.",
 		),
 		mcp.WithString("id", mcp.Required(),
 			mcp.Description("The subflow definition ID to remove.")),
@@ -382,11 +392,12 @@ func (s *Server) registerTools() {
 				"env, custom keys) are taken from the params argument verbatim, "+
 				"so callers can pass instance-level overrides without the MCP "+
 				"having to know about them.\n\n"+
-				"A backup is taken before the write and the wires are validated "+
-				"like any other node add. If flow_id does not exist, or "+
-				"subflow_id is not a known definition, the call fails before "+
-				"anything is written. Read /list_subflows first to discover "+
-				"available subflow ids, and /get_flow first to find tab ids.",
+				"The wires are validated like any other node add. If flow_id does "+
+				"not exist, or subflow_id is not a known definition, the call fails "+
+				"before anything is written. Read /list_subflows first to discover "+
+				"available subflow ids, and /get_flow first to find tab ids.\n\n"+
+				"A backup of the current configuration is taken automatically before the "+
+				"write and can be restored with restore_backup.",
 		),
 		mcp.WithString("flow_id", mcp.Required(),
 			mcp.Description("The flow tab to add the instance to (from list_flows or search_flows).")),
@@ -529,8 +540,8 @@ func (s *Server) registerTools() {
 		mcp.WithDescription(
 			"Restore the ENTIRE Node-RED flow config from a saved backup (a full "+
 				"deployment that replaces everything). The current config is snapshotted "+
-				"first, so a restore can itself be undone. Pass a backup name from "+
-				"list_backups, or \"latest\" for the most recent.",
+				"first, so a restore can itself be undone. Use list_backups to find "+
+				"available snapshots; pass the backup filename or \"latest\" for the most recent.",
 		),
 		mcp.WithString("backup", mcp.Required(),
 			mcp.Description("Backup filename (from list_backups), or \"latest\".")),
@@ -715,8 +726,9 @@ func (s *Server) registerTools() {
 	setFlowsState := mcp.NewTool("set_flows_state",
 		mcp.WithDescription(
 			"Start or stop the Node-RED runtime (\"start\" or \"stop\"). MUTATES the "+
-				"runtime: stopping pauses all flow execution, starting resumes it. A backup "+
-				"of the current flow config is taken first so the change can be rolled back.",
+				"runtime: stopping pauses all flow execution, starting resumes it.\n\n"+
+				"A backup of the current configuration is taken automatically before the "+
+				"write and can be restored with restore_backup.",
 		),
 		mcp.WithString("state", mcp.Required(),
 			mcp.Description("Either \"start\" or \"stop\".")),
@@ -730,13 +742,14 @@ func (s *Server) registerTools() {
 		mcp.WithDescription(
 			"Replace the ENTIRE Node-RED flow config with a supplied flow array "+
 				"(full deployment). MUTATES the runtime: this is the most destructive "+
-				"operation the admin API exposes. A backup of the current config is taken "+
-				"first so the change can be rolled back. Prefer create_flow / update_flow "+
+				"operation the admin API exposes. Prefer create_flow / update_flow "+
 				"/ delete_flow for single-tab edits.\n\n"+
 				"WARNING: this tool can deploy any node type, including exec/system "+
 				"nodes that execute shell commands on the Node-RED host. The MCP "+
 				"server blocks a configurable set of node types (MCP_NODE_DENYLIST, "+
-				"default: exec,system); see SECURITY.md.",
+				"default: exec,system); see SECURITY.md.\n\n"+
+				"A backup of the current configuration is taken automatically before the "+
+				"write and can be restored with restore_backup.",
 		),
 		mcp.WithString("flows", mcp.Required(),
 			mcp.Description("A JSON array of flow objects (the same shape returned by list_flows).")),
