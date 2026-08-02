@@ -161,3 +161,71 @@ func TestSetNodeEnabled_WithSet(t *testing.T) {
 		t.Errorf("expected set in path, got %s", gotPath)
 	}
 }
+
+func TestListNodes_IncludesUserField(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `[
+			{"id":"node-red-node-mqtt","name":"node-red-node-mqtt","version":"1.0.0","local":false,"user":true,"types":["mqtt in","mqtt out"],"loaded":true,"enabled":true,"module":"node-red-node-mqtt"}
+		]`)
+	})
+
+	nodes, err := c.ListNodes(context.Background())
+	if err != nil {
+		t.Fatalf("ListNodes: %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(nodes))
+	}
+	if !nodes[0].User {
+		t.Errorf("expected User=true, got %v", nodes[0].User)
+	}
+	if nodes[0].Local {
+		t.Errorf("expected Local=false, got %v", nodes[0].Local)
+	}
+}
+
+func TestGetNodeInfo_RoundTripAllFields(t *testing.T) {
+	fixture := `{
+		"name":"node-red-node-mqtt",
+		"version":"1.0.0",
+		"local":false,
+		"user":true,
+		"path":"/home/composedof2/.node-red/node_modules/node-red-node-mqtt",
+		"plugins":[1,2,3],
+		"nodes":[
+			{"id":"mqtt","name":"mqtt","version":"1.0.0","local":false,"user":true,"types":["mqtt in","mqtt out"],"loaded":true,"enabled":true,"module":"node-red-node-mqtt"}
+		]
+	}`
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, fixture)
+	})
+
+	info, err := c.GetNodeInfo(context.Background(), "node-red-node-mqtt")
+	if err != nil {
+		t.Fatalf("GetNodeInfo: %v", err)
+	}
+	if info.Name != "node-red-node-mqtt" {
+		t.Errorf("name: got %q", info.Name)
+	}
+	if info.Version != "1.0.0" {
+		t.Errorf("version: got %q", info.Version)
+	}
+	if info.Local != false {
+		t.Errorf("local: got %v", info.Local)
+	}
+	if info.User != true {
+		t.Errorf("user: got %v", info.User)
+	}
+	if info.Path != "/home/composedof2/.node-red/node_modules/node-red-node-mqtt" {
+		t.Errorf("path: got %q", info.Path)
+	}
+	if len(info.Plugins) == 0 || string(info.Plugins) != "[1,2,3]" {
+		t.Errorf("plugins: got %s", string(info.Plugins))
+	}
+	if len(info.Nodes) != 1 {
+		t.Fatalf("nodes: got %d entries", len(info.Nodes))
+	}
+	if info.Nodes[0].ID != "mqtt" {
+		t.Errorf("nodes[0].id: got %q", info.Nodes[0].ID)
+	}
+}

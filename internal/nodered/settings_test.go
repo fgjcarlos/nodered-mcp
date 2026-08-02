@@ -130,6 +130,58 @@ func TestSetFlows_RequiresAtLeastOneFlow(t *testing.T) {
 	}
 }
 
+// TestSetFlows_RejectsNonTabOnlyArray is the regression pin for issue
+// #106: Node-RED accepts a non-empty flows array that contains zero
+// tab entries (e.g. one orphan inject node) and deploys it, leaving
+// the runtime with no tabs. SetFlows must reject such an input before
+// it touches the runtime, so the handler-side t.Errorf never fires.
+func TestSetFlows_RejectsNonTabOnlyArray(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("server should not be called for a no-tab flows array: %s %s", r.Method, r.URL.Path)
+	})
+	flows := []json.RawMessage{
+		json.RawMessage(`{"id":"orphan","type":"inject","name":"o","topic":"t","payload":"p","payloadType":"str","repeat":"","crontab":"","once":false,"onceDelay":0.1,"x":140,"y":140,"wires":[]}`),
+	}
+	err := c.SetFlows(context.Background(), flows)
+	if err == nil {
+		t.Fatal("expected error when flows array has no tab entry")
+	}
+	if !strings.Contains(err.Error(), `"tab"`) {
+		t.Errorf("error must mention tab requirement, got %q", err.Error())
+	}
+}
+
+// TestSetFlows_AcceptsArrayWithAtLeastOneTab pins the happy path: as
+// soon as one tab entry is present, the rest of the array may be
+// anything (orphan nodes, subflow definitions, ...) and the deploy
+// must reach the runtime.
+func TestSetFlows_AcceptsArrayWithAtLeastOneTab(t *testing.T) {
+	dir := t.TempDir()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			_, _ = w.Write([]byte(`[{"id":"old","type":"tab","label":"Old"}]`))
+		case r.Method == "POST" && r.URL.Path == "/flows":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := NewClient(Options{BaseURL: srv.URL, Token: "t", BackupDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	flows := []json.RawMessage{
+		json.RawMessage(`{"id":"orphan","type":"inject","name":"o","topic":"t","payload":"p","payloadType":"str","repeat":"","crontab":"","once":false,"onceDelay":0.1,"x":140,"y":140,"wires":[]}`),
+		json.RawMessage(`{"id":"tabA","type":"tab","label":"X","nodes":[]}`),
+	}
+	if err := c.SetFlows(context.Background(), flows); err != nil {
+		t.Fatalf("SetFlows: %v", err)
+	}
+}
+
 func TestSetFlows_FullDeployHeader(t *testing.T) {
 	dir := t.TempDir()
 	var deployType string

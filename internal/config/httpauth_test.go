@@ -157,3 +157,52 @@ func TestLoadAllowsLoopbackHTTPWithOAuthAndNoToken(t *testing.T) {
 		t.Errorf("loopback bind with OAuth should not require a token: %v", err)
 	}
 }
+
+// MCP_ALLOW_INSECURE_LOOPBACK (issue #89) is the operator's
+// acknowledgement that the loopback-without-token configuration is
+// intentional. It does not affect auth — it only controls the startup
+// warning — so the test asserts the flag is loaded and that a bare
+// loopback bind remains accepted (the warning is the server runtime's
+// responsibility, exercised separately in the mcp package).
+func TestLoadReadsAllowInsecureLoopback(t *testing.T) {
+	t.Setenv("MCP_TRANSPORT", "http")
+	t.Setenv("MCP_HTTP_ADDR", "127.0.0.1:8090")
+	t.Setenv("MCP_HTTP_TOKEN", "")
+	t.Setenv("MCP_ALLOW_INSECURE_LOOPBACK", "true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.MCPAllowInsecureLoopback {
+		t.Errorf("expected MCPAllowInsecureLoopback=true, got false")
+	}
+}
+
+// The default value of MCP_ALLOW_INSECURE_LOOPBACK is false: every
+// deployment that lands on the loopback-without-token configuration
+// should see the warning by default, so an operator has to opt in to
+// silence it.
+func TestLoadAllowInsecureLoopbackDefaultsFalse(t *testing.T) {
+	t.Setenv("MCP_TRANSPORT", "http")
+	t.Setenv("MCP_HTTP_ADDR", "127.0.0.1:8090")
+	t.Setenv("MCP_HTTP_TOKEN", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MCPAllowInsecureLoopback {
+		t.Errorf("expected MCPAllowInsecureLoopback=false by default, got true")
+	}
+}
+
+func TestLoadRejectsMalformedAllowInsecureLoopback(t *testing.T) {
+	t.Setenv("MCP_TRANSPORT", "http")
+	t.Setenv("MCP_HTTP_ADDR", "127.0.0.1:8090")
+	t.Setenv("MCP_ALLOW_INSECURE_LOOPBACK", "yes-please")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected a parse error for non-boolean MCP_ALLOW_INSECURE_LOOPBACK")
+	}
+}

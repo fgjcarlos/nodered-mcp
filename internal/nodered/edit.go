@@ -230,20 +230,38 @@ func AddNodeToFlow(flow RawFlow, node json.RawMessage) (RawFlow, error) {
 	// node referenced from a canvas node, or a canvas node pointing at an
 	// unknown tab. Verify the z either is the owning tab or names an existing
 	// node in this doc.
-	if z := stringField(decoded, "z"); z != "" {
-		tabID := stringField(doc.Extra, "id")
-		if z != tabID && !doc.exists(z) {
-			return nil, fmt.Errorf(
-				"node %q (%s) references z=%q which is neither the owning tab nor an existing "+
-					"node in this flow: Node-RED's runtime will crash on deploy with "+
-					"'Cannot read properties of undefined (reading wires)' if this is written",
-				id, nodeType(decoded), z,
-			)
-		}
+	if err := validateZRef(doc, stringField(decoded, "z")); err != nil {
+		return nil, fmt.Errorf("node %q (%s): %w", id, nodeType(decoded), err)
 	}
 
 	doc.Nodes = append(doc.Nodes, decoded)
 	return doc.encode()
+}
+
+// validateZRef returns nil if z resolves to the owning tab or to an existing
+// node in this document. Returning a non-nil error fails the write loud
+// rather than letting Node-RED silently rewrite a bad z to the owning tab id
+// (which loses the wire the model intended — issue #99).
+//
+// Used by the add / update write paths to surface the bad z before the
+// runtime accepts it. The read-only validate_flow tool reuses the same rule
+// via checkZRef so the validator and the write path agree.
+func validateZRef(doc *flowDoc, z string) error {
+	if z == "" {
+		return nil
+	}
+	if tabID := stringField(doc.Extra, "id"); z == tabID {
+		return nil
+	}
+	if doc.exists(z) {
+		return nil
+	}
+	return fmt.Errorf(
+		"references z=%q which is neither the owning tab nor an existing "+
+			"node in this flow: Node-RED's runtime will crash on deploy with "+
+			"'Cannot read properties of undefined (reading wires)' if this is written",
+		z,
+	)
 }
 
 // nodeType reads a node's type field, returning "" when absent or unreadable.
@@ -291,6 +309,13 @@ func UpdateNodeInFlow(flow RawFlow, id string, patch map[string]json.RawMessage)
 
 	for k, v := range patch {
 		(*collection)[i][k] = v
+	}
+	// A patch may rewrite z to a value that does not name the owning tab
+	// or any existing node in this flow. Node-RED silently rewrites such
+	// z to the owning tab id, which loses the wire the model intended —
+	// issue #99. Same check AddNodeToFlow runs on the new-node path.
+	if err := validateZRef(doc, stringField((*collection)[i], "z")); err != nil {
+		return nil, fmt.Errorf("node %q (%s): %w", id, nodeType((*collection)[i]), err)
 	}
 	return doc.encode()
 }

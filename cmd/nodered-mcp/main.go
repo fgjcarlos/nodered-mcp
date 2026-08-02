@@ -63,16 +63,17 @@ func pickVersion(stamped, embedded string) string {
 // reads (and validates) the environment — so precedence is flag > env >
 // default, with all validation kept in one place.
 var flagEnv = map[string]string{
-	"url":          "NODERED_URL",
-	"token":        "NODERED_TOKEN",
-	"transport":    "MCP_TRANSPORT",
-	"http-addr":    "MCP_HTTP_ADDR",
-	"http-token":   "MCP_HTTP_TOKEN",
-	"oauth-issuer": "MCP_OAUTH_ISSUER",
-	"oauth-aud":    "MCP_OAUTH_AUDIENCE",
-	"log-level":    "MCP_LOG_LEVEL",
-	"read-only":    "MCP_READ_ONLY",
-	"debug-stream": "MCP_DEBUG_STREAM",
+	"url":                     "NODERED_URL",
+	"token":                   "NODERED_TOKEN",
+	"transport":               "MCP_TRANSPORT",
+	"http-addr":               "MCP_HTTP_ADDR",
+	"http-token":              "MCP_HTTP_TOKEN",
+	"oauth-issuer":            "MCP_OAUTH_ISSUER",
+	"oauth-aud":               "MCP_OAUTH_AUDIENCE",
+	"log-level":               "MCP_LOG_LEVEL",
+	"read-only":               "MCP_READ_ONLY",
+	"debug-stream":            "MCP_DEBUG_STREAM",
+	"allow-insecure-loopback": "MCP_ALLOW_INSECURE_LOOPBACK",
 }
 
 func main() {
@@ -116,6 +117,7 @@ func serve(args []string) error {
 	fs.String("log-level", "", "log level: debug|info|warn|error (env MCP_LOG_LEVEL)")
 	fs.Bool("read-only", false, "expose only tools that cannot modify Node-RED (env MCP_READ_ONLY)")
 	fs.Bool("debug-stream", false, "open the /comms WebSocket tail at startup to enable debug streaming (env MCP_DEBUG_STREAM). Off by default; some Node-RED versions crash on the handshake.")
+	fs.Bool("allow-insecure-loopback", false, "acknowledge the loopback-without-token trade-off and silence the startup warning emitted when MCP_TRANSPORT=http is bound to loopback with no auth (env MCP_ALLOW_INSECURE_LOOPBACK). See issue #89 — this option does NOT add any auth, only silences the warning.")
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return nil
@@ -151,13 +153,31 @@ func serve(args []string) error {
 	}
 
 	srv := mcpserver.New(nrClient, mcpserver.Options{
-		Version:      resolveVersion(),
-		ReadOnly:     cfg.MCPReadOnly,
-		DebugStream:  cfg.MCPDebugStream,
-		NodeDenylist: cfg.NodeDenylist,
-		HTTPMaxBody:  cfg.MCPHTTPMaxBody,
+		Version:               resolveVersion(),
+		ReadOnly:              cfg.MCPReadOnly,
+		DebugStream:           cfg.MCPDebugStream,
+		NodeDenylist:          cfg.NodeDenylist,
+		HTTPMaxBody:           cfg.MCPHTTPMaxBody,
+		AllowInsecureLoopback: cfg.MCPAllowInsecureLoopback,
+		HTTPRatePerSec:        cfg.MCPHTTPRatePerSec,
+		HTTPRateBurst:         cfg.MCPHTTPRateBurst,
+		HTTPRateDisabled:      cfg.MCPHTTPRateDisabled,
 	})
 	if cfg.MCPTransport == "http" {
+		// SECURITY (issue #89): the loopback bind path below is the
+		// one a reverse-proxy deployment silently lands on. nginx,
+		// Caddy, and Traefik all forward client connections to
+		// 127.0.0.1:8090, so the listener believes every connection
+		// is local and skips auth. Any client that can reach the
+		// proxy can then call any MCP tool with no credentials. The
+		// token/OAuth checks above already require a credential when
+		// the bind is exposed; this comment is for the loopback
+		// branch, which is "safe" only as long as nothing on the
+		// network can forward traffic to it. The startup warning
+		// emitted by RunHTTP makes the assumption visible; the
+		// AllowInsecureLoopback option lets operators with upstream
+		// auth (mTLS at the proxy, IP allowlist, etc.) silence the
+		// nag without weakening any guard.
 		verifier, err := buildOAuthVerifier(cfg)
 		if err != nil {
 			return fmt.Errorf("building OAuth verifier: %w", err)

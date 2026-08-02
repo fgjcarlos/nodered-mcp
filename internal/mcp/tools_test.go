@@ -1607,6 +1607,42 @@ func TestSetFlows_RejectsDeniedNodeType(t *testing.T) {
 	}
 }
 
+// TestHandleSetFlows_NonTabOnlyRejected is the MCP-layer regression
+// pin for issue #106: an array of orphan nodes (no tab entry) used to
+// pass through normalizeFlowsArray and deploy, leaving the runtime
+// with zero tabs. The handler must reject it before any Node-RED call.
+func TestHandleSetFlows_NonTabOnlyRejected(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("server should not be called for a no-tab flows array: %s %s", r.Method, r.URL.Path)
+		_, _ = w.Write([]byte("[]"))
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	s := New(c, Options{Version: "test"})
+
+	res, err := s.handleSetFlows(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"flows": `[
+				{"id":"orphan","type":"inject","name":"o","topic":"t","payload":"p","payloadType":"str","repeat":"","crontab":"","once":false,"onceDelay":0.1,"x":140,"y":140,"wires":[]}
+			]`,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("handleSetFlows returned err=%v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result, got %+v", res)
+	}
+	tc := res.Content[0].(mcp.TextContent)
+	if !strings.Contains(tc.Text, `"tab"`) {
+		t.Errorf("error must mention tab requirement, got %q", tc.Text)
+	}
+}
+
 // TestHandleValidateFlow_StringWiresReturnsIssue is the MCP-layer pin
 // for issue #415: a model that hands a node with a string-typed wires
 // field back to validate_flow used to get a misleading "0 issues" answer
@@ -1673,5 +1709,164 @@ func TestHandleConnectNodes_SelfLoopRejected(t *testing.T) {
 	}
 	if !strings.Contains(tc.Text, "infinite") {
 		t.Errorf("error must mention the infinite loop, got %q", tc.Text)
+	}
+}
+
+// TestHandleUpdateFlow_BadZRejected mirrors the underlying nodered guard
+// through the MCP layer: a flow whose node carries z referencing a non-
+// existent tab must be rejected by update_flow before any Node-RED call,
+// so the wire the model intended is not silently lost on deploy (issue
+// #99). The handler is invoked directly so no httptest server is needed
+// for the negative case — the validator fires before the runtime is hit.
+func TestHandleUpdateFlow_BadZRejected(t *testing.T) {
+	s := newTestServer(t, false)
+
+	res, err := s.handleUpdateFlow(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"id": "tabA",
+			"flow": `{
+				"id":"tabA","label":"Home",
+				"nodes":[{"id":"n1","type":"inject","z":"ghost","x":140,"y":140,"wires":[]}]
+			}`,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("handleUpdateFlow returned err=%v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result for bad z, got %+v", res)
+	}
+	tc := res.Content[0].(mcp.TextContent)
+	if !strings.Contains(tc.Text, `z="ghost"`) {
+		t.Errorf("error must name the bad z, got %q", tc.Text)
+	}
+	if !strings.Contains(tc.Text, "owning tab") {
+		t.Errorf("error must explain the z resolution rule, got %q", tc.Text)
+	}
+}
+
+// TestHandleInjectNode_DisabledNodeRejected covers issue #104:
+// the admin /inject/:id endpoint accepts a node with
+// "disabled":true and returns success, but the runtime silently
+// drops the message. inject_node must refuse the call with a typed
+// error so the operator sees the actual cause instead of a phantom
+// success.
+func TestHandleInjectNode_DisabledNodeRejected(t *testing.T) {
+	srv, _ := injectServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/flows" {
+			// Node itself is disabled; tab is fine. The exact
+			// POST request must not be made.
+			_, _ = w.Write([]byte(`[
+				{"id":"tab1","type":"tab","label":"Home"},
+				{"id":"n1","type":"inject","z":"tab1","disabled":true}
+			]`))
+			return
+		}
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	res, err := srv.handleInjectNode(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{"id": "n1"}},
+	})
+	if err != nil {
+		t.Fatalf("handleInjectNode: %v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result for a disabled node, got %+v", res)
+	}
+	tc := res.Content[0].(mcp.TextContent)
+	if !strings.Contains(tc.Text, "n1") {
+		t.Errorf("error must name the offending node id, got %q", tc.Text)
+	}
+	if !strings.Contains(tc.Text, "disabled") {
+		t.Errorf("error must mention the disabled flag, got %q", tc.Text)
+	}
+	// Crucially, must NOT say "fired" — that was the phantom
+	// success bug #104 caught.
+	if strings.Contains(tc.Text, "fired") {
+		t.Errorf("error must not claim the node fired, got %q", tc.Text)
+	}
+}
+
+// TestHandleInjectNode_DisabledTabRejected mirrors the previous
+// case: the node itself is enabled, but the tab it lives in is
+// disabled. The runtime accepts the inject and returns success
+// while dropping the message — and the operator sees nothing
+// downstream. Reject the call with the same typed-error treatment.
+func TestHandleInjectNode_DisabledTabRejected(t *testing.T) {
+	srv, _ := injectServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/flows" {
+			// Tab is disabled, node is enabled. Same phantom
+			// bug as the disabled-node case.
+			_, _ = w.Write([]byte(`[
+				{"id":"tab1","type":"tab","label":"Home","disabled":true},
+				{"id":"n1","type":"inject","z":"tab1"}
+			]`))
+			return
+		}
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	res, err := srv.handleInjectNode(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{"id": "n1"}},
+	})
+	if err != nil {
+		t.Fatalf("handleInjectNode: %v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result for a node in a disabled tab, got %+v", res)
+	}
+	tc := res.Content[0].(mcp.TextContent)
+	if !strings.Contains(tc.Text, "tab") {
+		t.Errorf("error must mention the disabled tab, got %q", tc.Text)
+	}
+	if strings.Contains(tc.Text, "fired") {
+		t.Errorf("error must not claim the node fired, got %q", tc.Text)
+	}
+}
+
+// TestHandleInjectNode_ActiveNodeFires is the regression case for
+// the happy path: when the node and tab are both enabled, the new
+// lookup must NOT block the call. POST /inject/:id must still be hit
+// and the success text must still include "fired".
+func TestHandleInjectNode_ActiveNodeFires(t *testing.T) {
+	var posts []capture
+	var srv *Server
+	var got *capture
+	srv, got = injectServer(t, func(w http.ResponseWriter, r *http.Request) {
+		posts = append(posts, *got)
+		if r.Method == http.MethodGet && r.URL.Path == "/flows" {
+			_, _ = w.Write([]byte(`[
+				{"id":"tab1","type":"tab","label":"Home"},
+				{"id":"n1","type":"inject","z":"tab1"}
+			]`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	res, err := srv.handleInjectNode(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{"id": "n1"}},
+	})
+	if err != nil {
+		t.Fatalf("handleInjectNode: %v", err)
+	}
+	if res == nil || res.IsError {
+		t.Fatalf("expected success for an enabled inject in an enabled tab, got %+v", res)
+	}
+	tc := res.Content[0].(mcp.TextContent)
+	if !strings.Contains(tc.Text, "fired") {
+		t.Errorf("expected success text to mention fired, got %q", tc.Text)
+	}
+	var sawPost bool
+	for _, p := range posts {
+		if p.method == "POST" && p.path == "/inject/n1" {
+			sawPost = true
+		}
+	}
+	if !sawPost {
+		t.Errorf("expected POST /inject/n1, got %+v", posts)
 	}
 }

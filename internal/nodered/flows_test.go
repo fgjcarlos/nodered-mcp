@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -182,6 +183,72 @@ func TestUpdateFlow_RejectsDanglingWire(t *testing.T) {
 	}
 	if reached {
 		t.Error("a request reached Node-RED despite invalid wires")
+	}
+}
+
+// TestUpdateFlow_RejectsBadZ covers issue #99: a flow node whose z field
+// references a tab or node that does not exist in this document is silently
+// rewritten by Node-RED to the owning tab id, losing the wire the model
+// intended. UpdateFlow must fail loud before the request reaches the
+// runtime.
+func TestUpdateFlow_RejectsBadZ(t *testing.T) {
+	var reached bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := clientWithBackup(t, srv.URL)
+	// Tab id is "tabA" but the node carries z="ghost", which is neither
+	// the owning tab nor an existing node in this document.
+	bad := RawFlow(`{
+		"id":"tabA","label":"Home",
+		"nodes":[{"id":"n1","type":"inject","z":"ghost","x":100,"y":80,"wires":[]}]
+	}`)
+	err := c.UpdateFlow(context.Background(), "tabA", bad)
+	if err == nil {
+		t.Fatal("expected UpdateFlow to reject a node whose z does not resolve")
+	}
+	if !strings.Contains(err.Error(), `z="ghost"`) {
+		t.Errorf("expected the error to name the bad z, got %q", err.Error())
+	}
+	if reached {
+		t.Error("a request reached Node-RED despite the bad z")
+	}
+}
+
+// TestUpdateFlow_AcceptsValidZ is the regression pin for the new z check:
+// a node whose z equals the owning tab id (the usual case) or names an
+// existing node in the document must still be accepted by UpdateFlow.
+func TestUpdateFlow_AcceptsValidZ(t *testing.T) {
+	var putPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == "PUT" && r.URL.Path == "/flow/tabA":
+			putPath = r.URL.Path
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := clientWithBackup(t, srv.URL)
+	good := RawFlow(`{
+		"id":"tabA","label":"Home",
+		"nodes":[
+			{"id":"n1","type":"inject","z":"tabA","x":100,"y":80,"wires":[["n2"]]},
+			{"id":"n2","type":"function","z":"tabA","x":260,"y":80,"wires":[]}
+		]
+	}`)
+	if err := c.UpdateFlow(context.Background(), "tabA", good); err != nil {
+		t.Fatalf("UpdateFlow rejected a node with a valid z: %v", err)
+	}
+	if putPath != "/flow/tabA" {
+		t.Errorf("expected the PUT to reach /flow/tabA, got %q", putPath)
 	}
 }
 

@@ -169,6 +169,16 @@ func (c *Client) updateFlowLocked(ctx context.Context, id string, flow RawFlow) 
 	if err := validateFlowWires(flow); err != nil {
 		return err
 	}
+	// Issue #99: a node whose z references neither the owning tab nor
+	// any existing node in this document is silently rewritten by Node-RED
+	// to the owning tab id, losing the wire the model intended. The
+	// create_flow path does not need this check — Node-RED assigns the
+	// new tab id on POST and rewrites z to match — so the check lives
+	// here, where the tab id is supplied by the caller, not after the
+	// shared validateFlowWires used by both write paths.
+	if err := validateZRefsInFlow(flow, id); err != nil {
+		return err
+	}
 	if _, err := c.snapshotFlows(ctx); err != nil {
 		return err
 	}
@@ -304,6 +314,62 @@ func (c *Client) nodeType(ctx context.Context, id string) (string, bool, error) 
 	return "", false, nil
 }
 
+// InjectLookup is the disabled-relevant subset of a node plus the
+// disabled flag of its owning tab (if any). It is the answer to
+// "could the runtime fire this?" — the admin /inject/:id endpoint
+// always says yes, but the runtime silently drops the message when
+// the node or its tab is disabled. The MCP uses this to surface that
+// case as a typed error instead of letting the operator see a
+// phantom success.
+type InjectLookup struct {
+	Type        string
+	Disabled    bool
+	HasTab      bool
+	TabDisabled bool
+}
+
+// LookupInjectTarget walks GET /flows and returns the disabled flags
+// for the node with the given id and the tab that owns it. The
+// boolean return is "node found" — true even for nodes whose tab is
+// missing (HasTab=false), so a config node is distinguishable from a
+// genuine miss.
+//
+// A failed HTTP call returns (zero, false, err). A successful call
+// for an unknown id returns (zero, false, nil) — the operator sees
+// the call surface as "not found", not as a transport error.
+//
+// Cost: one GET /flows. InjectNode already pays one for its own
+// type check (the audit of #43 set that path), so the helper makes
+// each inject_node call do two GETs. Acceptable for a non-hot-path
+// tool; cache if a future audit flags latency.
+func (c *Client) LookupInjectTarget(ctx context.Context, id string) (InjectLookup, bool, error) {
+	raw, err := c.ListFlows(ctx)
+	if err != nil {
+		return InjectLookup{}, false, fmt.Errorf("looking up inject target %q: %w", id, err)
+	}
+	items := extractFlowArray(raw)
+	byID, _, _ := containers(items)
+	for _, item := range items {
+		var m nodeMeta
+		if json.Unmarshal(item, &m) != nil {
+			continue
+		}
+		if m.Type == "tab" || m.Type == "subflow" {
+			continue
+		}
+		if m.ID != id {
+			continue
+		}
+		lookup := InjectLookup{Type: m.Type, Disabled: m.Disabled}
+		if owner, ok := byID[m.Z]; ok {
+			lookup.HasTab = true
+			lookup.TabDisabled = owner.Disabled
+		}
+		return lookup, true, nil
+	}
+	return InjectLookup{}, false, nil
+}
+
 // FlowTabCount returns how many flow tabs (objects with "type":"tab") appear
 // in a raw GET /flows response. It tolerates both the bare-array (API v1) and
 // the {"flows":[...]} envelope (API v2). Returns 0 on any parse failure.
@@ -384,6 +450,33 @@ func validateFlowWires(raw RawFlow) error {
 			// actual JSON shape so the operator can fix it.
 			return errors.New(issue.Message)
 		}
+	}
+	return nil
+}
+
+// validateZRefsInFlow walks every node in flow and refuses the write
+// when any node's z references neither tabID nor any existing node in
+// the document. Node-RED silently rewrites a bad z to the owning tab id
+// on PUT, which loses the wire the model intended (issue #99). The check
+// runs only on update_flow / update_node — create_flow does not need it
+// because Node-RED assigns the new tab id and rewrites z to match on POST.
+func validateZRefsInFlow(flow RawFlow, tabID string) error {
+	doc, err := decodeFlow(flow)
+	if err != nil {
+		return err
+	}
+	for _, node := range append(append([]map[string]json.RawMessage{}, doc.Nodes...), doc.Configs...) {
+		z := stringField(node, "z")
+		if z == "" {
+			continue
+		}
+		if z == tabID {
+			continue
+		}
+		if doc.exists(z) {
+			continue
+		}
+		return errors.New(badZMessage(nodeID(node), z))
 	}
 	return nil
 }
