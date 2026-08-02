@@ -335,6 +335,117 @@ func TestNormalizeFlowDoc(t *testing.T) {
 	}
 }
 
+// TestNormalizeFlowDoc_NodesNullSubstituted covers issue #96: a flow
+// payload that explicitly serializes "nodes":null (or "configs":null)
+// must be coalesced into an empty array the same way a missing key is.
+// Node-RED's runtime rejects a null with an opaque "Cannot read
+// properties of null" error, so leaving the literal null through the
+// auto-fill block was a user-facing bug.
+func TestNormalizeFlowDoc_NodesNullSubstituted(t *testing.T) {
+	tests := []struct {
+		name        string
+		in          string
+		flowID      string
+		fill        bool
+		wantNodes   string // substring expected in normalized flow ("" = key absent)
+		wantConfigs string // substring expected in normalized flow ("" = key absent)
+	}{
+		{
+			name:      "nodes:null coalesced to []",
+			in:        `{"label":"x","nodes":null}`,
+			flowID:    "",
+			fill:      true,
+			wantNodes: `"nodes":[]`,
+		},
+		{
+			name:        "nodes:null and configs:null both coalesced",
+			in:          `{"label":"x","nodes":null,"configs":null}`,
+			flowID:      "",
+			fill:        true,
+			wantNodes:   `"nodes":[]`,
+			wantConfigs: `"configs":[]`,
+		},
+		{
+			name:        "absent nodes and configs both filled",
+			in:          `{"label":"x"}`,
+			flowID:      "",
+			fill:        true,
+			wantNodes:   `"nodes":[]`,
+			wantConfigs: `"configs":[]`,
+		},
+		{
+			name:      "real nodes array preserved, absent configs left absent",
+			in:        `{"label":"x","nodes":[{"id":"n1"}]}`,
+			flowID:    "",
+			fill:      true,
+			wantNodes: `"id":"n1"`,
+		},
+		{
+			name:      "fillNodes=false leaves null alone",
+			in:        `{"label":"x","nodes":null}`,
+			flowID:    "",
+			fill:      false,
+			wantNodes: `"nodes":null`,
+		},
+		{
+			name:      "fillNodes=false leaves absent keys absent",
+			in:        `{"label":"x"}`,
+			flowID:    "",
+			fill:      false,
+			wantNodes: "", // no nodes key in output
+		},
+		{
+			name:        "configs:null alone is coalesced",
+			in:          `{"label":"x","nodes":[{"id":"n1"}],"configs":null}`,
+			flowID:      "",
+			fill:        true,
+			wantNodes:   `"id":"n1"`,
+			wantConfigs: `"configs":[]`,
+		},
+		{
+			name:        "present configs array left intact",
+			in:          `{"label":"x","nodes":[],"configs":[{"id":"c1"}]}`,
+			flowID:      "",
+			fill:        true,
+			wantNodes:   `"nodes":[]`,
+			wantConfigs: `"id":"c1"`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := normalizeFlowDoc(json.RawMessage(tc.in), tc.flowID, tc.fill)
+			if err != nil {
+				t.Fatalf("normalizeFlowDoc: %v", err)
+			}
+			var m map[string]json.RawMessage
+			if err := json.Unmarshal(got, &m); err != nil {
+				t.Fatalf("result not a JSON object: %v\nbody: %s", err, got)
+			}
+			assertSubstring(t, "nodes", string(got), tc.wantNodes, m)
+			assertSubstring(t, "configs", string(got), tc.wantConfigs, m)
+		})
+	}
+}
+
+// assertSubstring validates a normalized flow document field. When
+// want is empty the key must be absent from the parsed object; when
+// want is set it must appear as a substring of the marshaled body.
+func assertSubstring(t *testing.T, key, body, want string, m map[string]json.RawMessage) {
+	t.Helper()
+	if want == "" {
+		if _, ok := m[key]; ok {
+			t.Errorf("expected key %q to be absent, got %s", key, body)
+		}
+		return
+	}
+	if _, ok := m[key]; !ok {
+		t.Errorf("expected key %q in normalized flow, got %s", key, body)
+	}
+	if !bytes.Contains([]byte(body), []byte(want)) {
+		t.Errorf("expected %q in normalized flow, got %s", want, body)
+	}
+}
+
 // TestNodeParam covers issue #25: add_node's `node` argument must accept
 // either a JSON-encoded string or a node object directly. Anything else
 // (number, boolean, array) is rejected with a single actionable message.

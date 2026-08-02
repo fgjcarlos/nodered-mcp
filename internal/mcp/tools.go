@@ -1720,9 +1720,10 @@ func nodeParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) {
 }
 
 // normalizeFlowDoc turns a raw flow payload into a Node-RED admin-API
-// document. If fillNodes is true and the document is a tab object missing
-// its "nodes" array, an empty one is added so a POST /flow does not bounce
-// with the unhelpful "missing nodes property" 400 from the runtime.
+// document. If fillNodes is true and the document is a tab object whose
+// "nodes" or "configs" array is missing or explicitly null, an empty
+// array is substituted so a POST /flow does not bounce with the opaque
+// "Cannot read properties of null" runtime error.
 //
 // The payload is accepted in any of the three shapes Node-RED hands back:
 //
@@ -1744,8 +1745,19 @@ func normalizeFlowDoc(raw json.RawMessage, flowID string, fillNodes bool) (noder
 		_, hasNodes := doc["nodes"]
 		_, hasConfigs := doc["configs"]
 		if hasNodes || hasConfigs || !looksLikeFlatArrayElement(doc) {
-			if fillNodes && !hasNodes {
-				doc["nodes"] = json.RawMessage(`[]`)
+			if fillNodes {
+				if !hasNodes || isJSONNull(doc["nodes"]) {
+					doc["nodes"] = json.RawMessage(`[]`)
+				}
+				// Match the same null-coalescing for configs, but only
+				// fill an absent configs when nodes is also absent: a
+				// caller who supplied a real nodes array does not want
+				// us to invent a configs key they never asked for. The
+				// explicit null case (configs:null) is always coalesced,
+				// because the runtime rejects null with an opaque error.
+				if isJSONNull(doc["configs"]) || (!hasConfigs && !hasNodes) {
+					doc["configs"] = json.RawMessage(`[]`)
+				}
 			}
 			out, err := json.Marshal(doc)
 			if err != nil {
@@ -1860,6 +1872,15 @@ func looksLikeFlatArrayElement(doc map[string]json.RawMessage) bool {
 	_, hasNodes := doc["nodes"]
 	_, hasConfigs := doc["configs"]
 	return hasID && hasType && !hasNodes && !hasConfigs
+}
+
+// isJSONNull reports whether raw is the JSON literal "null". A
+// serializer output of `"nodes":null` is not the same as the key being
+// absent: the key exists, but it points at nothing. Node-RED's runtime
+// rejects that with an opaque "Cannot read properties of null" error, so
+// normalizeFlowDoc treats null the same as missing when filling defaults.
+func isJSONNull(raw json.RawMessage) bool {
+	return string(raw) == "null"
 }
 
 // normalizeFlowsArray splits a raw flows payload into the per-flow entries
