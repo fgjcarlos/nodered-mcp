@@ -156,7 +156,9 @@ func (c *Client) SearchNodes(ctx context.Context, query string, limit int) ([]Se
 	// admin-side InsecureSkipVerify to the public registry.
 	resp, err := c.registryClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("calling npm registry: %w", err)
+		// Strip any query string (may contain tokens) before reporting the URL.
+		redactedBase := strings.SplitN(base, "?", 2)[0]
+		return nil, fmt.Errorf("cannot reach npm registry at %s (check network connectivity): %w", redactedBase, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
