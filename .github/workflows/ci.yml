@@ -74,6 +74,16 @@ jobs:
       - name: coverage ratchet
         run: bash scripts/coverage-ratchet.sh
 
+      # Complexity check (issue #73): five named functions must stay
+      # at or below the agreed threshold (15) and may not regress vs.
+      # their per-function baseline. The tool pinned is gocyclo;
+      # install it at the top of the step because the runner's
+      # pre-installed go bin does not include it.
+      - name: install gocyclo
+        run: go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
+      - name: complexity check
+        run: bash scripts/complexity-check.sh
+
   # nodered-mcp ships for Linux, macOS and Windows, and it does real work with
   # OS-specific paths (backup directories, per-client config locations in the
   # init command). Testing on one platform would not cover that.

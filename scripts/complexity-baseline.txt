@@ -1,0 +1,31 @@
+# scripts/complexity-baseline.txt — issue #73 complexity floor.
+#
+# Named functions from issue #73 with their current cyclomatic complexity
+# (gocyclo). One line per function in the format:
+#
+#   <func>  <file>  <complexity>
+#
+# The columns are space-separated. The script reads each line, looks up
+# the function in the current gocyclo output, and:
+#
+#   1. Fails if any value exceeds the agreed threshold (15) — issue #73
+#      acceptance criterion.
+#   2. Fails if any value increases vs. its baseline — a deliberate
+#      regression in complexity is a regression in the codebase.
+#
+# Bumping a baseline value is a deliberate commit, not an accidental side
+# effect of a refactor. The script is intended to be reproduced locally
+# and in CI (same tool, same threshold, same parsing).
+#
+# To regenerate after a refactor that legitimately reduces complexity:
+#
+#   scripts/complexity-check.sh --write
+#
+# That updates the per-function values in-place and exits 0; nothing
+# else changes. The threshold check still runs.
+
+normalizeFlowDoc    internal/mcp/tools_shared.go    6
+handleGetRuntimeLogs    internal/mcp/tools_runtime.go    18
+ValidateFlow    internal/nodered/validate.go    18
+synthesizeFlowFromFlat    internal/nodered/flows.go    15
+handleSetContext    internal/mcp/tools_context.go    17
