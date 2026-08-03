@@ -47,7 +47,9 @@ function assetName() {
     console.error(`@fgjcarlos/nodered-mcp: no binary published for ${key}.`);
     console.error('On Windows, use the install script from the README:');
     console.error('  irm https://raw.githubusercontent.com/' + REPO +
-                  '/main/install.ps1 | iex');
+                  '/main/scripts/install.ps1 | iex');
+    console.error('To remove the broken launcher left in PATH after this failure:');
+    console.error('  npm uninstall -g @fgjcarlos/nodered-mcp');
     process.exit(1);
   }
   return name;
