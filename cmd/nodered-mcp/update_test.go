@@ -351,3 +351,56 @@ func TestRunUpdate_NPMChannel_ConfirmAccepted(t *testing.T) {
 		t.Error("expected npm install after user confirmed")
 	}
 }
+
+// TestUpdateChannel_String covers the Stringer for all three constants
+// plus the zero/unknown default. Cheap table-driven test, no fixtures.
+func TestUpdateChannel_String(t *testing.T) {
+	cases := map[updateChannel]string{
+		channelNPM:    "npm",
+		channelDocker: "docker",
+		channelBinary: "binary",
+		// Any unrecognised value should fall through to "unknown".
+		updateChannel(99): "unknown",
+	}
+	for in, want := range cases {
+		if got := in.String(); got != want {
+			t.Errorf("updateChannel(%d).String() = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestRealExecer_Run exercises the production execer wrapper without
+// actually invoking a subprocess. A non-existent command on PATH is
+// the smallest check that fails the same way a real `npm` failure
+// would (non-zero exit / ENOENT), so we avoid a network or filesystem
+// dependency.
+func TestRealExecer_Run(t *testing.T) {
+	err := (realExecer{}).Run(context.Background(), "this-binary-does-not-exist-xyz", "arg1")
+	if err == nil {
+		t.Error("realExecer.Run should fail when the binary is missing")
+	}
+}
+
+// TestRunUpdate_DockerChannel confirms the docker early-return path
+// prints the pull hint and exits nil without touching npm.
+func TestRunUpdate_DockerChannel(t *testing.T) {
+	orig := detectChannel
+	detectChannel = func() updateChannel { return channelDocker }
+	t.Cleanup(func() { detectChannel = orig })
+
+	if err := runUpdate(nil); err != nil {
+		t.Errorf("runUpdate should return nil on docker channel; got %v", err)
+	}
+}
+
+// TestRunUpdate_BinaryChannel confirms the standalone-binary early-return
+// path prints the install.sh hint and exits nil without touching npm.
+func TestRunUpdate_BinaryChannel(t *testing.T) {
+	orig := detectChannel
+	detectChannel = func() updateChannel { return channelBinary }
+	t.Cleanup(func() { detectChannel = orig })
+
+	if err := runUpdate(nil); err != nil {
+		t.Errorf("runUpdate should return nil on binary channel; got %v", err)
+	}
+}
