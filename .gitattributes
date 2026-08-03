@@ -1,0 +1,27 @@
+# Repository-owned text formats are pinned to LF so cross-platform checkouts
+# (Windows with core.autocrlf=true in particular) stay gofmt-clean and avoid
+# go.mod / go.sum noise. See issue #67.
+#
+# Binary assets are intentionally left un-annotated; do not blanket-normalise
+# them with this file.
+
+# Go toolchain surfaces
+*.go text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf
+
+# Shell installers shipped by this repo
+*.sh text eol=lf
+
+# CI and packaging manifests
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+
+# Docs and PowerShell installer (LF lets PowerShell 5.1+ on Windows still parse it)
+*.md text eol=lf
+*.ps1 text eol=lf
+
+# Node bin shipped via npm; keep LF so the bin shim does not embed CRLF
+*.js text eol=lf
