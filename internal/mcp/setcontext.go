@@ -26,8 +26,11 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"sync"
+	"time"
 
 	"github.com/fgjcarlos/nodered-mcp/internal/nodered"
 )
@@ -114,16 +117,37 @@ return msg;
 // forces every caller to share the same gate, even on the no-op
 // path; the explicit mutex makes that fast path obvious in the
 // trace.
-func (s *Server) ensureSetContextHelper(ctx context.Context) (*setContextHelper, error) {
+// setContextProvisioningDelay is how long the first call after a
+// lazy-provisioned helper waits before retrying a 404 on /inject/:id.
+// Node-RED's routing layer occasionally answers 404 to the first
+// inject request after a freshly-deployed node before the deploy has
+// fully propagated. The value is small enough that a recovery is
+// imperceptible to the caller, and large enough that it covers the
+// deploy-propagation window observed in the wild (issue #158).
+const setContextProvisioningDelay = 200 * time.Millisecond
+
+// isNodeNotFound reports whether err is a Node-RED 404 (the helper
+// inject was not yet visible to the routing layer, or the id is
+// genuinely missing). Issue #158 uses it to gate the retry on a
+// just-provisioned helper.
+func isNodeNotFound(err error) bool {
+	var apiErr *nodered.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == http.StatusNotFound
+	}
+	return false
+}
+
+func (s *Server) ensureSetContextHelper(ctx context.Context) (*setContextHelper, bool, error) {
 	if s.readOnly {
 		// Defensive: the tool is withheld in read-only mode, so this
 		// should never be reached. Surface a clear error rather than
 		// silently failing in a less obvious way.
-		return nil, fmt.Errorf("set_context is not available in read-only mode")
+		return nil, false, fmt.Errorf("set_context is not available in read-only mode")
 	}
 
 	if s.ctxHelper != nil && s.ctxHelper.provisioned() {
-		return s.ctxHelper, nil
+		return s.ctxHelper, false, nil
 	}
 
 	s.ctxHelper = &setContextHelper{}
@@ -133,7 +157,7 @@ func (s *Server) ensureSetContextHelper(ctx context.Context) (*setContextHelper,
 	// Re-check under the lock: another goroutine may have just finished
 	// provisioning.
 	if s.ctxHelper.provisioned() {
-		return s.ctxHelper, nil
+		return s.ctxHelper, false, nil
 	}
 
 	if err := s.provisionSetContextHelper(ctx); err != nil {
@@ -141,9 +165,9 @@ func (s *Server) ensureSetContextHelper(ctx context.Context) (*setContextHelper,
 		// scratch rather than seeing a "provisioned" helper that
 		// actually has no flow on the runtime.
 		s.ctxHelper = nil
-		return nil, err
+		return nil, false, err
 	}
-	return s.ctxHelper, nil
+	return s.ctxHelper, true, nil
 }
 
 // provisionSetContextHelper performs the one-time install: create the

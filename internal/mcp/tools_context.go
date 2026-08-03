@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -117,7 +118,7 @@ func (s *Server) handleSetContext(ctx context.Context, req mcp.CallToolRequest) 
 		)), nil
 	}
 
-	helper, err := s.ensureSetContextHelper(ctx)
+	helper, justProvisioned, err := s.ensureSetContextHelper(ctx)
 	if err != nil {
 		slog.Error("set_context: provisioning helper failed", "error", err)
 		return mcp.NewToolResultError(fmt.Sprintf("provisioning set_context helper: %v", err)), nil
@@ -146,6 +147,23 @@ func (s *Server) handleSetContext(ctx context.Context, req mcp.CallToolRequest) 
 	}
 
 	if err := s.nrClient.InjectNodeWithBody(ctx, helper.injectID, bodyBytes); err != nil {
+		// Issue #158: when the helper was just provisioned in this
+		// call, Node-RED's routing layer may not yet have propagated
+		// the freshly-deployed inject node. A short pause + retry
+		// recovers from this transient 404 without surfacing it to
+		// the caller.
+		if justProvisioned && isNodeNotFound(err) {
+			time.Sleep(setContextProvisioningDelay)
+			if retryErr := s.nrClient.InjectNodeWithBody(ctx, helper.injectID, bodyBytes); retryErr == nil {
+				return mcp.NewToolResultText(fmt.Sprintf(
+					"Set context %s key %q to %s (via helper flow %q, inject %q). "+
+						"Read it back with get_context; the helper is reused, not re-created.",
+					scope, key, prettyJSONValue(value), helper.flowID, helper.injectID,
+				)), nil
+			}
+			// Retry failed too — fall through to the original error
+			// so the caller sees the most relevant diagnostic.
+		}
 		slog.Error("set_context failed", "error", err, "scope", scope, "id", id, "key", key)
 		return mcp.NewToolResultError(fmt.Sprintf("dispatching set_context: %v", err)), nil
 	}
