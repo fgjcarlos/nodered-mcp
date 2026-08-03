@@ -138,6 +138,21 @@ func isNodeNotFound(err error) bool {
 	return false
 }
 
+// injectWithProvisioningRetry fires the helper's inject and, if the
+// helper was just provisioned in this call and the first attempt
+// returns a Node-RED 404, retries once after setContextProvisioningDelay.
+// The retry is gated on justProvisioned so a genuine "helper missing"
+// failure on a subsequent call still surfaces to the operator instead
+// of being masked by a retry (issue #158).
+func (s *Server) injectWithProvisioningRetry(ctx context.Context, injectID string, body []byte, justProvisioned bool) error {
+	err := s.nrClient.InjectNodeWithBody(ctx, injectID, body)
+	if err == nil || !justProvisioned || !isNodeNotFound(err) {
+		return err
+	}
+	time.Sleep(setContextProvisioningDelay)
+	return s.nrClient.InjectNodeWithBody(ctx, injectID, body)
+}
+
 func (s *Server) ensureSetContextHelper(ctx context.Context) (*setContextHelper, bool, error) {
 	if s.readOnly {
 		// Defensive: the tool is withheld in read-only mode, so this
