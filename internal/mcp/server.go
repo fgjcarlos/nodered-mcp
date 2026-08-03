@@ -229,7 +229,10 @@ func New(nrClient *nodered.Client, opts Options) *Server {
 	// :latest as of writing), must not stop the other 23 tools from working
 	// and must not bring the runtime down by triggering the upstream bug.
 	if !opts.DebugStream {
-		slog.Info("debug stream disabled; set MCP_DEBUG_STREAM=on to enable")
+		// Issue #159: surface this hint at Warn level so it is visible
+		// under the defensive MCP_LOG_LEVEL=warn production default,
+		// not only at the noisier Info level.
+		slog.Warn("debug stream disabled; set MCP_DEBUG_STREAM=on to enable")
 	} else {
 		if tail, err := nodered.NewDebugTail(nrClient, nodered.DefaultDebugBufferSize); err != nil {
 			slog.Warn("debug tail unavailable", "error", err)
