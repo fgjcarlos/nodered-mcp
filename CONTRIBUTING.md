@@ -96,7 +96,11 @@ Three GitHub Actions fire on the tag and run in parallel:
   `checksums.txt` to the GitHub release.
 - `docker.yml` — multi-arch image is pushed to `ghcr.io/fgjcarlos/nodered-mcp`.
 - `npm.yml` — `@fgjcarlos/nodered-mcp` is published to npmjs; the
-  workflow refuses to ship if `package.json` and the tag disagree.
+  workflow refuses to ship if `package.json` and the tag disagree, or
+  if the `bin/install.js` `VERSION` constant and the tag disagree
+  (the wrapper's postinstall URL embeds that constant — a stale value
+  here makes `npm install -g` silently download the previous tag's
+  tarball).
 
 A new release is justified when there is a user-visible change: a new
 tool, a new subcommand, a new install channel, a fixed bug. Pure docs

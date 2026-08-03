@@ -6,6 +6,11 @@ name: npm
 # versioned in package.json, bumped by hand; this workflow reads that
 # version and refuses to publish if it does not match the tag, so a
 # mismatched package.json never ships.
+#
+# The wrapper's postinstall downloads a tarball whose URL embeds the
+# `bin/install.js` VERSION constant — if that constant lags the tag, a
+# fresh `npm install -g @fgjcarlos/nodered-mcp` silently downloads the
+# previous release's tarball. We gate on that constant here too.
 on:
   push:
     tags:
@@ -34,6 +39,28 @@ jobs:
           expected="${EXPECTED#v}"
           if [ "$actual" != "$expected" ]; then
             echo "package.json version ($actual) does not match tag $EXPECTED (expected $expected)"
+            exit 1
+          fi
+
+      # Same gate as above, but for the bin/install.js VERSION constant —
+      # the wrapper's postinstall builds its tarball URL from this
+      # literal. A stale constant here is the bug from #146: the gate on
+      # package.json would pass, the npm publish would succeed, and a
+      # fresh `npm install -g` would silently download the previous
+      # tag's binary. The grep targets the line we keep by convention;
+      # a `const VERSION = ...` declaration is the contract.
+      - name: verify bin/install.js VERSION matches the tag
+        env:
+          EXPECTED: ${{ github.ref_name }}
+        run: |
+          actual=$(grep -E "^const VERSION = '[^']+';" bin/install.js | head -1 | sed -E "s/^const VERSION = '([^']+)';.*/\\1/")
+          expected="${EXPECTED#v}"
+          if [ -z "$actual" ]; then
+            echo "could not parse VERSION from bin/install.js"
+            exit 1
+          fi
+          if [ "$actual" != "$expected" ]; then
+            echo "bin/install.js VERSION ($actual) does not match tag $EXPECTED (expected $expected)"
             exit 1
           fi
 
