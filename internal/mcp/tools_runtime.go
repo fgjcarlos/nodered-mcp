@@ -149,26 +149,9 @@ func (s *Server) handleGetRuntimeLogs(ctx context.Context, req mcp.CallToolReque
 	}
 
 	sinceArg := strings.TrimSpace(req.GetString("since", ""))
-	var lineOffset int // > 0 means "last N lines"; 0 means no offset
-	var sinceTime time.Time
-	if sinceArg != "" {
-		if strings.HasPrefix(sinceArg, "-") {
-			n, err := strconv.Atoi(sinceArg[1:])
-			if err != nil || n <= 0 {
-				return mcp.NewToolResultError(fmt.Sprintf(
-					"since line offset must be a positive integer after \"-\", got %q (e.g. \"-50\")", sinceArg,
-				)), nil
-			}
-			lineOffset = n
-		} else {
-			t, err := time.Parse(time.RFC3339, sinceArg)
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf(
-					"since must be an RFC 3339 timestamp (e.g. \"2026-07-28T19:00:00Z\") or a line offset \"-N\", got %q", sinceArg,
-				)), nil
-			}
-			sinceTime = t
-		}
+	lineOffset, sinceTime, errMsg := parseSinceArg(sinceArg)
+	if errMsg != "" {
+		return mcp.NewToolResultError(errMsg), nil
 	}
 	slog.Debug("tool: get_runtime_logs", "limit", limit, "level", level, "since", sinceArg)
 
@@ -232,6 +215,35 @@ func writeLogLine(sb *strings.Builder, e nodered.LogEntry) {
 	}
 	sb.WriteString(e.Message)
 	sb.WriteByte('\n')
+}
+
+// parseSinceArg decodes the "since" tool argument into either a
+// positive line offset ("-50" → 50) or an RFC 3339 timestamp. An
+// empty input is a no-op and returns zero values. The error path
+// returns the user-facing message to surface verbatim.
+//
+// Extracted from handleGetRuntimeLogs so the handler stays under
+// the complexity-15 threshold (issue #73).
+func parseSinceArg(sinceArg string) (lineOffset int, sinceTime time.Time, errMsg string) {
+	if sinceArg == "" {
+		return 0, time.Time{}, ""
+	}
+	if strings.HasPrefix(sinceArg, "-") {
+		n, err := strconv.Atoi(sinceArg[1:])
+		if err != nil || n <= 0 {
+			return 0, time.Time{}, fmt.Sprintf(
+				"since line offset must be a positive integer after \"-\", got %q (e.g. \"-50\")", sinceArg,
+			)
+		}
+		return n, time.Time{}, ""
+	}
+	t, err := time.Parse(time.RFC3339, sinceArg)
+	if err != nil {
+		return 0, time.Time{}, fmt.Sprintf(
+			"since must be an RFC 3339 timestamp (e.g. \"2026-07-28T19:00:00Z\") or a line offset \"-N\", got %q", sinceArg,
+		)
+	}
+	return 0, t, ""
 }
 
 // filterLogs applies level / since / line-offset filtering to a Logs
