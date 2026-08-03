@@ -28,4 +28,4 @@ normalizeFlowDoc    internal/mcp/tools_shared.go    6
 handleGetRuntimeLogs    internal/mcp/tools_runtime.go    18
 ValidateFlow    internal/nodered/validate.go    18
 synthesizeFlowFromFlat    internal/nodered/flows.go    15
-handleSetContext    internal/mcp/tools_context.go    17
+handleSetContext    internal/mcp/tools_context.go    10

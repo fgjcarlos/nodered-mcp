@@ -79,23 +79,6 @@ func describeContextTarget(id, key string) string {
 // limitations of how a function node reaches context, not of this
 // tool — the description states this so callers do not assume
 // arbitrary-target writes.
-
-// handleSetContext writes to Node-RED context via the managed helper.
-//
-// Flow:
-//  1. Lazy-provision the helper flow tab + inject + function on first
-//     call (see ensureSetContextHelper in setcontext.go).
-//  2. Build a JSON body containing the (scope, key, value) and the
-//     magic __user_inject_props__ field that makes the POST
-//     /inject/:id body become the inject's msg on Node-RED 5.x.
-//  3. POST the body to /inject/<helper-inject-id>. The function node
-//     downstream reads msg and writes to global/flow/context.
-//
-// Scope "node" writes to the helper's function node's own context;
-// scope "flow" writes to the helper's flow context. Both are
-// limitations of how a function node reaches context, not of this
-// tool — the description states this so callers do not assume
-// arbitrary-target writes.
 func (s *Server) handleSetContext(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	scope, err := req.RequireString("scope")
 	if err != nil {
@@ -140,31 +123,8 @@ func (s *Server) handleSetContext(ctx context.Context, req mcp.CallToolRequest) 
 		return mcp.NewToolResultError(fmt.Sprintf("provisioning set_context helper: %v", err)), nil
 	}
 
-	switch scope {
-	case "flow":
-		if id == "" {
-			return mcp.NewToolResultError(
-				`scope "flow" requires an id; call list_flows to find the helper flow labelled "__mcp_context_helper__"`,
-			), nil
-		}
-		if id != helper.flowID && id != setContextHelperFlowID {
-			return mcp.NewToolResultError(fmt.Sprintf(
-				`scope "flow" can only target the helper's own flow context, so the id must be the helper flow id (got %q); call list_flows to discover it`,
-				id,
-			)), nil
-		}
-	case "node":
-		if id == "" {
-			return mcp.NewToolResultError(
-				`scope "node" requires an id; call list_flows to find the function node named "__mcp_context_helper_set__"`,
-			), nil
-		}
-		if id != helper.functionID && id != setContextHelperFunctionID {
-			return mcp.NewToolResultError(fmt.Sprintf(
-				`scope "node" can only target the helper's function node's own context, so the id must be the helper function id (got %q)`,
-				id,
-			)), nil
-		}
+	if errMsg := validateContextTarget(scope, id, helper); errMsg != "" {
+		return mcp.NewToolResultError(errMsg), nil
 	}
 
 	// Build the inject body. The shape is:
@@ -197,10 +157,39 @@ func (s *Server) handleSetContext(ctx context.Context, req mcp.CallToolRequest) 
 	)), nil
 }
 
-// prettyJSONValue renders a decoded value the way get_context shows one:
-// as JSON. Used in the success reply so the caller sees exactly what
-// was written (an int, a string, an object) instead of having to parse
-// prose.
+// validateContextTarget enforces the scope/id invariants for set_context.
+// "global" needs no id; "flow" and "node" require the id and it must
+// point at the helper's own target (the only place that can actually
+// accept the write). Returns an empty string on success, or the error
+// message to surface to the caller.
+//
+// Extracted from handleSetContext so each function stays under the
+// complexity-15 threshold (issue #73).
+func validateContextTarget(scope, id string, helper *setContextHelper) string {
+	switch scope {
+	case "flow":
+		if id == "" {
+			return `scope "flow" requires an id; call list_flows to find the helper flow labelled "__mcp_context_helper__"`
+		}
+		if id != helper.flowID && id != setContextHelperFlowID {
+			return fmt.Sprintf(
+				`scope "flow" can only target the helper's own flow context, so the id must be the helper flow id (got %q); call list_flows to discover it`,
+				id,
+			)
+		}
+	case "node":
+		if id == "" {
+			return `scope "node" requires an id; call list_flows to find the function node named "__mcp_context_helper_set__"`
+		}
+		if id != helper.functionID && id != setContextHelperFunctionID {
+			return fmt.Sprintf(
+				`scope "node" can only target the helper's function node's own context, so the id must be the helper function id (got %q)`,
+				id,
+			)
+		}
+	}
+	return ""
+}
 
 // prettyJSONValue renders a decoded value the way get_context shows one:
 // as JSON. Used in the success reply so the caller sees exactly what
