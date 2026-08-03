@@ -84,7 +84,7 @@ La versión en inglés de este documento está en [`README.md`](./README.md).
 | `list_plugins` | `GET /plugins` | read | Plugins de editor cargados por el runtime |
 | `get_node_status` | WebSocket `/comms` | read | Eventos de estado de nodos en vivo (offline, disconnect, connected) desde el runtime |
 | `get_runtime_logs` | journal / stream | read | Logs recientes del runtime Node-RED: stdout, stderr y la superficie de log del editor |
-| `set_flows_state` | `POST /flows/state` | write | Arrancar o detener el runtime (requiere `runtimeState.enabled` en los settings de Node-RED) |
+| `set_flows_state` | `POST /flows/state` | write | Arrancar o detener el runtime (requiere `runtimeState.enabled` en los settings de Node-RED). Ver también: `MCP_DEBUG_STREAM` (variable de entorno del MCP) — gobierna una superficie distinta, ver Resolución de problemas. |
 | `list_backups` | local | read | Snapshots guardados, del más reciente al más antiguo |
 | `diff_flows` | local + `GET /flows` | read | Qué cambió entre un snapshot y ahora |
 | `restore_backup` | `POST /flows` | write | Revertir toda la configuración a un snapshot |
@@ -303,7 +303,7 @@ Cada ajuste puede indicarse como variable de entorno o como flag de línea de co
 | `NODERED_INSECURE` | — | `false` | Omitir la verificación TLS. Solo para desarrollo |
 | `NODERED_BACKUP_DIR` | — | `backups` | Dónde se escriben los snapshots antes de cada escritura |
 | `MCP_READ_ONLY` | `--read-only` | `false` | Exponer solo las tools que no pueden modificar Node-RED |
-| `MCP_DEBUG_STREAM` | `--debug-stream` | `false` | Abrir el WebSocket de `/comms` al arrancar para activar el stream de debug. **Desactivado por defecto** porque algunas versiones de Node-RED crashean durante el handshake. Tras activarlo, dale a `get_debug_messages` ~3 segundos para empezar a recibir — el WebSocket se conecta al arrancar y el runtime no publica nada hasta que el filtro del editor está cableado. Si la llamada sigue reportando "still connecting", pon `MCP_LOG_LEVEL=debug` y busca un error de dial `/comms` en los logs del servidor. |
+| `MCP_DEBUG_STREAM` | `--debug-stream` | `false` | Abrir el WebSocket de `/comms` al arrancar para activar el stream de debug. **Desactivado por defecto** porque algunas versiones de Node-RED crashean durante el handshake. Tras activarlo, dale a `get_debug_messages` ~3 segundos para empezar a recibir — el WebSocket se conecta al arrancar y el runtime no publica nada hasta que el filtro del editor está cableado. Si la llamada sigue reportando "still connecting", pon `MCP_LOG_LEVEL=debug` y busca un error de dial `/comms` en los logs del servidor. Ver también: `runtimeState.enabled` en los settings de Node-RED — gobierna `get_flows_state` / `set_flows_state`, una superficie distinta. |
 | `MCP_TRANSPORT` | `--transport` | `stdio` | `stdio` o `http` |
 | `MCP_HTTP_ADDR` | `--http-addr` | `:8090` | Dirección de escucha del transporte HTTP |
 | `MCP_HTTP_TOKEN` | `--http-token` | — | Bearer token del transporte HTTP. Obligatorio salvo con bind a loopback |
@@ -571,6 +571,13 @@ La API de administración de Node-RED nunca devuelve valores de credenciales en 
 **El transporte HTTP no conecta.** Confirma que `--transport http` está activo y que el puerto de `--http-addr` está libre.
 
 **Una escritura se rechaza con un error de backup.** Los backups fallan en cerrado por diseño: si el snapshot no se puede escribir, la escritura no se ejecuta. Comprueba que `NODERED_BACKUP_DIR` existe y tiene permisos de escritura.
+
+**`get_flows_state` dice que runtimeState está deshabilitado; `get_node_status` dice stream unavailable.** Son dos flags distintos en lados distintos del cable:
+
+- `runtimeState.enabled` es un setting de **Node-RED** (`settings.js`). Gobierna `GET/POST /flows/state`, usado por `get_flows_state` y `set_flows_state`. Actívalo en `settings.js` (`runtimeState: { enabled: true, ui: false }`) y reinicia Node-RED.
+- `MCP_DEBUG_STREAM` es una variable de entorno del **MCP**. Gobierna el WebSocket `/comms` que usan `get_node_status` y `get_debug_messages`. Actívalo en el proceso MCP (`MCP_DEBUG_STREAM=on`).
+
+Son independientes — ninguno habilita al otro. Un solo flag mal configurado puede ocultar una superficie de herramientas mientras la otra funciona bien.
 
 ## Arquitectura
 
