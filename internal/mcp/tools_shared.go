@@ -162,29 +162,12 @@ func nodeParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) {
 // a flat array, the tab id to match is taken from flowID (when supplied);
 // a nested payload is accepted as-is.
 func normalizeFlowDoc(raw json.RawMessage, flowID string, fillNodes bool) (nodered.RawFlow, error) {
-	// Try a nested tab object first. A nested doc has either "nodes" or
-	// "configs" — the two arrays Node-RED splits a tab into. A flat-array
-	// element carries "type":"tab" and never both "nodes" and the rest of a
-	// tab object, so the absence of those keys is the disambiguation.
 	var doc map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &doc); err == nil {
 		_, hasNodes := doc["nodes"]
 		_, hasConfigs := doc["configs"]
 		if hasNodes || hasConfigs || !looksLikeFlatArrayElement(doc) {
-			if fillNodes {
-				if !hasNodes || isJSONNull(doc["nodes"]) {
-					doc["nodes"] = json.RawMessage(`[]`)
-				}
-				// Match the same null-coalescing for configs, but only
-				// fill an absent configs when nodes is also absent: a
-				// caller who supplied a real nodes array does not want
-				// us to invent a configs key they never asked for. The
-				// explicit null case (configs:null) is always coalesced,
-				// because the runtime rejects null with an opaque error.
-				if isJSONNull(doc["configs"]) || (!hasConfigs && !hasNodes) {
-					doc["configs"] = json.RawMessage(`[]`)
-				}
-			}
+			coalesceNullFields(doc, fillNodes, hasNodes, hasConfigs)
 			out, err := json.Marshal(doc)
 			if err != nil {
 				return nil, fmt.Errorf("re-encoding flow document: %w", err)
@@ -192,31 +175,52 @@ func normalizeFlowDoc(raw json.RawMessage, flowID string, fillNodes bool) (noder
 			return nodered.RawFlow(out), nil
 		}
 	}
+	return normalizeFlatFlowArray(raw, flowID, fillNodes)
+}
 
-	// Flat array shape: pick the tab whose id matches flowID, then collect
-	// every node whose z references it.
+// coalesceNullFields fills absent or null `nodes`/`configs` arrays on a
+// nested tab document. Extracted from normalizeFlowDoc so each function
+// stays under the complexity-15 threshold (issue #73).
+func coalesceNullFields(doc map[string]json.RawMessage, fillNodes, hasNodes, hasConfigs bool) {
+	if !fillNodes {
+		return
+	}
+	if !hasNodes || isJSONNull(doc["nodes"]) {
+		doc["nodes"] = json.RawMessage(`[]`)
+	}
+	// Match the same null-coalescing for configs, but only fill an absent
+	// configs when nodes is also absent: a caller who supplied a real nodes
+	// array does not want us to invent a configs key they never asked for.
+	// The explicit null case (configs:null) is always coalesced, because
+	// the runtime rejects null with an opaque error.
+	if isJSONNull(doc["configs"]) || (!hasConfigs && !hasNodes) {
+		doc["configs"] = json.RawMessage(`[]`)
+	}
+}
+
+// normalizeFlatFlowArray handles the flat-array shape of the admin API.
+// A flat /flows array has one element per (tab, node, config) item; the
+// caller already knows the flow id, so we pick the matching tab and
+// collect its children. The result is re-encoded as a nested document.
+func normalizeFlatFlowArray(raw json.RawMessage, flowID string, fillNodes bool) (nodered.RawFlow, error) {
 	var flat []json.RawMessage
 	if err := json.Unmarshal(raw, &flat); err != nil {
 		return nil, fmt.Errorf("flow document is not a JSON object or flow array: %w", err)
 	}
 	if flowID == "" {
-		return nil, fmt.Errorf(
-			"flow document is a flat array; pass the flow id so the right tab can be picked out")
+		return nil, fmt.Errorf("flow document is a flat array; pass the flow id so the right tab can be picked out")
 	}
 	tab, nodes, configs := splitFlatFlow(flat, flowID)
 	if tab == nil {
 		return nil, fmt.Errorf("no tab with id %q in the supplied flat flow array", flowID)
 	}
 
-	// Project into the nested doc shape.
 	out := make(map[string]json.RawMessage, len(tab)+2)
 	for k, v := range tab {
-		// The flat shape includes "type":"tab" and "id":"<flow>" — drop those,
-		// the nested shape uses id at the top level and "tab" is implied.
-		if k == "type" {
-			continue
-		}
-		if k == "id" {
+		// The flat shape includes "type":"tab" and "id":"<flow>" — drop
+		// those; the nested shape uses id at the top level and "tab" is
+		// implied.
+		if k == "type" || k == "id" {
 			continue
 		}
 		out[k] = v
