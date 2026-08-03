@@ -166,7 +166,7 @@ func SearchFlows(raw RawFlow, query, nodeType string, limit int) (matches []Node
 		if m.Type == "tab" || m.Type == "subflow" {
 			continue
 		}
-		if nodeType != "" && strings.ToLower(m.Type) != strings.ToLower(nodeType) {
+		if nodeType != "" && !strings.EqualFold(m.Type, nodeType) {
 			continue
 		}
 		if needle != "" && !strings.Contains(strings.ToLower(string(item)), needle) {

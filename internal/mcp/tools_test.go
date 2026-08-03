@@ -1394,8 +1394,7 @@ func TestGetNodeStatus_ErroredNodeWithLastError(t *testing.T) {
 // controls the policy independently of the global config layer.
 func serverWithDenylist(t *testing.T, types ...string) (*Server, *httptest.Server) {
 	t.Helper()
-	var srv *httptest.Server
-	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Snapshot-only: any handler reaching this point means the
 		// denylist guard let the request through, which is what the
 		// "positive" tests assert. The "negative" tests expect an
