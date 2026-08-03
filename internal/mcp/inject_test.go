@@ -151,7 +151,7 @@ func TestHandleInjectNode_WithPayload(t *testing.T) {
 	// The magic trigger must be present and empty (a non-empty list would
 	// tell Node-RED to apply per-call msg.* prop overrides instead of
 	// forwarding the body as msg).
-	props, _ := sent["__user_inject_props__"]
+	props := sent["__user_inject_props__"]
 	var propsList []any
 	if err := json.Unmarshal(props, &propsList); err != nil || len(propsList) != 0 {
 		t.Errorf("expected __user_inject_props__ to be an empty array, got %s", string(props))
