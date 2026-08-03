@@ -117,7 +117,7 @@ func (s *Server) handleSetContext(ctx context.Context, req mcp.CallToolRequest) 
 		)), nil
 	}
 
-	helper, err := s.ensureSetContextHelper(ctx)
+	helper, justProvisioned, err := s.ensureSetContextHelper(ctx)
 	if err != nil {
 		slog.Error("set_context: provisioning helper failed", "error", err)
 		return mcp.NewToolResultError(fmt.Sprintf("provisioning set_context helper: %v", err)), nil
@@ -145,7 +145,7 @@ func (s *Server) handleSetContext(ctx context.Context, req mcp.CallToolRequest) 
 		return mcp.NewToolResultError(fmt.Sprintf("encoding set_context body: %v", err)), nil
 	}
 
-	if err := s.nrClient.InjectNodeWithBody(ctx, helper.injectID, bodyBytes); err != nil {
+	if err := s.injectWithProvisioningRetry(ctx, helper.injectID, bodyBytes, justProvisioned); err != nil {
 		slog.Error("set_context failed", "error", err, "scope", scope, "id", id, "key", key)
 		return mcp.NewToolResultError(fmt.Sprintf("dispatching set_context: %v", err)), nil
 	}

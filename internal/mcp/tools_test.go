@@ -735,6 +735,221 @@ func TestSetContext_HappyPathAndHelperReuse(t *testing.T) {
 	}
 }
 
+// TestSetContext_RetriesOnFirstCall404 covers issue #158: when the
+// helper is freshly provisioned in the same call, Node-RED's routing
+// layer occasionally answers 404 to the first POST /inject/:id before
+// the deploy has fully propagated. The handler must retry once
+// without surfacing the transient 404 to the caller.
+//
+// The mock returns 404 on the first POST /inject/:id and 200 on the
+// second — the second one is what the user sees.
+func TestSetContext_RetriesOnFirstCall404(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		postInj  int
+		injected [][]byte
+		liveFlow = map[string]any{
+			"id":    "mcp_ctx_helper_tab",
+			"label": "__mcp_context_helper__",
+			"nodes": []any{},
+		}
+	)
+	refreshSnapshot := func() []byte {
+		out, _ := json.Marshal(liveFlow)
+		return out
+	}
+	ingestPUT := func(body []byte) {
+		var doc struct {
+			ID    string           `json:"id"`
+			Label string           `json:"label"`
+			Nodes []map[string]any `json:"nodes"`
+		}
+		if err := json.Unmarshal(body, &doc); err != nil {
+			return
+		}
+		liveFlow["id"] = doc.ID
+		liveFlow["label"] = doc.Label
+		liveFlow["nodes"] = doc.Nodes
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			_, _ = w.Write([]byte(fmt.Sprintf(
+				`[{"type":"tab","id":"other","label":"Other","nodes":[]},%s]`,
+				refreshSnapshot(),
+			)))
+		case r.Method == "POST" && r.URL.Path == "/flow":
+			body, _ := io.ReadAll(r.Body)
+			_, _ = w.Write(body)
+		case r.Method == "GET" && r.URL.Path == "/flow/mcp_ctx_helper_tab":
+			_, _ = w.Write(refreshSnapshot())
+		case r.Method == "PUT" && r.URL.Path == "/flow/mcp_ctx_helper_tab":
+			body, _ := io.ReadAll(r.Body)
+			ingestPUT(body)
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/inject/"):
+			postInj++
+			body, _ := io.ReadAll(r.Body)
+			injected = append(injected, body)
+			// First call: simulate the "routing layer hasn't
+			// propagated yet" transient 404. Subsequent calls: succeed.
+			if postInj == 1 {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`Cannot POST /inject/mcp_ctx_helper_inj`))
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	srv2 := New(c, Options{Version: "test"})
+
+	// Single call: must provision + retry + succeed.
+	res, err := srv2.handleSetContext(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"scope": "global",
+			"key":   "foo",
+			"value": "42",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("handleSetContext returned err=%v", err)
+	}
+	if res == nil || res.IsError {
+		t.Fatalf("set_context should succeed on the retry, got %+v", res)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if postInj != 2 {
+		t.Errorf("expected 2 inject dispatches (1 transient 404 + 1 retry), got %d", postInj)
+	}
+	if len(injected) != 2 {
+		t.Fatalf("expected 2 captured inject bodies, got %d", len(injected))
+	}
+	if !bytes.Contains(injected[0], []byte(`"value":42`)) {
+		t.Errorf("first inject body missing value:42: %s", injected[0])
+	}
+	if !bytes.Contains(injected[1], []byte(`"value":42`)) {
+		t.Errorf("retry body missing value:42: %s", injected[1])
+	}
+}
+
+// TestSetContext_NoRetryWhenHelperAlreadyProvisioned covers the
+// negative side of issue #158: once the helper is in place, a 404
+// from /inject/:id is a real "helper missing" error, not a transient
+// propagation delay. The handler must surface it, not retry forever.
+func TestSetContext_NoRetryWhenHelperAlreadyProvisioned(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		postInj  int
+		liveFlow = map[string]any{
+			"id":    "mcp_ctx_helper_tab",
+			"label": "__mcp_context_helper__",
+			"nodes": []any{},
+		}
+	)
+	refreshSnapshot := func() []byte {
+		out, _ := json.Marshal(liveFlow)
+		return out
+	}
+	ingestPUT := func(body []byte) {
+		var doc struct {
+			ID    string           `json:"id"`
+			Label string           `json:"label"`
+			Nodes []map[string]any `json:"nodes"`
+		}
+		if err := json.Unmarshal(body, &doc); err != nil {
+			return
+		}
+		liveFlow["id"] = doc.ID
+		liveFlow["label"] = doc.Label
+		liveFlow["nodes"] = doc.Nodes
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			_, _ = w.Write([]byte(fmt.Sprintf(
+				`[{"type":"tab","id":"other","label":"Other","nodes":[]},%s]`,
+				refreshSnapshot(),
+			)))
+		case r.Method == "POST" && r.URL.Path == "/flow":
+			body, _ := io.ReadAll(r.Body)
+			_, _ = w.Write(body)
+		case r.Method == "GET" && r.URL.Path == "/flow/mcp_ctx_helper_tab":
+			_, _ = w.Write(refreshSnapshot())
+		case r.Method == "PUT" && r.URL.Path == "/flow/mcp_ctx_helper_tab":
+			body, _ := io.ReadAll(r.Body)
+			ingestPUT(body)
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/inject/"):
+			postInj++
+			// Every call 404s — both the first and the retry.
+			// The retry must surface the original 404, not loop.
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`Cannot POST /inject/mcp_ctx_helper_inj`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	srv2 := New(c, Options{Version: "test"})
+
+	makeReq := func() mcp.CallToolRequest {
+		return mcp.CallToolRequest{
+			Params: mcp.CallToolParams{Arguments: map[string]any{
+				"scope": "global",
+				"key":   "foo",
+				"value": "42",
+			}},
+		}
+	}
+
+	// First call: 404 + retry + 404. Must surface the error.
+	res, err := srv2.handleSetContext(context.Background(), makeReq())
+	if err != nil {
+		t.Fatalf("handleSetContext returned err=%v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result on persistent 404, got %+v", res)
+	}
+
+	// Second call: helper is already provisioned, so the 404 must
+	// surface WITHOUT a retry (would be a different bug).
+	postInj = 0
+	res, err = srv2.handleSetContext(context.Background(), makeReq())
+	if err != nil {
+		t.Fatalf("handleSetContext returned err=%v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result on 404 with helper already in place, got %+v", res)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if postInj != 1 {
+		t.Errorf("expected NO retry when helper is already provisioned; got %d inject calls (1 expected)", postInj)
+	}
+}
+
 func TestRestoreBackup_ClearsSetContextHelper(t *testing.T) {
 	backupDir := t.TempDir()
 	liveFlow := []byte(`{"id":"runtime_helper_tab","label":"__mcp_context_helper__","nodes":[]}`)
