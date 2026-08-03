@@ -143,7 +143,14 @@ func runUpdate(args []string) error {
 // `package.json` neighbour wins over the docker check, so a developer
 // running the binary inside a node-style install but with /.dockerenv
 // still gets the npm path.
-func detectChannel() updateChannel {
+//
+// detectChannel is a package-level variable (not a function) so tests
+// can swap the implementation. Production callers go through the
+// function-form detectChannelImpl so the call site reads the same as
+// a free function.
+var detectChannel = detectChannelImpl
+
+func detectChannelImpl() updateChannel {
 	if _, err := os.Stat("/.dockerenv"); err == nil {
 		return channelDocker
 	}
