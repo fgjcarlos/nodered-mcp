@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -179,6 +180,9 @@ func TestExecutablePath_FallsBackWhenExecutableMissing(t *testing.T) {
 }
 
 func TestExecutablePath_PrefersSymlinkTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Readlink / symlink semantics differ on Windows")
+	}
 	// Build a real symlink in t.TempDir() that points at a dummy
 	// target, and verify executablePath would prefer the symlink
 	// path. We can't change what os.Executable returns, so instead
