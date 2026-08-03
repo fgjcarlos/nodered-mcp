@@ -18,19 +18,19 @@ discrepen, manda esta.
 | Capa | Estado |
 |---|---|
 | `internal/nodered` (cliente HTTP) | Completo: flows, edición granular, palette, settings, contexto, diagnóstico, backups, diff, tail |
-| `internal/mcp` (server) | 37 tools, 3 resources, 2 prompts |
+| `internal/mcp` (server) | 43 tools, 3 resources, 2 prompts |
 | `internal/config` | 13 env vars + flags + validación |
 | `internal/oauth` | Resource server OAuth 2.1 / OIDC con JWKS discovery |
 | Modelo de datos | Resuelto: JSON opaco, sin pérdida de campos (ver §2) |
 | Backup antes de escribir | Implementado y fail-closed (ver §3) |
 | Transportes | stdio + streamable HTTP; bearer u OAuth |
-| Modo de solo lectura | `--read-only` / `MCP_READ_ONLY`: 14 tools, ninguna de escritura |
+| Modo de solo lectura | `--read-only` / `MCP_READ_ONLY`: 20 tools de lectura, ninguna de escritura |
 | Stream de debug | WebSocket `/comms` con buffer acotado y reconexión |
 | CI | `.github/workflows/ci.yml`: formato, vet, tests en 3 SO, race, build cruzado |
 | Releases | Tag-triggered en `.github/workflows/release.yml`; npm wrapper en `@fgjcarlos/nodered-mcp`; imagen GHCR |
 
-37 tools, 3 resources, 2 prompts. La división `read` / `write` se aplica en el
-*registro* de tools, no dentro de cada handler: las 19 que modifican no llegan
+43 tools, 3 resources, 2 prompts. La división `read` / `write` se aplica en el
+*registro* de tools, no dentro de cada handler: las 23 que modifican no llegan
 a anunciarse en `--read-only`, de modo que un modelo no puede invocar lo que
 no ve. `inject_node` cuenta como modificadora — disparar un inject puede
 mandar una orden a un dispositivo real.
@@ -152,7 +152,7 @@ nodered-mcp/
 │   │   └── types.go      # tipos mínimos + RawFlow
 │   ├── mcp/
 │   │   ├── server.go     # stdio + streamable HTTP transports
-│   │   ├── tools.go      # registra las 37 tools
+│   │   ├── tools.go      # registra las 43 tools
 │   │   ├── resources.go  # 3 resources
 │   │   ├── prompts.go    # 2 prompts
 │   │   └── httpauth.go   # bearer + OAuth middleware
@@ -186,14 +186,14 @@ Sin frameworks, sin ORMs, sin cliente Node-RED de terceros.
 
 ---
 
-## 5. Catálogo de tools (37)
+## 5. Catálogo de tools (43 — entradas parciales; ver #152)
 
 Marcadas por riesgo. `read` = sin efectos · `write` = muta config (backup
 previo) · `action` = efecto en runtime no persistido. En el código, las
 `action` también se registran como `addWriteTool` para que `--read-only` las
 oculte.
 
-Las 18 marcadas `read` son las únicas que se registran con `--read-only`.
+Las 20 marcadas `read` son las únicas que se registran con `--read-only`.
 
 ### Flows
 
@@ -275,7 +275,7 @@ por dependencia y por valor, no por tamaño.
 | **6** | Bearer auth en el transporte HTTP | ✅ Completada |
 | **6.b** | OAuth 2.1 para conectores web | ✅ Completada — `internal/oauth/` |
 
-Tras la fase 6: **37 tools** (18 en modo de solo lectura), 3 resources, 2
+Tras la fase 6: **43 tools** (20 en modo de solo lectura), 3 resources, 2
 prompts.
 
 ### Detalle de lo entregado
@@ -373,7 +373,7 @@ Fuera de etapa, por necesidad detectada durante el trabajo:
 | `MCP_TRANSPORT` | `stdio` | `--transport` | `stdio` o `http` |
 | `MCP_HTTP_ADDR` | `:8090` | `--http-addr` | Dirección de escucha del transporte http |
 | `MCP_HTTP_TOKEN` | *(vacío)* | `--http-token` | Bearer token del transporte http. **Obligatorio** si la dirección no es loopback |
-| `MCP_READ_ONLY` | `false` | `--read-only` | Registrar solo las 14 tools sin efectos secundarios |
+| `MCP_READ_ONLY` | `false` | `--read-only` | Registrar solo las 20 tools de lectura, ninguna de escritura |
 | `MCP_DEBUG_STREAM` | `false` | `--debug-stream` | Abrir el WebSocket de `/comms` al arrancar para activar el stream de debug. **Desactivado por defecto** porque algunas versiones de Node-RED crashean durante el handshake (#17). Tras activarlo, `get_debug_messages` necesita ~3s para empezar a recibir mensajes |
 | `MCP_OAUTH_ISSUER` | *(vacío)* | `--oauth-issuer` | Habilita OAuth 2.1 / OIDC en el transporte HTTP |
 | `MCP_OAUTH_AUDIENCE` | *(vacío)* | `--oauth-aud` | Audience claim obligatorio cuando hay issuer |
@@ -437,15 +437,15 @@ afirmación de las anteriores en una tarde.
 
 ### Una línea
 
-37 tools, 3 resources, 2 prompts, ~120 tests, dos transportes, OAuth 2.1
+43 tools, 3 resources, 2 prompts, 517 tests, dos transportes, OAuth 2.1
 opcional. El plan técnico está terminado.
 
 ### Cómo verificar la lista de tools
 
 ```bash
 grep -oE 'mcp\.NewTool\("[a-z_]+"' internal/mcp/tools.go | sed 's/.*"//;s/"//' | sort -u
-grep -c 'addReadTool('  internal/mcp/tools.go    # -> 14
-grep -c 'addWriteTool(' internal/mcp/tools.go    # -> 15
+grep -c 'addReadTool('  internal/mcp/tools.go    # -> 20
+grep -c 'addWriteTool(' internal/mcp/tools.go    # -> 23
 ```
 
 ### Cómo verificar el árbol de fuentes
