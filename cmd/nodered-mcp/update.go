@@ -98,7 +98,7 @@ func runUpdate(args []string) error {
 	case channelBinary:
 		fmt.Fprintln(os.Stderr, "Detected a standalone binary install. Re-run the install script from the README")
 		fmt.Fprintln(os.Stderr, "to upgrade:")
-		fmt.Fprintln(os.Stderr, "  curl -sSL https://raw.githubusercontent.com/fgjcarlos/nodered-mcp/main/install.sh | sh")
+		fmt.Fprintln(os.Stderr, "  curl -sSL https://raw.githubusercontent.com/fgjcarlos/nodered-mcp/main/scripts/install.sh | sh")
 		return nil
 	}
 
