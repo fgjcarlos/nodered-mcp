@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -184,6 +185,36 @@ func TestConfirm_YesLong(t *testing.T) {
 	if !confirm(strings.NewReader("yes\n"), io.Discard) {
 		t.Error("expected 'yes' to confirm")
 	}
+}
+
+// TestConfirm_FailClosedOnReadError is the regression guard for issue
+// #71: a closed stdin, EOF, or scanner failure must NOT launch npm.
+// Before the fix, fmt.Fscan returned err but it was discarded, leaving
+// `line` as the empty string — which the no-match branch already
+// handled by accident. The test pins the contract explicitly so the
+// behaviour cannot drift back to "ignore scan errors".
+func TestConfirm_FailClosedOnReadError(t *testing.T) {
+	cases := []struct {
+		name string
+		r    io.Reader
+	}{
+		{"closed reader returns EOF", strings.NewReader("")},
+		{"broken reader", errReader{}},
+		{"empty input", strings.NewReader("")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if confirm(tc.r, io.Discard) {
+				t.Errorf("expected confirm to return false on %s", tc.name)
+			}
+		})
+	}
+}
+
+type errReader struct{}
+
+func (errReader) Read(_ []byte) (int, error) {
+	return 0, fmt.Errorf("simulated read failure")
 }
 
 // withUpdateStubs swaps the package-level seams for the duration of t and
