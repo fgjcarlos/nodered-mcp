@@ -27,6 +27,10 @@ if (!fs.existsSync(real)) {
   console.error('nodered-mcp: binary not found.');
   console.error('The postinstall download may have failed. Try:');
   console.error('  npm install -g --force @fgjcarlos/nodered-mcp');
+  if (process.platform === 'win32') {
+    console.error('Windows is not published on the npm channel; use the install script instead:');
+    console.error('  irm https://raw.githubusercontent.com/fgjcarlos/nodered-mcp/main/scripts/install.ps1 | iex');
+  }
   process.exit(1);
 }
 
