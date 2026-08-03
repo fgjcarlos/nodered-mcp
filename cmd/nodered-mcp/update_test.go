@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -384,23 +385,63 @@ func TestRealExecer_Run(t *testing.T) {
 // TestRunUpdate_DockerChannel confirms the docker early-return path
 // prints the pull hint and exits nil without touching npm.
 func TestRunUpdate_DockerChannel(t *testing.T) {
-	orig := detectChannel
-	detectChannel = func() updateChannel { return channelDocker }
-	t.Cleanup(func() { detectChannel = orig })
+	out := captureStderr(t, func() {
+		orig := detectChannel
+		detectChannel = func() updateChannel { return channelDocker }
+		t.Cleanup(func() { detectChannel = orig })
 
-	if err := runUpdate(nil); err != nil {
-		t.Errorf("runUpdate should return nil on docker channel; got %v", err)
+		if err := runUpdate(nil); err != nil {
+			t.Errorf("runUpdate should return nil on docker channel; got %v", err)
+		}
+	})
+	if !strings.Contains(out, "docker pull ghcr.io/fgjcarlos/nodered-mcp:latest") {
+		t.Errorf("docker channel hint missing pull command; got:\n%s", out)
 	}
 }
 
 // TestRunUpdate_BinaryChannel confirms the standalone-binary early-return
 // path prints the install.sh hint and exits nil without touching npm.
+//
+// Regression for issue #141: the printed URL used to be
+// `.../main/install.sh`, which 404s — the script lives under `scripts/`.
+// If this assertion breaks, the URL in update.go:101 has drifted from
+// `scripts/install.sh` again.
 func TestRunUpdate_BinaryChannel(t *testing.T) {
-	orig := detectChannel
-	detectChannel = func() updateChannel { return channelBinary }
-	t.Cleanup(func() { detectChannel = orig })
+	out := captureStderr(t, func() {
+		orig := detectChannel
+		detectChannel = func() updateChannel { return channelBinary }
+		t.Cleanup(func() { detectChannel = orig })
 
-	if err := runUpdate(nil); err != nil {
-		t.Errorf("runUpdate should return nil on binary channel; got %v", err)
+		if err := runUpdate(nil); err != nil {
+			t.Errorf("runUpdate should return nil on binary channel; got %v", err)
+		}
+	})
+	want := "https://raw.githubusercontent.com/fgjcarlos/nodered-mcp/main/scripts/install.sh"
+	if !strings.Contains(out, want) {
+		t.Errorf("binary channel hint missing %q; got:\n%s", want, out)
 	}
+}
+
+// captureStderr swaps os.Stderr for a buffer for the duration of fn,
+// restoring it on return. Returns whatever the wrapped code wrote.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stderr = w
+	t.Cleanup(func() { os.Stderr = orig })
+
+	done := make(chan string, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+		done <- buf.String()
+	}()
+
+	fn()
+	_ = w.Close()
+	return <-done
 }
