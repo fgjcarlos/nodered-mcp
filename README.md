@@ -84,7 +84,7 @@ A Spanish version of this document is available at [`README.es.md`](./README.es.
 | `list_plugins` | `GET /plugins` | read | Editor plugins loaded by the runtime |
 | `get_node_status` | `/comms` WebSocket | read | Live node status events (offline, disconnect, connected) streamed from the runtime |
 | `get_runtime_logs` | journal / stream | read | Recent Node-RED runtime logs: stdout, stderr, and the editor's own log surface |
-| `set_flows_state` | `POST /flows/state` | write | Start or stop the runtime (requires `runtimeState.enabled` in Node-RED settings) |
+| `set_flows_state` | `POST /flows/state` | write | Start or stop the runtime (requires `runtimeState.enabled` in Node-RED settings). See also: `MCP_DEBUG_STREAM` (MCP env var) — gates a different surface, see Troubleshooting. |
 | `list_backups` | local | read | Saved flow snapshots, newest first |
 | `diff_flows` | local + `GET /flows` | read | What changed between a snapshot and now |
 | `restore_backup` | `POST /flows` | write | Roll the entire configuration back to a snapshot |
@@ -318,7 +318,7 @@ Every setting can be supplied as an environment variable or a command-line flag.
 | `NODERED_INSECURE` | — | `false` | Skip TLS verification. Development only |
 | `NODERED_BACKUP_DIR` | — | `backups` | Where flow snapshots are written before each write |
 | `MCP_READ_ONLY` | `--read-only` | `false` | Expose only tools that cannot modify Node-RED |
-| `MCP_DEBUG_STREAM` | `--debug-stream` | `false` | Open the `/comms` WebSocket at startup to enable debug streaming. **Off by default** because some Node-RED versions crash during the handshake. After enabling it, give `get_debug_messages` ~3 seconds to receive — the WebSocket is dialled at startup and the runtime publishes nothing until the editor-side filter is wired up. If the call still reports "still connecting", set `MCP_LOG_LEVEL=debug` and look for a `/comms` dial error in the server logs. |
+| `MCP_DEBUG_STREAM` | `--debug-stream` | `false` | Open the `/comms` WebSocket at startup to enable debug streaming. **Off by default** because some Node-RED versions crash during the handshake. After enabling it, give `get_debug_messages` ~3 seconds to receive — the WebSocket is dialled at startup and the runtime publishes nothing until the editor-side filter is wired up. If the call still reports "still connecting", set `MCP_LOG_LEVEL=debug` and look for a `/comms` dial error in the server logs. See also: `runtimeState.enabled` in Node-RED settings — gates `get_flows_state` / `set_flows_state`, a different surface. |
 | `MCP_TRANSPORT` | `--transport` | `stdio` | `stdio` or `http` |
 | `MCP_HTTP_ADDR` | `--http-addr` | `:8090` | Listen address for the HTTP transport |
 | `MCP_HTTP_TOKEN` | `--http-token` | — | Bearer token for the HTTP transport. Required unless bound to loopback |
@@ -601,6 +601,13 @@ Node-RED's admin API never returns credential values in flow responses. Fields t
 **HTTP transport does not connect.** Confirm `--transport http` is set and that the `--http-addr` port is free.
 
 **A write is refused with a backup error.** Backups are fail-closed by design: if the snapshot cannot be written, the write does not proceed. Check that `NODERED_BACKUP_DIR` exists and is writable.
+
+**`get_flows_state` says runtimeState is disabled; `get_node_status` says stream unavailable.** These are two different flags on two different sides of the wire:
+
+- `runtimeState.enabled` is a **Node-RED** setting (`settings.js`). It gates `GET/POST /flows/state`, used by `get_flows_state` and `set_flows_state`. Enable it in `settings.js` (`runtimeState: { enabled: true, ui: false }`) and restart Node-RED.
+- `MCP_DEBUG_STREAM` is an **MCP** env var. It gates the `/comms` WebSocket used by `get_node_status` and `get_debug_messages`. Enable it on the MCP process (`MCP_DEBUG_STREAM=on`).
+
+They are independent — neither enables the other. A single misconfigured flag can hide one tool surface while the other works fine.
 
 ## Architecture
 
