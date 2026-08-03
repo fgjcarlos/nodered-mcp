@@ -40,7 +40,16 @@ func knownClients() []mcpClient {
 	}
 }
 
-func detectClients(all bool) []mcpClient {
+// detectClients returns the list of known clients whose `probe` path
+// exists in the user's filesystem, or every known client if all is
+// true (the --all flag).
+//
+// detectClients is a package-level var so tests can swap the
+// implementation. The production function is detectClientsImpl; the
+// test file already references the var name.
+var detectClients = detectClientsImpl
+
+func detectClientsImpl(all bool) []mcpClient {
 	var out []mcpClient
 	for _, c := range knownClients() {
 		if all {
