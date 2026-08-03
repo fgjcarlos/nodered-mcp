@@ -119,45 +119,7 @@ func ValidateFlow(flow RawFlow) []FlowIssue {
 	for id := range seen {
 		ids[id] = true
 	}
-	for _, collection := range [][]map[string]json.RawMessage{doc.Nodes, doc.Configs} {
-		for _, node := range collection {
-			rawWires, ok := node["wires"]
-			if !ok {
-				continue
-			}
-			wires, err := decodeWires(node)
-			if err != nil {
-				// decodeWires refused the shape (e.g. wires is a JSON
-				// string instead of an array of arrays). Surfacing the
-				// problem here is the whole point of validate_flow:
-				// the previous behaviour was a silent `continue`, which
-				// let the corrupted node be written and broke every
-				// later edit.
-				issues = append(issues, FlowIssue{
-					Kind:    IssueInvalidWires,
-					NodeID:  nodeID(node),
-					Message: invalidWiresMessage(nodeID(node), rawWires),
-				})
-				continue
-			}
-			if wires == nil {
-				continue
-			}
-			src := nodeID(node)
-			for port, targets := range wires {
-				for _, tgt := range targets {
-					if !ids[tgt] {
-						issues = append(issues, FlowIssue{
-							Kind:    IssueDanglingWire,
-							NodeID:  src,
-							Target:  tgt,
-							Message: wireDanglingMessage(src, port, tgt),
-						})
-					}
-				}
-			}
-		}
-	}
+	issues = append(issues, validateWires(doc.Nodes, doc.Configs, ids)...)
 
 	if issues == nil {
 		issues = []FlowIssue{}
@@ -202,6 +164,56 @@ func wireDanglingMessage(src string, port int, tgt string) string {
 		return "a wire on port " + strconv.Itoa(port) + " targets unknown node \"" + tgt + "\""
 	}
 	return "node \"" + src + "\" wires port " + strconv.Itoa(port) + " to unknown node \"" + tgt + "\"; Node-RED accepts dangling wires silently and the flow never delivers to that endpoint"
+}
+
+// validateWires walks every node in nodes+configs, reports wires whose
+// shape decodeWires rejects (IssueInvalidWires) and wires that point at
+// ids absent from the union of both collections (IssueDanglingWire).
+// Returns the list of issues; never nil. Extracted from ValidateFlow
+// so each function stays under the complexity-15 threshold (issue #73).
+func validateWires(nodes, configs []map[string]json.RawMessage, ids map[string]bool) []FlowIssue {
+	var issues []FlowIssue
+	for _, collection := range [][]map[string]json.RawMessage{nodes, configs} {
+		for _, node := range collection {
+			rawWires, ok := node["wires"]
+			if !ok {
+				continue
+			}
+			wires, err := decodeWires(node)
+			if err != nil {
+				// decodeWires refused the shape (e.g. wires is a JSON
+				// string instead of an array of arrays). Surfacing the
+				// problem here is the whole point of validate_flow:
+				// the previous behaviour was a silent `continue`, which
+				// let the corrupted node be written and broke every
+				// later edit.
+				id := nodeID(node)
+				issues = append(issues, FlowIssue{
+					Kind:    IssueInvalidWires,
+					NodeID:  id,
+					Message: invalidWiresMessage(id, rawWires),
+				})
+				continue
+			}
+			if wires == nil {
+				continue
+			}
+			src := nodeID(node)
+			for port, targets := range wires {
+				for _, tgt := range targets {
+					if !ids[tgt] {
+						issues = append(issues, FlowIssue{
+							Kind:    IssueDanglingWire,
+							NodeID:  src,
+							Target:  tgt,
+							Message: wireDanglingMessage(src, port, tgt),
+						})
+					}
+				}
+			}
+		}
+	}
+	return issues
 }
 
 // checkZRef returns an IssueBadZ if node's z field references neither the
