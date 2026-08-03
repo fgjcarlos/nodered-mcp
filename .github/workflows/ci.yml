@@ -32,6 +32,23 @@ jobs:
             exit 1
           fi
 
+      # .gitattributes pins text sources to LF (issue #67); this gate prevents
+      # new CRLF noise from sneaking in via copy-paste or Windows checkouts.
+      - name: no CRLF in text sources
+        run: |
+          # Windows runners use \r\n in checkout by default, so only enforce on
+          # Linux/macOS where the working tree is owned by .gitattributes.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            echo "Skipping CRLF check on Windows (core.autocrlf may rewrite)."
+            exit 0
+          fi
+          crlf=$(git grep -nIE $'\r' -- '*.go' '*.sh' '*.yaml' '*.yml' '*.json' '*.md' '*.ps1' '*.js' '*.toml' 'go.mod' 'go.sum' ':!.gitattributes' || true)
+          if [ -n "$crlf" ]; then
+            echo "These files contain CRLF line endings:"
+            echo "$crlf"
+            exit 1
+          fi
+
       - name: go vet
         run: go vet ./...
 
