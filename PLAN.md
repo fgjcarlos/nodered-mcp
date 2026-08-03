@@ -186,7 +186,7 @@ Sin frameworks, sin ORMs, sin cliente Node-RED de terceros.
 
 ---
 
-## 5. Catálogo de tools (43 — entradas parciales; ver #152)
+## 5. Catálogo de tools (43)
 
 Marcadas por riesgo. `read` = sin efectos · `write` = muta config (backup
 previo) · `action` = efecto en runtime no persistido. En el código, las
@@ -214,6 +214,19 @@ Las 20 marcadas `read` son las únicas que se registran con `--read-only`.
 | `disable_flow` | `PUT /flow/:id` | write | ✅ (#53) |
 | `enable_flow` | `PUT /flow/:id` | write | ✅ (#53) |
 | `inject_node` | `POST /inject/:id` | action | ✅ excluida de `--read-only`; payload opcional (#54) |
+| `import_flow` | `POST /flow` | write | ✅ un solo tab por llamada; mismo formato que el clipboard del editor |
+| `export_flow` | `GET /flow/:id` | read | ✅ mismo formato que el clipboard del editor |
+
+### Subflows
+
+| Tool | HTTP | Tipo | Estado |
+|---|---|---|---|
+| `list_subflows` | `GET /flow/global` | read | ✅ filtro en cliente; el admin API expone un array en `subflows` |
+| `get_subflow` | `GET /flow/global` | read | ✅ id ausente → `*APIError(404)` |
+| `create_subflow` | `PUT /flow/global` | write | ✅ id duplicado → error, no silencioso |
+| `update_subflow` | `PUT /flow/global` | write | ✅ id del path debe coincidir con el body |
+| `delete_subflow` | `PUT /flow/global` | write | ✅ no comprueba instancias en uso; mismo comportamiento que el editor |
+| `instantiate_subflow` | `PUT /flow/:id` | write | ✅ el `type` se sobreescribe a `subflow:<id>` para evitar typos |
 
 ### Palette
 
@@ -236,8 +249,11 @@ Las 20 marcadas `read` son las únicas que se registran con `--read-only`.
 | `get_flows_state` | `GET /flows/state` | read | ✅ |
 | `get_context` | `GET /context/...` | read | ✅ editor-api, sin contrato de estabilidad |
 | `get_debug_messages` | WebSocket `/comms` | read | ✅ buffer de 500, reconexión |
+| `get_node_status` | WebSocket `/comms` | read | ✅ mismo transporte que `get_debug_messages`; requiere `MCP_DEBUG_STREAM` |
+| `get_runtime_logs` | `GET /logs` | read | ✅ 404 esperado en stock 5.x; el handler apunta al archivo |
 | `list_plugins` | `GET /plugins` | read | ✅ editor-api |
 | `set_flows_state` | `POST /flows/state` | write | ✅ |
+| `set_context` | helper flow inject | write | ✅ helper instalado perezosamente; retry en 404 transitorio (#158) |
 | `list_backups` | local | read | ✅ |
 | `diff_flows` | local + `GET /flows` | read | ✅ |
 | `restore_backup` | `POST /flows` | write | ✅ |
