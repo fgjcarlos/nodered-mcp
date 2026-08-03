@@ -115,3 +115,22 @@ type you want blocked, including `exec` and `system`, in one value.
 Open a private security advisory on GitHub (or contact the
 maintainers directly through the channels listed in `README.md`).
 Please do not open a public issue for suspected vulnerabilities.
+
+### Supported versions
+
+Security fixes are backported to the most recent **minor** release
+line (for example, if the latest release is `v0.7.x`, fixes land
+there and are also backported to `v0.6.x` if it is still receiving
+maintenance). Earlier versions are not patched; please upgrade.
+
+### Response expectations
+
+- **Initial acknowledgement**: within 5 business days of the report.
+- **Triage outcome** (accepted / declined / needs-more-info): within
+  10 business days of the initial acknowledgement.
+- **Fix timeline**: agreed with the reporter after triage. Critical
+  RCE-class issues are prioritised.
+
+Coordinated disclosure is appreciated: please give the maintainers
+a reasonable window (typically up to 90 days) before publishing
+exploitable details so users have time to upgrade.

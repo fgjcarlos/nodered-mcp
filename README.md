@@ -645,6 +645,12 @@ Then ask your client to list the Node-RED flows.
 
 Work items are tracked in [`issues/`](./issues/README.md) until the repository moves to GitHub Issues. Design rationale lives in [`PLAN.md`](./PLAN.md).
 
+## Security
+
+See [`SECURITY.md`](./SECURITY.md) for the threat model, the
+`MCP_NODE_DENYLIST` / `MCP_READ_ONLY` / `MCP_HTTP_TOKEN` knobs, and
+how to report a vulnerability.
+
 ## Roadmap
 
 | Version | Scope | Status |

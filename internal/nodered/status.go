@@ -530,7 +530,7 @@ func pickIDs(nodes []map[string]any) []string {
 var ErrStatusStreamUnavailable = errors.New(
 	"node status stream is not available: the /comms WebSocket is " +
 		"not connected. Set MCP_DEBUG_STREAM=on to enable it (and " +
-		"restart the MCP if the flag was not set at start-up).",
+		"restart the MCP if the flag was not set at start-up)",
 )
 
 // urlError exists so an external caller (mcp package) can

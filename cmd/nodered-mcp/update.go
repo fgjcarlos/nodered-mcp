@@ -46,6 +46,13 @@ type execer interface {
 type realExecer struct{}
 
 func (realExecer) Run(ctx context.Context, name string, args ...string) error {
+	// Trust boundary: `nodered-mcp update` shells out to npm with a
+	// pinned, fixed argv to upgrade the package the binary itself is
+	// shipped through. There is no operator-supplied data on the
+	// command line — argv is the literal `npm install -g
+	// @fgjcarlos/nodered-mcp@latest` constructed in runUpdate. This
+	// is the documented update channel (see cmd/nodered-mcp/update.go
+	// and SECURITY.md).
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -211,11 +218,16 @@ func fetchLatestNPMVersion() (string, error) {
 }
 
 // confirm reads a single line from r and prints the prompt to w. Empty
-// answer or anything starting with "n" or "N" is treated as no.
+// answer or anything starting with "n" or "N" is treated as no. A read
+// failure (EOF, closed stdin, scanner error) is also treated as no so
+// that npm is never launched without an explicit operator "y".
 func confirm(r io.Reader, w io.Writer) bool {
 	fmt.Fprint(w, "Run `npm install -g @fgjcarlos/nodered-mcp@latest`? [y/N] ")
 	var line string
-	fmt.Fscan(r, &line)
+	if _, err := fmt.Fscan(r, &line); err != nil {
+		// EOF, closed pipe, or scanner failure: stay fail-closed.
+		return false
+	}
 	line = strings.TrimSpace(strings.ToLower(line))
 	return line == "y" || line == "yes"
 }
