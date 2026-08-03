@@ -66,6 +66,14 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # Coverage ratchet (issue #69): aggregate statement coverage across
+      # every production package and fail if it drops below the pinned
+      # baseline. The baseline lives at scripts/coverage-baseline.txt so
+      # bumping it is a deliberate commit (run scripts/coverage-ratchet.sh
+      # --write locally).
+      - name: coverage ratchet
+        run: bash scripts/coverage-ratchet.sh
+
   # nodered-mcp ships for Linux, macOS and Windows, and it does real work with
   # OS-specific paths (backup directories, per-client config locations in the
   # init command). Testing on one platform would not cover that.
