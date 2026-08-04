@@ -32,8 +32,10 @@ const REPO = 'fgjcarlos/nodered-mcp';
 //   nodered-mcp_windows_amd64.zip
 //   nodered-mcp_windows_arm64.zip
 //
-// We only support the .tar.gz trio from npm. Windows users get a clear
-// error directing them at the install scripts in the README.
+// We only support the .tar.gz trio from npm. The package.json `os`
+// field makes npm abort the install with EBADPLATFORM on Windows
+// before this script runs, so the unsupported branch below is a
+// defense-in-depth assert and not a user-facing message.
 function assetName() {
   const map = {
     'linux-x64':    'nodered-mcp_linux_amd64.tar.gz',
@@ -44,13 +46,7 @@ function assetName() {
   const key = `${process.platform}-${process.arch}`;
   const name = map[key];
   if (!name) {
-    console.error(`@fgjcarlos/nodered-mcp: no binary published for ${key}.`);
-    console.error('On Windows, use the install script from the README:');
-    console.error('  irm https://raw.githubusercontent.com/' + REPO +
-                  '/main/scripts/install.ps1 | iex');
-    console.error('To remove the broken launcher left in PATH after this failure:');
-    console.error('  npm uninstall -g @fgjcarlos/nodered-mcp');
-    process.exit(1);
+    throw new Error(`@fgjcarlos/nodered-mcp: no binary published for ${key}`);
   }
   return name;
 }
