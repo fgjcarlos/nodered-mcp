@@ -17,7 +17,7 @@
     "nodered-mcp": "bin/nodered-mcp.js"
   },
   "scripts": {
-    "postinstall": "node bin/install.js"
+    "postinstall": "node bin/install-impl.js"
   },
   "files": [
     "bin/",
