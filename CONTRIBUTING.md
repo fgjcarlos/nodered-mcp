@@ -14,7 +14,7 @@ can scan the queue:
 
 - `feat:` — new tool, new CLI subcommand, new install channel.
 - `fix:` — wrong behaviour you reproduced.
-- `docs:` — README, README.es, PLAN, or examples drift.
+- `docs:` — README, README.es, or examples drift.
 - `chore:` — tooling, CI, deps.
 
 The body should answer three questions:
@@ -75,10 +75,35 @@ regress the read/write counts already documented there.
 Run `go test ./internal/mcp/ -run TestFull` to verify the total tool count and
 `go test ./internal/mcp/ -run TestReadOnly` to verify the read-only subset.
 
-When adding or removing tools, update the counts in `README.md` and `README.es.md`
-to match. The constants `totalTools` and the `readOnlyTools` slice in
-`internal/mcp/tools_test.go` are the source of truth; the README tables must
-mirror them.
+When adding or removing tools, update the catalog in [`docs/tools.md`](./docs/tools.md).
+The constants `totalTools` and the `readOnlyTools` slice in
+`internal/mcp/tools_test.go` are the source of truth; `docs/tools.md` mirrors them.
+The CI gate enforces this parity via `TestReadmeSyncWithRegistry`.
+
+## Translation policy
+
+The repository ships two README files:
+
+- `README.md` — the source of truth, English, short (~80 lines).
+- `README.es.md` — a Spanish translation of the same short content.
+
+The two are kept in lock-step. When you edit `README.md`, update
+`README.es.md` in the same commit. The PR body should mention both.
+
+What does **not** get translated:
+
+- Files under `docs/` — these are reference material, not the entry
+  point. Translating them creates a 2× maintenance burden and the
+  translations drift as the source evolves. A visitor who needs
+  Spanish reference material can use a translation tool against the
+  English source; we do not maintain the translations.
+- Code, comments, CLI flags, env-var names — already English by
+  convention.
+- GitHub issue and PR bodies — also English, unless the reporter
+  writes in Spanish first.
+
+If a Spanish contributor opens an issue or a comment in Spanish,
+reply in Spanish. Do not demand they switch to English.
 
 ## Release process
 
@@ -116,10 +141,6 @@ closed. Reopen it once there is new context.
 
 ## What the maintainer will not do
 
-- Accept a PR that edits `README.md` and `README.es.md` together.
-  The English version is the source of truth; the Spanish version is
-  a translation. They almost always need to land in separate commits
-  so the reviewer can see both.
 - Accept a PR that bundles multiple unrelated issues. One issue, one
   branch, one PR. If you have two findings, open two pull requests.
 - Accept a PR that introduces a new dependency without justifying it
