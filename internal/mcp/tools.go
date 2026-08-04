@@ -778,4 +778,28 @@ func (s *Server) registerTools() {
 			mcp.Description("Maximum hits to return (1-50, default 10).")),
 	)
 	s.addReadTool(searchNodes, s.handleSearchNodes)
+
+	// ---- get_runtime_info ---------------------------------------------
+	// Companion to get_diagnostics: that tool returns Node-RED's own
+	// runtime report (memory, OS, runtime state); this one answers
+	// "what can this MCP actually do here?" by combining the
+	// detected NR version, the runtime-state gate, and the debug
+	// stream flag into a per-tool capability matrix. Read-only.
+	runtimeInfo := mcp.NewTool("get_runtime_info",
+		mcp.WithDescription(
+			"Report the MCP server's view of the connected Node-RED "+
+				"runtime: detected Node-RED version, the runtime-state "+
+				"gate, the debug-stream setting, and a per-tool capability "+
+				"matrix classifying each registered tool as ok, "+
+				"version_too_low, endpoint_not_mounted, setting_disabled, "+
+				"stream_disabled, or unknown.\n\n"+
+				"This is the single tool to call when an LLM session starts "+
+				"on an unfamiliar runtime: it tells the model which tools "+
+				"will work and which will fail before the first call is made. "+
+				"\n\n"+
+				"Companion to get_diagnostics (which returns Node-RED's own "+
+				"report); this tool returns the MCP server's report. Read-only.",
+		),
+	)
+	s.addReadTool(runtimeInfo, s.handleGetRuntimeInfo)
 }

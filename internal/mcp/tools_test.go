@@ -40,6 +40,7 @@ var readOnlyTools = []string{
 	"diff_flows",
 	"export_flow",
 	"get_runtime_logs",
+	"get_runtime_info",
 	"get_node_status",
 	"validate_flow",
 	"list_subflows",
@@ -49,7 +50,7 @@ var readOnlyTools = []string{
 // totalTools is the full-mode count: every read tool plus every mutating one.
 // Includes the validate_flow read tool (#56 batch) plus the six subflow tools
 // (list_subflows + get_subflow as reads, the rest as mutating).
-const totalTools = 43
+const totalTools = 44
 
 func newTestServer(t *testing.T, readOnly bool) *Server {
 	t.Helper()

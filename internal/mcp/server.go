@@ -35,6 +35,11 @@ import (
 type Server struct {
 	mcpServer *server.MCPServer
 	nrClient  *nodered.Client
+	// version is what the server reports during the MCP handshake
+	// (carried through NewMCPServer's name+version arguments). Stored
+	// here so handlers — get_runtime_info in particular — can include
+	// it in their JSON output without re-deriving from build flags.
+	version string
 	// opts preserves the knobs that have to survive New() and surface again
 	// later (runHTTP needs HTTPMaxBody to wrap the mux). Storing the whole
 	// struct avoids a long argument list that has to grow with every knob.
@@ -210,6 +215,7 @@ func New(nrClient *nodered.Client, opts Options) *Server {
 
 	srv := &Server{
 		mcpServer:   s,
+		version:     version,
 		nrClient:    nrClient,
 		opts:        opts,
 		readOnly:    opts.ReadOnly,
