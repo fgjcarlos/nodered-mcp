@@ -4,6 +4,13 @@ project_name: nodered-mcp
 
 before:
   hooks:
+    # Keep bin/install.js VERSION in lockstep with the tag. The
+    # npm workflow has a hard gate (npm.yml::verify bin/install.js
+    # VERSION matches the tag) that fails the release if the
+    # constant drifts; a sed in the before hook is the smallest
+    # thing that keeps the constant honest without a manual bump.
+    - cmd: |
+        sed -i.bak -E "s/^(const VERSION = ')[^']+(';)/\1{{ .Version }}\2/" bin/install.js && rm -f bin/install.js.bak
     - go mod tidy
 
 builds:
