@@ -20,6 +20,15 @@ jobs:
         with:
           go-version: stable
 
+      # Install syft for the CycloneDX SBOM step the goreleaser
+      # config requires. Anchored to the SHA per the OpenSSF
+      # Scorecard supply-chain work; bump with the goreleaser image
+      # when syft ships a release that changes the catalog format.
+      - name: Install syft for SBOM
+        uses: anchore/syft-action@1d603b75286fccda31994d00789a3e0d76b08425  # v0.3.0
+        with:
+          syft-version: v1.27.0
+
       - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a  # v6
         with:
           version: "~> v2"
