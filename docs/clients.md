@@ -5,21 +5,9 @@ All examples below use the stdio transport. For HTTP, see the
 
 ## Claude Desktop
 
-**Recommended: the `.mcpb` extension.** A native installer that
-requires no JSON editing. Build the bundle with
-`scripts/build-mcpb.sh`, or download it from Releases once
-published, then open **Settings → Extensions → Install Extension**
-in Claude Desktop and select the `.mcpb` file. Claude Desktop
-presents a form for the Node-RED URL, token, and backup directory.
-The token is stored in the operating system credential store.
-
-```bash
-VERSION=v0.4.0 bash scripts/build-mcpb.sh   # requires go and npx
-```
-
-**Manual alternative.** Edit `claude_desktop_config.json` —
-`%APPDATA%\Claude\` on Windows, `~/Library/Application Support/Claude/`
-on macOS. See [`examples/claude_desktop_config.json`](../examples/claude_desktop_config.json).
+Edit `claude_desktop_config.json` — `%APPDATA%\Claude\` on Windows,
+`~/Library/Application Support/Claude/` on macOS. See
+[`examples/claude_desktop_config.json`](../examples/claude_desktop_config.json).
 
 ```json
 {

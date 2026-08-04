@@ -37,7 +37,7 @@ Local issue tracker. One file per issue. Move to GitHub Issues when the repo goe
 | [302](302-goreleaser-binaries.md) | Prebuilt binaries via GoReleaser | M | ✅ (fires once 301 lands) |
 | [303](303-dockerfile.md) | Dockerfile for HTTP transport | S | ✅ (built + verified, ~18.7 MB) |
 | [304](304-quickstart-rewrite.md) | Rewrite install/Quick Start | S | ✅ |
-| [305](305-mcpb-bundle.md) | Claude Desktop one-click install (.mcpb) | M | ✅ built + validated (3.7 MB bundle) — one-click install needs your Claude Desktop to confirm |
+| [305](305-mcpb-bundle.md) | Claude Desktop one-click install (.mcpb) | M | 🗑️ retired — the project ships three channels (npm, go, docker) and nothing else |
 | [306](306-init-command.md) | `init`: interactive universal config generator | S | ✅ (built + verified; `--write` auto-configures) |
 | [307](307-install-scripts.md) | One-line install scripts (curl/irm) | S | ✅ written (inert until 301) |
 

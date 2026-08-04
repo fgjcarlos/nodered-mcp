@@ -2,7 +2,7 @@
 
 **Labels:** distribution, dx, claude-desktop
 **Milestone:** 4 — Distribution / DX
-**Status:** ✅ built + validated (one-click install still needs a real Claude Desktop to confirm end-to-end)
+**Status:** 🗑️ RETIRED — the bundle was built and validated, then dropped. The project deliberately ships three install channels (npm, go, docker) and no more; a fourth one nobody could download from Releases was documentation debt. `mcpb/manifest.json` and `scripts/build-mcpb.sh` are deleted. The notes below are kept as the record of why the bundle was tried.
 
 ## Context
 

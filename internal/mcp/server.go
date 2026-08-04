@@ -95,8 +95,8 @@ type Server struct {
 // config layer, not here, so tests can opt out explicitly).
 type Options struct {
 	// Version is what the server reports during the MCP handshake.
-	// Callers pass the build-time version (see main.version) so every
-	// surface (binary, server identity, mcpb manifest) stays in sync.
+	// Callers pass the build-time version (see main.version) so the
+	// binary and the server identity stay in sync.
 	Version string
 	// ReadOnly withholds every tool that mutates the Node-RED instance.
 	ReadOnly bool
