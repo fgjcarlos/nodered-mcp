@@ -64,5 +64,10 @@ jobs:
           # difference between 30s and 90s on Go projects.
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # SLSA-build provenance + SBOM (issue #179). Buildx >= 0.11
+          # emits both inline. `mode=max` is set on cache-to above so
+          # the SBOM attestation can be rebuilt on cache hits.
+          provenance: true
+          sbom: true
           build-args: |
             VERSION=${{ github.ref_name }}

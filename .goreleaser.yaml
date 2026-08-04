@@ -36,6 +36,17 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# SBOM (issue #179). CycloneDX is the OpenSSF Scorecard-friendly
+# default; SPDX is the alternative if a downstream consumer asks for
+# it. Attestation (cosign keyless signing) lives behind GoReleaser
+# Pro, so we only emit the SBOM here.
+sboms:
+  - id: default
+    artifacts: binary
+    documents:
+      - cyclonedx
+
+
 changelog:
   sort: asc
   filters:
