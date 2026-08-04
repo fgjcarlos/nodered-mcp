@@ -18,10 +18,6 @@ backups/
 PLAN.md
 issues/
 
-# mcpb bundle build artifacts
-mcpb/server/
-*.mcpb
-
 # Test artifacts
 *.test
 *.out

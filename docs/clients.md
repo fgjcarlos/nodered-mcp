@@ -5,21 +5,9 @@ All examples below use the stdio transport. For HTTP, see the
 
 ## Claude Desktop
 
-**Recommended: the `.mcpb` extension.** A native installer that
-requires no JSON editing. Build the bundle with
-`scripts/build-mcpb.sh`, or download it from Releases once
-published, then open **Settings → Extensions → Install Extension**
-in Claude Desktop and select the `.mcpb` file. Claude Desktop
-presents a form for the Node-RED URL, token, and backup directory.
-The token is stored in the operating system credential store.
-
-```bash
-VERSION=v0.4.0 bash scripts/build-mcpb.sh   # requires go and npx
-```
-
-**Manual alternative.** Edit `claude_desktop_config.json` —
-`%APPDATA%\Claude\` on Windows, `~/Library/Application Support/Claude/`
-on macOS. See [`examples/claude_desktop_config.json`](../examples/claude_desktop_config.json).
+Edit `claude_desktop_config.json` — `%APPDATA%\Claude\` on Windows,
+`~/Library/Application Support/Claude/` on macOS. See
+[`examples/claude_desktop_config.json`](../examples/claude_desktop_config.json).
 
 ```json
 {
@@ -119,7 +107,7 @@ For the HTTP transport variant, use `type: "remote"` with `url` and
 }
 ```
 
-Restart OpenCode after editing. All 43 tools should appear under
+Restart OpenCode after editing. All 44 tools should appear under
 the `nodered` server.
 
 ## Pi (pi-mono)
@@ -160,7 +148,7 @@ idle, which can mask connection issues.
 
 Inside Pi, run `/reload` to pick up the config, then
 `mcp({ connect: "nodered" })` to verify the connection and
-`mcp({ server: "nodered" })` to list the 43 tools.
+`mcp({ server: "nodered" })` to list the 44 tools.
 
 For the HTTP transport variant:
 
@@ -195,4 +183,4 @@ than at a command. In clients that support `url` or `type: http`:
 Drop the `headers` block only if the server is bound to loopback
 and running without a token.
 
-Restart the client after connecting. All 43 tools should appear.
+Restart the client after connecting. All 44 tools should appear.

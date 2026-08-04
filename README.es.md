@@ -46,7 +46,7 @@ Tras instalar, genera el snippet para tu cliente MCP:
 # 2. Generar el snippet para tu cliente MCP
 nodered-mcp init --write
 
-# 3. Reinicia tu cliente MCP; aparecen 43 tools bajo el servidor "nodered"
+# 3. Reinicia tu cliente MCP; aparecen 44 tools bajo el servidor "nodered"
 ```
 
 ¿Problemas? Consulta [`docs/troubleshooting.md`](./docs/troubleshooting.md).
@@ -57,7 +57,7 @@ La referencia completa está en [`docs/`](./docs/):
 | Doc | Cubre |
 |---|---|
 | [`docs/architecture.md`](./docs/architecture.md) | Árbol de fuentes, dependencias, modelo JSON-opaco, backup antes de escribir |
-| [`docs/tools.md`](./docs/tools.md) | Catálogo de las 43 tools MCP (read / write / action) |
+| [`docs/tools.md`](./docs/tools.md) | Catálogo de las 44 tools MCP (read / write / action) |
 | [`docs/configuration.md`](./docs/configuration.md) | Variables de entorno y flags de línea de comandos |
 | [`docs/transports.md`](./docs/transports.md) | Transportes stdio y streamable HTTP, bearer auth, OAuth 2.1 |
 | [`docs/clients.md`](./docs/clients.md) | Snippets de configuración por cliente MCP |
@@ -77,7 +77,7 @@ en marcha exige guardarraíles. Hay tres integrados:
   los destinos colgantes se rechazan en la capa MCP.
 
 Arranca con `--read-only` (o `MCP_READ_ONLY=true`) para anunciar
-solo las 20 tools de lectura y esconder todas las mutantes en el
+solo las 21 tools de lectura y esconder todas las mutantes en el
 registro. `inject_node` también se esconde: disparar un inject puede
 mandar una orden real a un dispositivo real.
 

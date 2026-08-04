@@ -4,14 +4,13 @@ project_name: nodered-mcp
 
 before:
   hooks:
-    # Keep bin/install.js VERSION in lockstep with the tag. The
-    # npm workflow has a hard gate (npm.yml::verify bin/install.js
-    # VERSION matches the tag) that fails the release if the
-    # constant drifts; a sed in the before hook is the smallest
-    # thing that keeps the constant honest without a manual bump.
-    - >-
-      sed -i.bak -E 's/^(const VERSION = ''')[^''']+(''';)/\1{{ .Version }}\2/'
-      bin/install.js && rm -f bin/install.js.bak
+    # Keep this list to plain, shell-free commands: goreleaser splits
+    # each hook with shlex and execs it directly, so `&&`, pipes and
+    # nested quoting do not work here (#218 tried a sed one-liner and
+    # every release died with "invalid command line string"). The
+    # bin/install.js VERSION constant is bumped by hand and guarded by
+    # npm.yml, which checks out its own copy of the source — a sed in
+    # this hook could never have satisfied that gate anyway.
     - go mod tidy
 
 builds:
@@ -48,11 +47,18 @@ checksum:
 # default; SPDX is the alternative if a downstream consumer asks for
 # it. Attestation (cosign keyless signing) lives behind GoReleaser
 # Pro, so we only emit the SBOM here.
+#
+# The format is selected by the `--output` arg, NOT by `documents` —
+# `documents` is only the output filename. Setting it to a bare
+# "cyclonedx" gave all six binaries the same asset name and the
+# release died on the second upload with a 404. Leaving `documents`
+# unset uses goreleaser's per-binary default
+# ({{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}.sbom.json),
+# which is unique by construction.
 sboms:
   - id: default
     artifacts: binary
-    documents:
-      - cyclonedx
+    args: ["$artifact", "--output", "cyclonedx-json=$document"]
 
 
 changelog:

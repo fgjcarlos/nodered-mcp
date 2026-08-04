@@ -25,3 +25,18 @@ go.sum text eol=lf
 
 # Node bin shipped via npm; keep LF so the bin shim does not embed CRLF
 *.js text eol=lf
+
+# Data files the CI gates parse. scripts/complexity-baseline.txt was the one
+# extension this list missed: a Windows checkout rewrote it to CRLF, the CR
+# rode along on the last field, and every arithmetic comparison in
+# complexity-check.sh failed while the script still reported OK.
+*.txt text eol=lf
+
+# Extensionless files. These matched neither this list nor the CI CRLF gate,
+# so all five were committed with CRLF -- including the Dockerfile, where a
+# CR at the end of a RUN line becomes part of the shell command.
+Dockerfile text eol=lf
+LICENSE text eol=lf
+.gitignore text eol=lf
+.dockerignore text eol=lf
+.env.example text eol=lf

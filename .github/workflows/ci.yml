@@ -46,7 +46,7 @@ jobs:
             echo "Skipping CRLF check on Windows (core.autocrlf may rewrite)."
             exit 0
           fi
-          crlf=$(git grep -nIE $'\r' -- '*.go' '*.sh' '*.yaml' '*.yml' '*.json' '*.md' '*.ps1' '*.js' '*.toml' 'go.mod' 'go.sum' ':!.gitattributes' || true)
+          crlf=$(git grep -nIE $'\r' -- '*.go' '*.sh' '*.yaml' '*.yml' '*.json' '*.md' '*.ps1' '*.js' '*.toml' '*.txt' 'go.mod' 'go.sum' 'Dockerfile' 'LICENSE' '.gitignore' '.dockerignore' '.env.example' ':!.gitattributes' || true)
           if [ -n "$crlf" ]; then
             echo "These files contain CRLF line endings:"
             echo "$crlf"
@@ -109,6 +109,28 @@ jobs:
 
       - name: go build
         run: go build ./...
+
+  # The npm wrapper in bin/ has its own guards and nothing was running them.
+  # install_message_test.js is the one that fails when the asset map drifts
+  # away from what goreleaser publishes -- the exact break that stalled the
+  # v0.6.0 release behind a 404. They are plain node scripts with no
+  # dependencies, so there is nothing to install.
+  npm-wrapper:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: 18  # the floor declared in package.json engines
+
+      - name: node bin tests
+        run: |
+          set -euo pipefail
+          for t in bin/*_test.js; do
+            echo "--- $t"
+            node "$t"
+          done
 
   # The race detector needs a working C toolchain, which is only dependable on
   # the Linux runner. Data races are OS-independent anyway — the matrix above
