@@ -3,6 +3,13 @@
 All examples below use the stdio transport. For HTTP, see the
 "HTTP variant" section at the bottom.
 
+`nodered-mcp init` never writes `NODERED_TOKEN` into generated snippets or
+configuration files. Set the token in the client process environment, OS
+keychain, or a secret manager before starting the client. `init --write` only
+succeeds for clients with a supported config target; for other clients it
+prints manual instructions and exits with an error so automation can detect
+that nothing was applied.
+
 ## Claude Desktop
 
 Edit `claude_desktop_config.json` — `%APPDATA%\Claude\` on Windows,
@@ -15,8 +22,7 @@ Edit `claude_desktop_config.json` — `%APPDATA%\Claude\` on Windows,
     "nodered": {
       "command": "nodered-mcp",
       "env": {
-        "NODERED_URL": "http://localhost:1880",
-        "NODERED_TOKEN": "your-token-if-you-have-one"
+        "NODERED_URL": "http://localhost:1880"
       }
     }
   }
@@ -28,7 +34,6 @@ Edit `claude_desktop_config.json` — `%APPDATA%\Claude\` on Windows,
 ```bash
 claude mcp add -s user nodered \
   -e NODERED_URL=http://localhost:1880 \
-  -e NODERED_TOKEN=your-token \
   -- nodered-mcp
 ```
 
@@ -56,8 +61,7 @@ globally. Same shape as the Claude Desktop snippet above. See
     "nodered": {
       "command": "nodered-mcp",
       "env": {
-        "NODERED_URL": "http://localhost:1880",
-        "NODERED_TOKEN": "your-token-if-you-have-one"
+        "NODERED_URL": "http://localhost:1880"
       }
     }
   }
@@ -86,8 +90,7 @@ or `./opencode.json` (project-local). See
       "command": ["nodered-mcp"],
       "enabled": true,
       "environment": {
-        "NODERED_URL": "http://localhost:1880",
-        "NODERED_TOKEN": "your-token-if-you-have-one"
+        "NODERED_URL": "http://localhost:1880"
       }
     }
   }
@@ -137,8 +140,7 @@ Then write `~/.pi/agent/mcp.json` (global) or `./.pi/mcp.json`
     "nodered": {
       "command": "nodered-mcp",
       "env": {
-        "NODERED_URL": "http://localhost:1880",
-        "NODERED_TOKEN": "your-token-if-you-have-one"
+        "NODERED_URL": "http://localhost:1880"
       },
       "lifecycle": "keep-alive"
     }

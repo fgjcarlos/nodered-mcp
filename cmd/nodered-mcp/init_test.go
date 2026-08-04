@@ -73,7 +73,7 @@ func TestMergeServerIntoFile_CreatesMissingFile(t *testing.T) {
 	}
 }
 
-func TestInit_WritesPlaceholderUnderWrite(t *testing.T) {
+func TestInit_WriteOmitsToken(t *testing.T) {
 	dir := t.TempDir()
 	var path string
 	switch runtime.GOOS {
@@ -102,8 +102,8 @@ func TestInit_WritesPlaceholderUnderWrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read written config: %v", err)
 	}
-	if !strings.Contains(string(data), `"NODERED_TOKEN": "<NODERED_TOKEN>"`) {
-		t.Errorf("written config must contain the token placeholder:\n%s", data)
+	if strings.Contains(string(data), `"NODERED_TOKEN"`) {
+		t.Errorf("written config must omit NODERED_TOKEN:\n%s", data)
 	}
 	if strings.Contains(string(data), literalToken) {
 		t.Errorf("written config leaked the literal token:\n%s", data)
@@ -149,9 +149,8 @@ func TestRenderConfig_VSCodeUsesServersKey(t *testing.T) {
 	if strings.Contains(out, `"mcpServers"`) {
 		t.Errorf("VS Code snippet must not use 'mcpServers':\n%s", out)
 	}
-	// A Node-RED admin token can authorize dangerous deployments, so rendered output must only contain a placeholder.
-	if !strings.Contains(out, `"NODERED_TOKEN": "<NODERED_TOKEN>"`) {
-		t.Errorf("non-empty token must render as a placeholder:\n%s", out)
+	if strings.Contains(out, `"NODERED_TOKEN"`) {
+		t.Errorf("rendered config must omit NODERED_TOKEN:\n%s", out)
 	}
 	if strings.Contains(out, literalToken) {
 		t.Errorf("rendered config leaked the literal token:\n%s", out)
@@ -172,25 +171,25 @@ func TestInit_ClaudeCodeCommandIsUserScoped(t *testing.T) {
 	}
 }
 
-func TestInit_RendersPlaceholderForClaudeCode(t *testing.T) {
+func TestInit_ClaudeCodeOmitsToken(t *testing.T) {
 	const literalToken = "supersecret-test-token-12345"
 	out := renderConfig("claude-code", "/bin/nodered-mcp", "http://localhost:1880", literalToken, "custom-backups")
 	if !strings.HasPrefix(out, "claude mcp add -s user nodered") {
 		t.Errorf("expected a user-scoped `claude mcp add` command, got:\n%s", out)
 	}
-	if !strings.Contains(out, "-e NODERED_URL=http://localhost:1880") {
+	if !strings.Contains(out, "-e 'NODERED_URL=http://localhost:1880'") {
 		t.Errorf("URL flag missing:\n%s", out)
 	}
-	if !strings.Contains(out, "-e NODERED_TOKEN="+tokenPlaceholder) {
-		t.Errorf("token flag must contain the placeholder:\n%s", out)
+	if strings.Contains(out, "NODERED_TOKEN") {
+		t.Errorf("rendered command must omit NODERED_TOKEN:\n%s", out)
 	}
 	if strings.Contains(out, literalToken) {
 		t.Errorf("rendered command leaked the literal token:\n%s", out)
 	}
-	if !strings.Contains(out, "-e NODERED_BACKUP_DIR=custom-backups") {
+	if !strings.Contains(out, "-e 'NODERED_BACKUP_DIR=custom-backups'") {
 		t.Errorf("custom backup dir should be included:\n%s", out)
 	}
-	if !strings.HasSuffix(out, "-- /bin/nodered-mcp") {
+	if !strings.HasSuffix(out, "-- '/bin/nodered-mcp'") {
 		t.Errorf("command must end with the binary path:\n%s", out)
 	}
 }
