@@ -1,0 +1,33 @@
+version: 2
+
+# Dependabot keeps OpenSSF Scorecard's supply-chain tooling healthy.
+# Major bumps for the MCP SDK are held back manually because the SDK
+# ships breaking changes regularly.
+
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "github.com/mark3labs/mcp-go"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      actions:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
