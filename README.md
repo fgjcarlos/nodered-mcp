@@ -40,6 +40,20 @@ go install github.com/fgjcarlos/nodered-mcp/cmd/nodered-mcp@latest
 docker pull ghcr.io/fgjcarlos/nodered-mcp:latest
 ```
 
+The npm channel runs a checksum-verified, atomic postinstall. The
+tarball is downloaded from the matching GitHub release, its SHA-256
+is verified against the release's `checksums.txt`, the archive is
+extracted into a per-run staging directory under `os.tmpdir()`, and
+the binary is moved into place via a temp file + atomic rename. On
+any failure — bad checksum, download timeout, corrupted archive, or
+promotion error — the staging directory is removed and `bin/` is
+left untouched, so a partial install never overwrites a working
+prior one. The wrapper writes a `.installed` marker only after the
+binary is in place; subsequent `npm install` calls skip the
+download when the marker version matches. Re-installs fire
+automatically when the marker is missing or stale (corrupt prior
+install, version upgrade).
+
 After install, generate the snippet for your MCP client:
 
 ```bash
