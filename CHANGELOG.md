@@ -4,36 +4,84 @@ All notable changes to this project are documented here. The format
 follows [Keep a Changelog 1.1](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] - 2026-08-04
+
+Minor bump. Adds the version-detection foundation plus the
+runtime-info companion tool the 2026-08-03 QA audit called for;
+ships SBOM and provenance on every release artefact; lands
+Dependabot, pinned action SHAs, CODEOWNERS, and issue templates.
 
 ### Added
 
+- feat(nodered): central Node-RED version detection + min-version
+  table (#170). `Client.NodeRedVersion()` (cached, sync.Once)
+  backed by `GET /settings`; `nodered_min_version_for` map is the
+  single source of truth; `attachMinVersion` appends
+  " (requires NR >= X.Y)" to each gated tool's description at
+  registration time.
+- feat(mcp): add `get_runtime_info` with capability matrix (#168).
+  Companion to `get_diagnostics` that reports the MCP server's
+  view of the runtime (NR version, runtimeState, debug stream,
+  per-tool capability as ok / version_too_low /
+  endpoint_not_mounted / setting_disabled / stream_disabled /
+  unknown).
+- feat(mcp): startup banner reports detected NR version +
+  degraded tools (#171). Async probe after boot; follow-up
+  `Node-RED version detected` log line carries the version and
+  the count of gated tools the running NR cannot serve.
 - feat(npm): publish Windows binaries on the npm install channel
-  (#192). Drops the goreleaser `format_overrides` that forced Windows
-  archives as `.zip`; the existing `bin/tar.js` extractor handles
-  `.tar.gz` everywhere. Closes #182.
+  (#192). Drops the goreleaser `format_overrides` that forced
+  Windows archives as `.zip`; the existing `bin/tar.js` extractor
+  handles `.tar.gz` everywhere. Closes #182.
 - chore: enable SBOM and provenance on release artefacts (#179).
   Goreleaser emits a CycloneDX SBOM, Docker image builds with
   `provenance: true` + `sbom: true`, and the npm wrapper publishes
   with `provenance: true` (OIDC attestation).
-- chore: enable Dependabot for go modules and github-actions (#177).
-- chore: pin github actions to commit SHA (#178).
+- chore: enable Dependabot for go modules and github-actions
+  (#177). Daily grouping, weekly windows, marked-major ignored for
+  `mark3labs/mcp-go` (breaking-change budget lives in our hands,
+  not Dependabot's).
+- chore: pin github actions to commit SHA (#178). 13 references
+  pinned; the renovate-style SHA-only pattern keeps the supply
+  chain auditable.
 - chore: add CODEOWNERS, issue templates, and PR template (#181).
+  CODEOWNERS catch-all is `@fgjcarlos`; `bug.yml` + `feature.yml`
+  templates; PR template lists scope, tests, risks.
+- docs: add CHANGELOG and GitHub release-notes categories (#180).
+  `CHANGELOG.md` (Keep a Changelog 1.1) and `.github/release.yml`
+  with conventional-commit categories.
+- docs: ship `cleanup-npm-shims.ps1` helper for orphaned Windows
+  shims (#184). Idempotent, no admin required.
+- chore(deps): bump `docker/build-push-action` 6.19.2 -> 7.3.0
+  (#206).
+- chore(deps): bump `docker/metadata-action` 5.10.0 -> 6.2.0
+  (#205).
+- chore(deps): bump `docker/setup-buildx-action` 3.12.0 ->
+  4.2.0 (#203).
+- chore(deps): bump `docker/setup-qemu-action` 3.7.0 -> 4.2.0
+  (#204).
+- chore(deps): bump `actions/setup-go` 5.6.0 -> 7.0.0 (#207).
 
 ### Changed
 
-- docs: install sections describe npm, go install and docker (#194).
-- chore: retire shell install scripts in favour of go install (#193).
-  `scripts/install.sh` and `scripts/install.ps1` are deleted; the
-  standalone-binary channel's update hint now points at
+- docs: install sections describe npm, go install and docker
+  (#194).
+- chore: retire shell install scripts in favour of go install
+  (#193). `scripts/install.sh` and `scripts/install.ps1` are
+  deleted; the standalone-binary channel's update hint now
+  points at
   `go install github.com/fgjcarlos/nodered-mcp/cmd/nodered-mcp@latest`.
 - docs: document translation policy in CONTRIBUTING.md (#175).
 
 ### Fixed
 
-- fix(npm): declare `os: [linux, darwin]` so Windows aborts before
-  postinstall (#191). Reverted by #192 once the Windows `.tar.gz`
-  asset landed.
+- fix(mcp): translate 403 on /diagnostics to a setting hint
+  (#169). When `settings.diagnostics.enabled = false` on NR >=
+  3.1 the runtime returns 403; the handler now names the setting
+  so the operator can fix it.
+- fix(npm): declare `os: [linux, darwin]` so Windows aborts
+  before postinstall (#191). Reverted by #192 once the Windows
+  `.tar.gz` asset landed.
 
 ## [0.5.14] - 2026-07-29
 
