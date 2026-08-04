@@ -348,6 +348,13 @@ func (c *Client) getRaw(ctx context.Context, path string) ([]byte, error) {
 	return respBody, nil
 }
 
+// BaseURL returns the BaseURL the Client was configured with. Used
+// by callers that need to detect loopback test fixtures without
+// touching the unexported field.
+func (c *Client) BaseURL() string {
+	return c.baseURL
+}
+
 // redactURL strips the query string and userinfo from a URL to avoid leaking
 // tokens that may be embedded as query parameters. Returns "[unparseable URL]"
 // when the input cannot be parsed.

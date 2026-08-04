@@ -100,12 +100,14 @@ type versionCache struct {
 // Version with Known == false, and AtLeast reports false so the
 // caller can distinguish "older than this" from "could not tell".
 //
-// The probe is best-effort. Callers that need a real answer
-// (banner, get_runtime_info) should call DetectNodeRedVersion
-// themselves with their own deadline; NodeRedVersion exists for
-// the hot path that wants one GET /settings instead of N.
+// A nil or unconfigured client (baseURL empty) skips the probe
+// entirely so test fixtures that build a Client{} to satisfy the
+// constructor do not hit a nil httpClient.
 func (c *Client) NodeRedVersion(ctx context.Context) Version {
 	c.nrVersion.once.Do(func() {
+		if c == nil || c.baseURL == "" {
+			return
+		}
 		c.nrVersion.value = detectNodeRedVersion(ctx, c)
 	})
 	return c.nrVersion.value
