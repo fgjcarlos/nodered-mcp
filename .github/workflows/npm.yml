@@ -1,20 +1,30 @@
 name: npm
 
-# Mirror release.yml's trigger — every pushed tag produces a fresh npm
-# publish, so a release that publishes a binary also publishes an
-# npm-installable wrapper at the same version. The wrapper itself is
-# versioned in package.json, bumped by hand; this workflow reads that
-# version and refuses to publish if it does not match the tag, so a
-# mismatched package.json never ships.
+# npm publication is gated on the release workflow's success.
 #
-# The wrapper's postinstall downloads a tarball whose URL embeds the
-# `bin/install.js` VERSION constant — if that constant lags the tag, a
-# fresh `npm install -g @fgjcarlos/nodered-mcp` silently downloads the
-# previous release's tarball. We gate on that constant here too.
+# release.yml produces the GitHub Release (binaries, checksums.txt,
+# SBOMs) for the tag. The npm wrapper's postinstall downloads a
+# tarball whose URL is built from the tag, so if this workflow runs
+# before release.yml finishes (or before its assets are queryable),
+# a fresh `npm install -g` 404s on the tarball — and npm versions
+# are immutable, so a retry is a no-op. The previous design fired
+# both workflows on tag push and let the scheduler race them;
+# publishing could land before any binary was uploaded, with no
+# signal at the publish step that anything was wrong.
+#
+# The trigger below makes the order deterministic: this workflow
+# only sees a tag once release.yml has reported `completed` with
+# `success`. Inside the job, scripts/release-gate.js then verifies
+# the GitHub Release carries checksums.txt, at least one tarball,
+# and at least one SBOM, and that checksums.txt is internally
+# consistent. Any failure inside the gate exits non-zero before
+# `npm publish` is touched, so a half-built release cannot ship a
+# working npm wrapper.
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_run:
+    workflows: ["release"]
+    types:
+      - completed
 
 permissions:
   contents: read
@@ -25,9 +35,28 @@ permissions:
 
 jobs:
   publish:
+    # Skip the job entirely when release.yml did not succeed; an
+    # aborted, cancelled, or failed release means assets are
+    # incomplete and npm publish must not happen. The head_branch
+    # guard is a belt-and-braces against workflow_run firing from
+    # any non-tag push that release.yml could ever be triggered by
+    # in the future.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'v')
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.workflow_run.head_branch }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          # The triggering release.yml run executed against the tag;
+          # checkout the same ref so the version gates below read the
+          # post-bump package.json and bin/install.js. workflow_run
+          # events otherwise run on the default branch.
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+          fetch-tags: true
 
       # The version match check runs inline with the read because GitHub
       # Actions' step-output parser rejects any value that looks like a
@@ -37,7 +66,7 @@ jobs:
       # in the same shell avoids the issue entirely and is shorter.
       - name: verify package.json version matches the tag
         env:
-          EXPECTED: ${{ github.ref_name }}
+          EXPECTED: ${{ env.TAG }}
         run: |
           actual=$(jq -r .version package.json)
           expected="${EXPECTED#v}"
@@ -55,7 +84,7 @@ jobs:
       # a `const VERSION = ...` declaration is the contract.
       - name: verify bin/install.js VERSION matches the tag
         env:
-          EXPECTED: ${{ github.ref_name }}
+          EXPECTED: ${{ env.TAG }}
         run: |
           actual=$(grep -E "^const VERSION = '[^']+';" bin/install.js | head -1 | sed -E "s/^const VERSION = '([^']+)';.*/\\1/")
           expected="${EXPECTED#v}"
@@ -67,6 +96,17 @@ jobs:
             echo "bin/install.js VERSION ($actual) does not match tag $EXPECTED (expected $expected)"
             exit 1
           fi
+
+      # Verify the GitHub Release for this tag actually carries the
+      # assets the npm wrapper depends on. release.yml is the
+      # producer; this step is the consumer's gate. A "succeeded"
+      # workflow_run that left the Release empty (goreleaser config
+      # drift, SBOM step errored out, draft toggle flipped on, etc.)
+      # fails here, before npm is touched.
+      - name: verify release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/release-gate.js "$TAG" "${{ github.repository }}"
 
       # npm publish reads NODE_AUTH_TOKEN from env, but on a fresh
       # runner the empty ~/.npmrc can shadow it; writing the token to
