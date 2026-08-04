@@ -274,6 +274,7 @@ func New(nrClient *nodered.Client, opts Options) *Server {
 // transport (stdio / Streamable HTTP) keeps waiting on the goroutine. The
 // wrapper here cuts that wait at toolTimeout and surfaces a typed error.
 func (s *Server) addReadTool(tool mcp.Tool, handler server.ToolHandlerFunc) {
+	s.attachMinVersion(&tool)
 	s.mcpServer.AddTool(tool, s.withTimeoutRetry(tool.Name, handler))
 	s.tools = append(s.tools, tool)
 }
@@ -285,8 +286,27 @@ func (s *Server) addWriteTool(tool mcp.Tool, handler server.ToolHandlerFunc) {
 	if s.readOnly {
 		return
 	}
+	s.attachMinVersion(&tool)
 	s.mcpServer.AddTool(tool, s.withTimeoutRetry(tool.Name, handler))
 	s.tools = append(s.tools, tool)
+}
+
+// attachMinVersion appends the Node-RED version requirement to the
+// tool description, if the table has an entry for this tool. This is
+// the single point that consults nodered_min_version_for at
+// registration time — registerTools does not need to know which
+// tools have a minimum, and a future tool only needs one map entry.
+//
+// Annotating here (not at construction) keeps the existing
+// `mcp.NewTool("name", mcp.WithDescription(...), ...)` calls readable;
+// the audit that motivated this found the prior annotation buried in
+// hand-edited prose on three different tools.
+func (s *Server) attachMinVersion(tool *mcp.Tool) {
+	ann := MinVersionAnnotation(tool.Name)
+	if ann == "" {
+		return
+	}
+	tool.Description = tool.Description + ann
 }
 
 // toolTimeout is the per-tool call deadline. Set per the v0.5.12 audit:

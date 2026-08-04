@@ -43,6 +43,11 @@ type Client struct {
 	// back; the last writer won and earlier mutations were silently lost.
 	// ponytail: global lock, per-flow locks if throughput matters.
 	writeMu sync.Mutex
+
+	// nrVersion caches the Node-RED version probe (see version.go).
+	// Atomic pointer so the cache survives concurrent reads without
+	// locking; the probe itself runs at most once per Client.
+	nrVersion versionCache
 }
 
 // authStrategy encapsulates how Authorization headers are produced.
