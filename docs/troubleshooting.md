@@ -24,10 +24,15 @@ proceed. Check that `NODERED_BACKUP_DIR` exists and is writable.
 @fgjcarlos/nodered-mcp` from a version before 0.5.16 could leave three
 launcher files (`nodered-mcp`, `.cmd`, `.ps1`) in `%APPDATA%\npm\` that
 no `npm uninstall` removes. After #192 the npm package ships Windows
-binaries directly, so fresh installs do not reproduce this. Users who
-inherited the orphaned shims from a pre-0.5.16 install can delete them
-with:
+binaries directly, so fresh installs do not reproduce this.
+
+Users who inherited the orphaned shims from a pre-0.5.16 install
+can remove them with the shipped helper:
 
 ```powershell
-Remove-Item "$env:APPDATA\npm\nodered-mcp*"
+.\scripts\cleanup-npm-shims.ps1
 ```
+
+The script is idempotent; every Remove-Item tolerates a missing
+file, so re-running it is safe. No admin required, no PATH
+modified.
