@@ -38,8 +38,8 @@ func TestRunInit_UnknownFlag(t *testing.T) {
 // TestWriteClientConfig_NonWritableTarget covers the branch where
 // the chosen client has no writable file (claude-code, vscode).
 // writeClientConfig should render the snippet to stdout, print the
-// "paste/run the above" hint, and return nil without touching the
-// filesystem.
+// "paste/run the above" hint, and return an error because no
+// configuration was applied.
 func TestWriteClientConfig_NonWritableTarget(t *testing.T) {
 	// Capture stdout to assert the snippet is printed.
 	orig := os.Stdout
@@ -52,10 +52,14 @@ func TestWriteClientConfig_NonWritableTarget(t *testing.T) {
 		name: "Claude Code",
 		note: "run the command below",
 	}
-	if err := writeClientConfig(client, "/bin/nodered-mcp",
+	err := writeClientConfig(client, "/bin/nodered-mcp",
 		map[string]string{"NODERED_URL": "http://localhost:1880"},
-		"http://localhost:1880", "", "backups"); err != nil {
-		t.Fatalf("writeClientConfig: %v", err)
+		"http://localhost:1880", "", "backups")
+	if err == nil {
+		t.Fatal("writeClientConfig must fail when --write cannot apply configuration")
+	}
+	if !strings.Contains(err.Error(), "configuration was not applied") {
+		t.Errorf("error must explain that no configuration was applied: %v", err)
 	}
 	_ = w.Close()
 	var buf bytes.Buffer

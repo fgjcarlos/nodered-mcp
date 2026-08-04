@@ -82,15 +82,15 @@ func TestBuildEnv_DefaultBackupDirOmitted(t *testing.T) {
 	}
 }
 
-func TestEnvWithTokenPlaceholder_RewritesToken(t *testing.T) {
+func TestEnvWithoutToken_OmitsToken(t *testing.T) {
 	in := map[string]string{
 		"NODERED_URL":        "http://localhost:1880",
 		"NODERED_TOKEN":      "real-secret",
 		"NODERED_BACKUP_DIR": "/var/backups",
 	}
-	out := envWithTokenPlaceholder(in)
-	if out["NODERED_TOKEN"] != tokenPlaceholder {
-		t.Errorf("NODERED_TOKEN should be replaced with placeholder; got %q", out["NODERED_TOKEN"])
+	out := envWithoutToken(in)
+	if _, ok := out["NODERED_TOKEN"]; ok {
+		t.Error("NODERED_TOKEN must be omitted rather than replaced with a placeholder")
 	}
 	if out["NODERED_URL"] != "http://localhost:1880" {
 		t.Error("non-token envs must be passed through unchanged")
@@ -98,15 +98,15 @@ func TestEnvWithTokenPlaceholder_RewritesToken(t *testing.T) {
 	// Mutating the returned map must not affect the input.
 	out["NODERED_URL"] = "changed"
 	if in["NODERED_URL"] != "http://localhost:1880" {
-		t.Error("envWithTokenPlaceholder must return a defensive copy")
+		t.Error("envWithoutToken must return a defensive copy")
 	}
 }
 
-func TestEnvWithTokenPlaceholder_NoTokenIsNoOp(t *testing.T) {
+func TestEnvWithoutToken_NoTokenIsNoOp(t *testing.T) {
 	in := map[string]string{"NODERED_URL": "http://localhost:1880"}
-	out := envWithTokenPlaceholder(in)
+	out := envWithoutToken(in)
 	if _, ok := out["NODERED_TOKEN"]; ok {
-		t.Error("placeholder entry must not appear when no token was set")
+		t.Error("token entry must not appear when no token was set")
 	}
 }
 
