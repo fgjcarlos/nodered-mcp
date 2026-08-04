@@ -1,13 +1,15 @@
 'use strict';
 
-// bin/shim_test.js — regression guard for issues #80 and #182.
+// bin/shim_test.js — regression guard for issues #80, #182, and #192.
 //
 // Verifies that bin/nodered-mcp.js, when run without the
 // postinstall-downloaded binary present, emits the generic
 // `npm install -g --force` hint instead of a Node.js stack trace.
-// The Windows-specific hint was removed in #182 — the package.json
-// `os` field now makes npm abort on Windows before the shim runs,
-// so the shim is a Linux/macOS-only path by construction.
+// The shim applies the `.exe` suffix on Windows (#192) so the
+// missing-binary branch fires on the platform-correct path.
+// The old Windows-only message referencing install.ps1 was removed
+// in #182 and stayed gone in #192 — there is no platform-specific
+// hint to test.
 //
 // Run with: node bin/shim_test.js
 // Exits 0 on success, 1 on any mismatch.
@@ -22,19 +24,13 @@ function fail(msg) {
   process.exit(1);
 }
 
-const repoRoot = path.join(__dirname, '..');
-const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
-if (!Array.isArray(pkg.os) || !pkg.os.includes('linux') || !pkg.os.includes('darwin')) {
-  fail(`package.json must declare os: ["linux", "darwin"]; got ${JSON.stringify(pkg.os)}`);
-}
-
 const shim = path.join(__dirname, 'nodered-mcp.js');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'shim-test-'));
 
 try {
-  // The shim looks for `nodered-mcp` next to itself; copy it into a
-  // fresh temp dir without that binary so the missing-binary branch
-  // fires.
+  // The shim looks for `nodered-mcp[.exe]` next to itself; copy it
+  // into a fresh temp dir without that binary so the missing-binary
+  // branch fires.
   const copy = path.join(tmp, 'nodered-mcp.js');
   fs.copyFileSync(shim, copy);
 
@@ -50,6 +46,12 @@ try {
   }
   if (!stderr.includes('npm install -g --force @fgjcarlos/nodered-mcp')) {
     fail(`expected generic reinstall hint in stderr; got: ${stderr}`);
+  }
+
+  // Defensive: no install.ps1 hint should ever appear in the shim
+  // output. The script is retired in #193.
+  if (stderr.includes('install.ps1')) {
+    fail(`shim output references install.ps1 (retired in #193); got: ${stderr}`);
   }
 
   console.log('shim_test: PASS');
