@@ -7,19 +7,58 @@ decides how to expose those operations as tools.
 
 ## Data flow
 
+The end-to-end shape, including the OAuth discovery path that the
+ASCII version lost in indentation:
+
+```mermaid
+flowchart LR
+  subgraph clients["MCP clients"]
+    claude["Claude / Cursor / OpenCode / Pi / …"]
+  end
+
+  subgraph server["nodered-mcp (Go)"]
+    transport["stdio or streamable HTTP transport"]
+    mcp["MCP layer<br/>(tools, resources, prompts)"]
+    client["Node-RED admin API client"]
+    comms["/comms WebSocket tail"]
+    oauth["OAuth resource server<br/>(JWKS cache)"]
+  end
+
+  subgraph upstream["Upstream"]
+    nr["Node-RED :1880<br/>admin HTTP API"]
+    ws["Node-RED /comms<br/>debug stream"]
+    idp["IdP<br/>.well-known/openid-configuration"]
+  end
+
+  claude -- "stdio / HTTP" --> transport
+  transport -- "bearer / JWT" --> mcp
+  mcp --> client
+  mcp --> comms
+  mcp --> oauth
+  client -- "HTTP" --> nr
+  comms -- "WebSocket" --> ws
+  oauth -- "HTTPS discovery" --> idp
 ```
-MCP Client (Claude, Cursor, OpenCode, Pi, …)
-    │
-    ├──stdio | streamable HTTP──▶ nodered-mcp (Go)
-    │                                │
-    │                                ├──HTTP──▶ Node-RED admin API :1880
-    │                                │
-    │                                ├──WebSocket──▶ Node-RED /comms (debug tail)
-    │                                │
-    │                                └──HTTPS──▶ idp.example/.well-known/openid-configuration
-    │                                              (OAuth 2.1 resource-server mode)
-    │
-    └──Bearer | JWT──▶ nodered-mcp (authenticated HTTP transport)
+
+## Edit pipeline
+
+Mutating tools follow a read-modify-write path with three guards
+before any byte reaches the runtime. Optional diagram for
+operators debugging a flow write that was rejected:
+
+```mermaid
+flowchart LR
+  req["Mutating tool call"]
+  read["Read current flow<br/>(GET /flows)"]
+  modify["Apply caller change<br/>(merge / add / delete / connect)"]
+  validate{"Validate wires<br/>+ duplicate ids<br/>+ z resolves"}
+  backup["Write backup snapshot<br/>(NODERED_BACKUP_DIR)"]
+  write["PUT /flow/:id<br/>or POST /flows"]
+  result["Tool result to caller"]
+
+  req --> read --> modify --> validate
+  validate -- "ok" --> backup --> write --> result
+  validate -- "reject" --> err["Typed error to caller<br/>(no write)"]
 ```
 
 ## Source tree
