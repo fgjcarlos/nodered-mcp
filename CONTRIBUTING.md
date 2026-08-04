@@ -67,8 +67,8 @@ Use `%v` only for non-error values. Never wrap an `error` with `%v`.
   handling, not for concurrency.
 
 If your PR adds a new tool, the tool must be wired through `internal/mcp/tools.go`,
-show up in the §5 catalog in `PLAN.md`, and not regress the read/write
-counts already documented there.
+show up in the catalog in [`docs/tools.md`](./docs/tools.md), and not
+regress the read/write counts already documented there.
 
 ### Keeping tool counts accurate
 
@@ -128,4 +128,4 @@ closed. Reopen it once there is new context.
   alternative".
 - Accept a PR that bypasses the backup-before-write guardrail. Every
   mutating tool currently snapshots before it ships; the design
-  rationale is in `PLAN.md` §3.
+  rationale is in [`docs/architecture.md`](./docs/architecture.md).

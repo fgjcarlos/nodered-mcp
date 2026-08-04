@@ -620,7 +620,7 @@ go build -o nodered-mcp ./cmd/nodered-mcp
 
 Después, pide a tu cliente que liste los flows de Node-RED.
 
-Las tareas pendientes se registran en [`issues/`](./issues/README.md) hasta que el repositorio se traslade a GitHub Issues. Las decisiones de diseño están en [`PLAN.md`](./PLAN.md).
+Las tareas pendientes se registran en [`issues/`](./issues/README.md) hasta que el repositorio se traslade a GitHub Issues. Las decisiones de diseño están en [`docs/`](./docs/).
 
 ## Hoja de ruta
 
