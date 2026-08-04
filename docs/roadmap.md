@@ -25,7 +25,7 @@
 | v0.3 | Palette management: install, uninstall, enable, disable | Released |
 | v0.4 | `search_nodes`, settings and runtime state — 19 tools, 3 resources, 2 prompts | Released |
 | v0.5 | Read-only mode, context-efficient reads, diagnostics, context, the debug stream, granular node editing, `diff_flows`, HTTP bearer auth — 43 tools | Released |
-| v0.6 | OAuth 2.1 Resource Server for hosted web connectors | Released |
+| v0.6 | OAuth 2.1 Resource Server for hosted web connectors; npm channel with Windows binaries; SBOM + provenance on every artefact; Dependabot; SHA-pinned actions; CODEOWNERS + issue/PR templates; central NR version detection; get_runtime_info with capability matrix; startup banner with degraded-tools count — 44 tools | Released |
 
 ## Planned
 
