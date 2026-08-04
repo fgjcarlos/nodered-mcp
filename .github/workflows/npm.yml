@@ -72,9 +72,18 @@ jobs:
       # runner the empty ~/.npmrc can shadow it; writing the token to
       # .npmrc avoids that race entirely. The file lives in the
       # runner's home and is not committed.
+      # Re-pushing a tag to retry a failed goreleaser run re-triggers this
+      # workflow, and npm versions are immutable — a blind `npm publish`
+      # would fail the job with a 403 for a version that is already live.
+      # The registry check makes the retry a no-op instead.
       - name: publish
         env:
           NPM_SECRET: ${{ secrets.NPM_SECRET }}
         run: |
+          version=$(jq -r .version package.json)
+          if npm view "@fgjcarlos/nodered-mcp@${version}" version >/dev/null 2>&1; then
+            echo "@fgjcarlos/nodered-mcp@${version} is already published; nothing to do."
+            exit 0
+          fi
           echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
           npm publish --access public
