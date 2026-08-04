@@ -115,17 +115,28 @@ following by hand once per release:
 2. Push the commit to `main`.
 3. `git tag -a vX.Y.Z` and `git push origin vX.Y.Z`.
 
-Three GitHub Actions fire on the tag and run in parallel:
+Three GitHub Actions fire on the tag. `release.yml` and
+`docker.yml` run in parallel; `npm.yml` is gated on `release.yml`'s
+success and runs only after the GitHub Release has been verified.
 
-- `release.yml` — goreleaser publishes the six binaries and
-  `checksums.txt` to the GitHub release.
-- `docker.yml` — multi-arch image is pushed to `ghcr.io/fgjcarlos/nodered-mcp`.
-- `npm.yml` — `@fgjcarlos/nodered-mcp` is published to npmjs; the
-  workflow refuses to ship if `package.json` and the tag disagree, or
-  if the `bin/install.js` `VERSION` constant and the tag disagree
-  (the wrapper's postinstall URL embeds that constant — a stale value
-  here makes `npm install -g` silently download the previous tag's
-  tarball).
+- `release.yml` — goreleaser publishes the six binaries, six SBOMs
+  and `checksums.txt` to the GitHub release.
+- `docker.yml` — multi-arch image is pushed to
+  `ghcr.io/fgjcarlos/nodered-mcp`. Independent of release.yml and
+  npm.yml.
+- `npm.yml` — gated on `release.yml`. After release.yml reports
+  success, npm.yml checks out the tag, confirms `package.json`
+  version and `bin/install.js` VERSION agree with the tag, runs
+  `scripts/release-gate.js` to verify the GitHub Release carries
+  `checksums.txt`, at least one tarball, and at least one SBOM (with
+  a structurally valid `checksums.txt`), and only then publishes
+  `@fgjcarlos/nodered-mcp` to npmjs. Any failure inside the gate
+  exits non-zero before `npm publish` is touched, so a half-built
+  release cannot ship a working npm wrapper. The wrapper's
+  postinstall URL embeds the `bin/install.js` VERSION constant — a
+  stale value there would otherwise make `npm install -g` silently
+  download the previous tag's tarball, which is why that gate lives
+  alongside the asset check.
 
 A new release is justified when there is a user-visible change: a new
 tool, a new subcommand, a new install channel, a fixed bug. Pure docs
