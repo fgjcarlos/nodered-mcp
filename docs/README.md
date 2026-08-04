@@ -7,7 +7,7 @@ the entry point; everything below extends from there.
 | File | Responsibility |
 |---|---|
 | [`architecture.md`](architecture.md) | Source tree, dependencies, design decisions, JSON-opaque flow model, backup-before-write guardrail |
-| [`tools.md`](tools.md) | Catalog of the 43 MCP tools (read / write / action classification) |
+| [`tools.md`](tools.md) | Catalog of the 44 MCP tools (read / write / action classification) |
 | [`configuration.md`](configuration.md) | Environment variables, command-line flags, defaults |
 | [`transports.md`](transports.md) | stdio and streamable HTTP transports, bearer auth, OAuth 2.1 |
 | [`clients.md`](clients.md) | Per-MCP-client configuration snippets (Claude, Cursor, VS Code, Gemini CLI, OpenCode, Pi) |

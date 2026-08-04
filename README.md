@@ -46,7 +46,7 @@ After install, generate the snippet for your MCP client:
 # 2. Generate the snippet for your MCP client
 nodered-mcp init --write
 
-# 3. Restart your MCP client; 43 tools appear under the "nodered" server
+# 3. Restart your MCP client; 44 tools appear under the "nodered" server
 ```
 
 Need help? See [`docs/troubleshooting.md`](./docs/troubleshooting.md).
@@ -57,7 +57,7 @@ The full reference lives in [`docs/`](./docs/):
 | Doc | Covers |
 |---|---|
 | [`docs/architecture.md`](./docs/architecture.md) | Source tree, dependencies, JSON-opaque flow model, backup-before-write guardrail |
-| [`docs/tools.md`](./docs/tools.md) | Catalog of the 43 MCP tools (read / write / action) |
+| [`docs/tools.md`](./docs/tools.md) | Catalog of the 44 MCP tools (read / write / action) |
 | [`docs/configuration.md`](./docs/configuration.md) | Environment variables and command-line flags |
 | [`docs/transports.md`](./docs/transports.md) | stdio and streamable HTTP transports, bearer auth, OAuth 2.1 |
 | [`docs/clients.md`](./docs/clients.md) | Per-MCP-client configuration snippets |
@@ -78,7 +78,7 @@ guardrails. Three are built in:
   wire targets are rejected at the MCP layer.
 
 Run with `--read-only` (or `MCP_READ_ONLY=true`) to advertise only
-the 20 read tools and withhold every mutating one at registration.
+the 21 read tools and withhold every mutating one at registration.
 `inject_node` is also withheld: firing an inject can send a real
 command to real hardware.
 

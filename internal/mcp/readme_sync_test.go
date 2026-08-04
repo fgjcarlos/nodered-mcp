@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -62,6 +63,74 @@ func TestReadmeSyncWithRegistry(t *testing.T) {
 			compareRegistry(t, rel+" tools", registryTools, docTools)
 			compareRegistry(t, rel+" resources", registryResources, docResources)
 			compareRegistry(t, rel+" prompts", registryPrompts, docPrompts)
+		}
+	}
+}
+
+// readCountClaim matches a claim about the --read-only subset, in
+// either language. It is tried first and its matches are removed from
+// the line, so the general countClaim below never sees them. Matching
+// the phrase rather than looking for "read" anywhere on the line
+// matters: "Catalog of the 44 MCP tools (read / write / action)" names
+// the risk classification, not the subset.
+var readCountClaim = regexp.MustCompile(
+	"(?i)(\\d+)\\s+(?:read\\s+tools|tools\\s+marked\\s+`?read`?|tools\\s+de\\s+lectura)")
+
+// countClaim matches the headline totals the docs quote in prose --
+// "44 tools", "the 44 MCP tools". The name-level check above cannot
+// catch these: docs/tools.md can list every tool correctly and still
+// open with a stale total, which is exactly the drift that survived
+// from v0.5 (43) into v0.6 (44).
+var countClaim = regexp.MustCompile(`(\d+)\s+(?:MCP\s+)?tools`)
+
+// countClaimDocs are the files that describe the *current* build.
+// docs/roadmap.md is deliberately excluded: its per-version rows are
+// history and must keep quoting the count each release actually had.
+var countClaimDocs = []string{
+	"README.md",
+	"README.es.md",
+	"docs/README.md",
+	"docs/tools.md",
+	"docs/clients.md",
+	"docs/configuration.md",
+}
+
+// TestDocsToolCountsMatchRegistry pins every "N tools" claim in the
+// user-facing docs to the live registry, so the totals cannot drift
+// away from the catalogue the way they did between v0.5 and v0.6.
+func TestDocsToolCountsMatchRegistry(t *testing.T) {
+	c, err := nodered.NewClient(nodered.Options{BaseURL: "http://127.0.0.1:1"})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	wantAll := len(New(c, Options{Version: "test"}).tools)
+	wantRead := len(New(c, Options{Version: "test", ReadOnly: true}).tools)
+
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		t.Fatalf("findRepoRoot: %v", err)
+	}
+	for _, rel := range countClaimDocs {
+		raw, err := os.ReadFile(filepath.Join(repoRoot, rel))
+		if err != nil {
+			t.Fatalf("%s: %v", rel, err)
+		}
+		for i, line := range strings.Split(string(raw), "\n") {
+			check := func(got string, want int, label string) {
+				if got != strconv.Itoa(want) {
+					t.Errorf("%s:%d: claims %s %s, registry has %d\n\t%s",
+						rel, i+1, got, label, want, strings.TrimSpace(line))
+				}
+			}
+			// Consume the read-only claims first so the general
+			// matcher below cannot double-report them.
+			rest := readCountClaim.ReplaceAllStringFunc(line, func(hit string) string {
+				check(readCountClaim.FindStringSubmatch(hit)[1], wantRead, "read tools")
+				return ""
+			})
+			for _, m := range countClaim.FindAllStringSubmatch(rest, -1) {
+				check(m[1], wantAll, "tools")
+			}
 		}
 	}
 }

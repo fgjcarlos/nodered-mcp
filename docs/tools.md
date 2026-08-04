@@ -1,6 +1,6 @@
 # Tools
 
-43 tools, 3 resources, 2 prompts. Tools are classified by risk:
+44 tools, 3 resources, 2 prompts. Tools are classified by risk:
 
 - **read** — no side effects.
 - **write** — mutates persisted configuration and takes a backup first.
@@ -12,7 +12,7 @@ inside each handler: the 23 mutating tools are not advertised when
 `inject_node` counts as mutating — firing an inject can send a real
 command to real hardware.
 
-The 20 tools marked `read` are the only ones registered under
+The 21 tools marked `read` are the only ones registered under
 `--read-only`.
 
 ## Flows
