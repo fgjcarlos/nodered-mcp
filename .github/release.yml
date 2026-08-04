@@ -1,0 +1,26 @@
+# GitHub release form categories (issue #180). When the maintainer
+# drafts a release, the form auto-suggests these categories so the
+# shipped notes line up with the changelog conventions.
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+    authors:
+      - dependabot
+  categories:
+    - title: Features
+      labels:
+        - enhancement
+        - feat
+    - title: Bug fixes
+      labels:
+        - bug
+        - fix
+    - title: Documentation
+      labels:
+        - documentation
+        - docs
+    - title: Maintenance
+      labels:
+        - chore
+        - maintenance
