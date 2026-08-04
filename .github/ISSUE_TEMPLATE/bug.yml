@@ -1,0 +1,54 @@
+name: Bug report
+description: Something is not working as documented.
+title: "fix: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. The three questions below mirror
+        `CONTRIBUTING.md`; answering them gets the maintainer to a
+        repro fast.
+
+  - type: input
+    id: version
+    attributes:
+      label: "`nodered-mcp version` output"
+      description: Output of `nodered-mcp version`. Always include it.
+    validations:
+      required: true
+
+  - type: input
+    id: did
+    attributes:
+      label: "What did you do?"
+      description: The exact command, the URL of the Node-RED instance.
+      placeholder: |
+        npm install -g @fgjcarlos/nodered-mcp
+        nodered-mcp serve
+    validations:
+      required: true
+
+  - type: textarea
+    id: expect
+    attributes:
+      label: "What did you expect?"
+      description: Why this matters — a real flow you were trying to build, a real client you were trying to configure.
+    validations:
+      required: true
+
+  - type: textarea
+    id: happened
+    attributes:
+      label: "What happened instead?"
+      description: The error message, the unexpected output, the workaround. If you worked around it, say how.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: "Reproduction"
+      description: A small flow JSON or shell transcript beats any prose. Paste inline or attach.
+    validations:
+      required: false
