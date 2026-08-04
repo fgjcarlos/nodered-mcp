@@ -1,637 +1,74 @@
 # nodered-mcp
 
-An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server, written in Go, that exposes the Node-RED admin API to AI clients as tools, resources, and prompts.
+An [MCP (Model Context Protocol)](https://modelcontextprotocol.io)
+server, written in Go, that exposes the Node-RED admin API to AI
+clients as tools, resources, and prompts.
 
-```
-MCP client  ──stdio | HTTP──▶  nodered-mcp  ──HTTP──▶  Node-RED :1880
-```
-
-`nodered-mcp` is provider-agnostic. The same binary works with any MCP-capable client — Claude Desktop, Claude Code, Cursor, VS Code, Gemini CLI, OpenCode, Pi, Cline — regardless of the underlying model.
-
-A Spanish version of this document is available at [`README.es.md`](./README.es.md).
-
-## Contents
-
-- [Capabilities](#capabilities)
-- [Safety model](#safety-model)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Command line](#command-line)
-- [Transports](#transports)
-- [Client integration](#client-integration)
-- [Troubleshooting](#troubleshooting)
-- [Architecture](#architecture)
-- [Development](#development)
-- [Roadmap](#roadmap)
-
-## Capabilities
-
-43 tools, 3 resources, and 2 prompts. Tools are classified by risk: **read** is side-effect free, **write** mutates persisted configuration and takes a backup first, **action** has a runtime side effect that is not persisted.
-
-### Flows
-
-| Tool | Endpoint | Risk | Description |
-|---|---|---|---|
-| `list_flows` | `GET /flows` | read | Map of tabs, subflows, node counts, and node types |
-| `search_flows` | `GET /flows` | read | Find nodes anywhere by free text or node type |
-| `get_flow` | `GET /flow/:id` | read | A single flow tab by ID |
-| `create_flow` | `POST /flow` | write | Create a new flow tab |
-| `update_flow` | `PUT /flow/:id` | write | Replace an existing flow tab. Accepts both the nested `{id,label,nodes}` shape and the flat `GET /flows` array (the matching tab is picked out by `id`) |
-| `delete_flow` | `DELETE /flow/:id` | write | Delete a flow tab and its nodes |
-| `set_flows` | `POST /flows` | write | Full deployment — replaces the entire configuration |
-| `add_node` | `PUT /flow/:id` | write | Add one node without touching the rest. The `node` argument accepts a JSON object directly or a JSON-encoded string. Nodes without `x`/`y` are rejected — add them before calling (a typical inject carries `x:140,y:140`) |
-| `update_node` | `PUT /flow/:id` | write | Change one node's properties, merging not replacing |
-| `delete_node` | `PUT /flow/:id` | write | Remove one node and the wires pointing at it |
-| `connect_nodes` | `PUT /flow/:id` | write | Wire one node's output to another |
-| `validate_flow` | local | read | Dry-run the structural checks (dangling wires, duplicate / missing ids, missing x/y) against a flow document — returns the list of issues without writing |
-| `disable_flow` | `PUT /flow/:id` | write | Stop a flow tab from running without deleting it |
-| `enable_flow` | `PUT /flow/:id` | write | Re-enable a previously disabled flow tab |
-| `inject_node` | `POST /inject/:id` | action | Fire an inject node on demand. Optional `payload` (any JSON value) overrides `msg.payload` for that one call — useful for "what if msg.payload = X?" edge cases without redeploying the node (requires Node-RED 5.x) |
-| `export_flow` | `GET /flow/:id` | read | Export a single flow tab as a JSON document, including its nodes and wires |
-| `import_flow` | `POST /flow` | write | Import a flow document previously produced by `export_flow` (or hand-written) into a new tab |
-| `list_subflows` | `GET /flow/global` | read | Every subflow definition installed on the runtime |
-| `get_subflow` | `GET /flow/global` | read | A single subflow definition by id (metadata, ports, env, internal nodes) |
-| `create_subflow` | `PUT /flow/global` | write | Install a new subflow definition |
-| `update_subflow` | `PUT /flow/global` | write | Replace an existing subflow definition |
-| `delete_subflow` | `PUT /flow/global` | write | Remove a subflow definition (the runtime does not check whether instances still reference it) |
-| `instantiate_subflow` | `PUT /flow/:id` | write | Add a new instance of a subflow to a flow tab — `type` is set to `subflow:<id>` and the caller's `params` are merged in verbatim |
-
-### Palette
-
-| Tool | Endpoint | Risk | Description |
-|---|---|---|---|
-| `list_nodes` | `GET /nodes` | read | Installed node modules, versions, and enabled state |
-| `get_node_info` | `GET /nodes/:module` | read | Metadata for one installed module |
-| `search_nodes` | npm registry | read | Search the public catalogue before installing ¹ |
-| `install_node` | `POST /nodes` | write | Install a module from npm |
-| `uninstall_node` | `DELETE /nodes/:module` | write | Remove an installed module |
-| `enable_node` | `PUT /nodes/:module[/:set]` | write | Enable a module or one of its node sets |
-| `disable_node` | `PUT /nodes/:module[/:set]` | write | Disable without uninstalling |
-
-¹ `search_nodes` requires outbound network access to the npm registry (`https://registry.npmjs.org` or `NODERED_SEARCH_BASE_URL` if set).
-
-### Runtime and recovery
-
-| Tool | Endpoint | Risk | Description |
-|---|---|---|---|
-| `get_settings` | `GET /settings` | read | Server configuration: auth scheme, port, theme, plugins |
-| `get_diagnostics` | `GET /diagnostics` | read | Node.js version and memory, OS, container detection |
-| `get_flows_state` | `GET /flows/state` | read | Whether the runtime is started or stopped |
-| `get_context` | `GET /context/...` | read | State the flows keep between messages |
-| `set_context` | `POST /context/...` | write | Inject a value into the flows' context store, valid until the next deploy |
-| `get_debug_messages` | `/comms` WebSocket | read | Output the flows actually produced |
-| `list_plugins` | `GET /plugins` | read | Editor plugins loaded by the runtime |
-| `get_node_status` | `/comms` WebSocket | read | Live node status events (offline, disconnect, connected) streamed from the runtime |
-| `get_runtime_logs` | journal / stream | read | Recent Node-RED runtime logs: stdout, stderr, and the editor's own log surface |
-| `set_flows_state` | `POST /flows/state` | write | Start or stop the runtime (requires `runtimeState.enabled` in Node-RED settings). See also: `MCP_DEBUG_STREAM` (MCP env var) — gates a different surface, see Troubleshooting. |
-| `list_backups` | local | read | Saved flow snapshots, newest first |
-| `diff_flows` | local + `GET /flows` | read | What changed between a snapshot and now |
-| `restore_backup` | `POST /flows` | write | Roll the entire configuration back to a snapshot |
-
-### Working with large instances
-
-The full flow configuration of a real instance is far too large to hand to a model verbatim. A 150-node setup is roughly 30,000 characters; a few hundred nodes will exhaust the context window before any work begins.
-
-Two tools exist to avoid that.
-
-`list_flows` returns a compact map by default — tabs, subflows, node counts, and a per-type breakdown, with no node bodies. On that same 150-node instance the summary is about 1,600 characters against 30,000 for the full document. Pass `detail="full"` when you genuinely need everything.
-
-`search_flows` finds nodes without downloading the configuration. The text query is matched case-insensitively against each node's complete JSON, so it locates values living in node-specific fields — an MQTT topic, an HTTP url, a node name, a line inside a function body — without this server needing to know any node type. Each hit reports the node verbatim plus the tab that owns it, which is what a subsequent `get_flow` or `update_flow` needs.
-
-```
-search_flows(query: "sensors/room13/temperature")   -> 4 nodes, across 4 tabs
-search_flows(type: "function", limit: 3)            -> 16 matched, first 3 shown
+```mermaid
+flowchart LR
+  client["MCP client<br/>(Claude, Cursor, …)"]
+  server["nodered-mcp<br/>(this binary)"]
+  nr["Node-RED :1880"]
+  client -- "stdio / HTTP" --> server
+  server -- "HTTP" --> nr
 ```
 
-When results are truncated the response states the true total, so a capped list is never mistaken for a complete one.
+`nodered-mcp` is provider-agnostic. The same binary works with any
+MCP-capable client — Claude Desktop, Claude Code, Cursor, VS Code,
+Gemini CLI, OpenCode, Pi, Cline — regardless of the underlying
+model.
 
-### Diagnosing behaviour, not just structure
+A Spanish version of this document is available at
+[`README.es.md`](./README.es.md).
 
-Reading the flows tells you what an instance is *supposed* to do. Three tools cover why it might not be doing it.
-
-`get_diagnostics` answers "what is this actually running on" in one call: Node.js version and memory, operating system, whether it sits in a container, locale and timezone. Requires Node-RED 3.1 or later; on older versions the tool says so rather than returning a bare 404.
-
-`get_context` reads the state flows keep between messages. Context appears nowhere in the flow JSON, so a flow can look entirely correct and still misbehave because of a value it stored earlier — this is the only way to see that from outside the editor. Scope `global` is instance-wide; `flow` and `node` take the tab or node id. Omit `key` for the whole store.
-
-```
-get_context(scope: "global")                      -> {"memory":{"temperature":{"msg":"21.5","format":"number"}}}
-get_context(scope: "global", key: "temperature")  -> {"msg":"21.5","format":"number"}
-get_context(scope: "flow", id: "tabA")            -> {"memory":{"counter":{"msg":"7","format":"number"}}}
-```
-
-Context is read-only here because the admin API exposes no way to write it — there is no hidden setter this server declines to expose.
-
-`list_plugins` lists editor plugins, which extend the editor rather than adding nodes and therefore never appear in `list_nodes`.
-
-### Editing one node instead of a whole tab
-
-`update_flow` replaces an entire tab, which means a model has to reproduce every node exactly. Anything it fails to reproduce is destroyed — and Node-RED nodes carry type-specific fields no schema knows about.
-
-The granular tools avoid that. Each reads the tab, changes only what was asked for, and writes it back through the same guardrails: wires validated, backup taken. Concurrent calls against the same instance are serialized at the `Client` level so a second `add_node` always sees the first's write — no more silent lost-mutation races.
-
-```
-add_node(flow_id, node)                      -> appends, leaves everything else byte-identical
-update_node(flow_id, node_id, properties)    -> merges the keys given, keeps the rest
-delete_node(flow_id, node_id)                -> removes it and cleans up incoming wires
-connect_nodes(flow_id, from_id, to_id, port) -> appends to that output port
-```
-
-`update_node` merges rather than replaces. Retuning an MQTT topic leaves the broker reference, QoS, and position untouched. Deleting a node also strips wires aimed at it, because Node-RED accepts wires pointing at nothing and simply never delivers to them — a flow that looks intact and quietly does less than it should. `connect_nodes` appends to the port you name and grows the wires array when that port does not exist yet, instead of rewriting the array by hand.
-
-Guarded: a duplicate node id is rejected, a node's id cannot be changed (the wires reference it), wiring to a node that does not exist is refused, and `add_node` rejects a node without `x`/`y` or whose `z` does not resolve to the owning tab or another existing node — the runtime crashes on the next deploy with `Cannot read properties of undefined (reading 'wires')` if either slips through.
-
-One detail worth knowing when reading a tab: Node-RED splits its contents into `nodes` and `configs`, deciding by whether the object carries `x`/`y` canvas coordinates. A shared MQTT broker belongs to the tab but appears under `configs`. These tools honour that split, so config nodes can be edited too and never end up filed in the wrong place.
-
-`diff_flows` compares any two configurations — a backup against the live instance, or two backups — and reports what was added, removed, or changed. Since a backup is taken before every write, `diff_flows(from: "latest")` answers "what did that last change actually do".
-
-Both arguments take a backup name exactly as `list_backups` returns it, or the literal `"current"` for the live configuration:
-
-```
-diff_flows(from: "latest",                 to: "current")   # what did the last change do
-diff_flows(from: "flows-20260727-200446.359.json", to: "current")
-diff_flows(from: "flows-20260727-200446.359.json", to: "flows-20260727-193012.044.json")
-```
-
-`restore_backup` takes the same shape, plus the shorthand `"latest"`:
-
-```
-restore_backup(backup: "latest")
-restore_backup(backup: "flows-20260727-200446.359.json")
-```
-
-### Closing the loop: seeing what a flow did
-
-Every other tool here describes the instance. `get_debug_messages` reports what it actually produced — the output of debug nodes, exactly as the editor's debug sidebar shows it.
-
-That completes the cycle a model needs to work unattended:
-
-```
-create_flow / update_flow  ->  inject_node  ->  get_debug_messages  ->  fix and repeat
-```
-
-Without the last step a model can deploy a flow and never learn whether it worked.
-
-Node-RED publishes this only over the editor's `/comms` WebSocket; there is no HTTP endpoint for it. `nodered-mcp` therefore opens that connection at startup and keeps a rolling buffer of the most recent 500 messages, so output produced *before* you thought to ask is already captured. Pass `since` (an RFC 3339 timestamp) to see only what arrived after a given moment — typically just before you injected.
-
-The connection is maintained in the background and is deliberately never fatal:
-
-- If Node-RED is unreachable, the server still starts and every other tool works.
-- A redeploy or restart bounces the runtime; the tail reconnects with capped exponential backoff.
-- An empty result distinguishes "not connected", "connected but nothing has arrived", and "nothing matched your filter" — silence is never ambiguous.
-- If the buffer overflows, the response says how many older messages were discarded.
-
-When `adminAuth` is enabled the same token authenticates the WebSocket. It needs the `status.read` permission; without it Node-RED rejects the handshake and the reason is reported in the tool's output.
-
-### Resources
-
-| URI | Description |
-|---|---|
-| `nodered://flows/current` | The full current flow configuration |
-| `nodered://settings` | Server settings |
-| `nodered://flows/state` | Runtime state |
-
-### Prompts
-
-| Name | Arguments | Description |
-|---|---|---|
-| `explain_flow` | `flow_id` (required) | Explain what a flow does, its triggers, and which external systems it talks to |
-| `generate_flow` | `description` (required) | Generate a Node-RED flow from a plain-English description |
-
-## Safety model
-
-Handing an LLM write access to a running automation runtime demands guardrails. Three are built in.
-
-**Flow documents are treated as opaque JSON.** Node-RED's node model is deliberately schemaless: an MQTT node carries `topic` and `broker`, a function node carries `func`, an inject node carries `payload` and `repeat`. Modelling that with fixed Go structs would silently drop every unrecognised field on a read/write round-trip. `nodered-mcp` passes flow JSON through verbatim and parses only the specific fields it needs, where it needs them. No field is ever lost.
-
-**Every mutating operation takes a backup first, and fails closed.** Before any write, the server fetches the complete flow configuration and writes it to a timestamped file under `NODERED_BACKUP_DIR`. If the snapshot cannot be written — Node-RED unreachable, directory not writable — the write is aborted rather than risking an unrecoverable change. `list_backups` and `restore_backup` expose the rollback path.
-
-**Wires are validated before the write reaches the runtime.** Node-RED accepts dangling wire targets silently, leaving broken connections behind. `create_flow` and `update_flow` reject any document whose wires point at a node that does not exist within it, which catches the most common failure mode of LLM-generated flow JSON.
-
-Backup filenames are restricted to bare names, so `restore_backup` cannot be used to read arbitrary files from disk.
-
-### Read-only mode
-
-For a production instance, the safest guardrail is not to offer the dangerous tools at all.
+## Quickstart
 
 ```bash
-nodered-mcp serve --read-only        # or MCP_READ_ONLY=true
-```
-
-The server then registers only the 14 side-effect-free tools. The 15 mutating ones are never advertised, so a model cannot call what it cannot see — this is enforced at registration, not by a check inside each handler.
-
-`inject_node` is treated as mutating and withheld. It writes no configuration, but firing an inject can send a real command to real hardware.
-
-Resources and prompts remain available: all three resources are read-only views, and prompts are inert text.
-
-| Mode | Tools | Resources | Prompts |
-|---|---|---|---|
-| default | 43 | 3 | 2 |
-| `--read-only` | 20 | 3 | 2 |
-
-## Requirements
-
-- A reachable Node-RED instance (1.x or later) with its admin API enabled.
-- Nothing else at runtime: `nodered-mcp` is a single static binary.
-- Go 1.25+ only if you build from source.
-
-Runs on Linux, macOS, and Windows (amd64 and arm64).
-
-## Installation
-
-Pick one method, then [connect your client](#client-integration). All five options install the same binary; the difference is who manages platform/arch.
-
-### Option A — npm
-
-The wrapper lives at [`@fgjcarlos/nodered-mcp`](https://www.npmjs.com/package/@fgjcarlos/nodered-mcp). On `npm install`, a postinstall step downloads the platform-appropriate binary from the matching GitHub release and a shim re-execs it.
-
-```bash
+# 1. Install
 npm install -g @fgjcarlos/nodered-mcp
-nodered-mcp version   # -> 0.5.15
+
+# 2. Generate the snippet for your MCP client
+nodered-mcp init --write
+
+# 3. Restart your MCP client; 43 tools appear under the "nodered" server
 ```
 
-Works on Linux, macOS, and Windows (amd64 and arm64) without extra setup. The wrapper has zero npm dependencies — a hand-rolled POSIX tar parser in `bin/tar.js` extracts the binary, so `npm audit` sees only the wrapper itself.
+Need help? See [`docs/troubleshooting.md`](./docs/troubleshooting.md).
 
-### Option B — Prebuilt binary
+## Documentation
 
-Download the archive for your platform from [Releases](https://github.com/fgjcarlos/nodered-mcp/releases/latest) and place the binary on your `PATH`.
+The full reference lives in [`docs/`](./docs/):
 
-```bash
-# adjust the filename to your OS and architecture
-curl -sSL https://github.com/fgjcarlos/nodered-mcp/releases/latest/download/nodered-mcp_Linux_x86_64.tar.gz | tar xz
-sudo mv nodered-mcp /usr/local/bin/
-nodered-mcp version
-```
-
-On Windows, download the `.zip`, extract it, and move `nodered-mcp.exe` into a directory on the `PATH`.
-
-### Option C — go install
-
-```bash
-go install github.com/fgjcarlos/nodered-mcp/cmd/nodered-mcp@latest
-```
-
-The binary lands in `$(go env GOPATH)/bin`; make sure that directory is on your `PATH`.
-
-`@latest` resolves to the newest tag. `nodered-mcp version` reports what was actually installed: `go install` applies no linker flags, so the version is recovered from the module information the toolchain embeds.
-
-### Option D — Docker
-
-The image is published automatically to GitHub Container Registry on every tagged release.
-
-```bash
-docker pull ghcr.io/fgjcarlos/nodered-mcp:latest
-docker run --rm -p 8090:8090 \
-  -e NODERED_URL=http://host.docker.internal:1880 \
-  -e NODERED_TOKEN=your-token \
-  ghcr.io/fgjcarlos/nodered-mcp:latest
-```
-
-The MCP endpoint is then `http://localhost:8090/mcp`. The image defaults to the HTTP transport, since stdio is meaningless inside a container. On Linux, if Node-RED runs on the host, add `--add-host=host.docker.internal:host-gateway`.
-
-To build the image yourself from source instead:
-
-```bash
-git clone https://github.com/fgjcarlos/nodered-mcp
-cd nodered-mcp
-docker build -t nodered-mcp .
-```
-
-### Option E — From source
-
-```bash
-git clone https://github.com/fgjcarlos/nodered-mcp
-cd nodered-mcp
-go build -o nodered-mcp ./cmd/nodered-mcp
-```
-
-## Configuration
-
-Every setting can be supplied as an environment variable or a command-line flag. Precedence is flag, then environment variable, then default.
-
-| Variable | Flag | Default | Description |
-|---|---|---|---|
-| `NODERED_URL` | `--url` | `http://localhost:1880` | Node-RED base URL |
-| `NODERED_TOKEN` | `--token` | — | Bearer token, when admin auth is enabled |
-| `NODERED_USERNAME` | — | — | Basic auth username, as an alternative to the token |
-| `NODERED_PASSWORD` | — | — | Basic auth password |
-| `NODERED_INSECURE` | — | `false` | Skip TLS verification. Development only |
-| `NODERED_BACKUP_DIR` | — | `backups` | Where flow snapshots are written before each write |
-| `MCP_READ_ONLY` | `--read-only` | `false` | Expose only tools that cannot modify Node-RED |
-| `MCP_DEBUG_STREAM` | `--debug-stream` | `false` | Open the `/comms` WebSocket at startup to enable debug streaming. **Off by default** because some Node-RED versions crash during the handshake. After enabling it, give `get_debug_messages` ~3 seconds to receive — the WebSocket is dialled at startup and the runtime publishes nothing until the editor-side filter is wired up. If the call still reports "still connecting", set `MCP_LOG_LEVEL=debug` and look for a `/comms` dial error in the server logs. See also: `runtimeState.enabled` in Node-RED settings — gates `get_flows_state` / `set_flows_state`, a different surface. |
-| `MCP_TRANSPORT` | `--transport` | `stdio` | `stdio` or `http` |
-| `MCP_HTTP_ADDR` | `--http-addr` | `:8090` | Listen address for the HTTP transport |
-| `MCP_HTTP_TOKEN` | `--http-token` | — | Bearer token for the HTTP transport. Required unless bound to loopback |
-| `MCP_LOG_LEVEL` | `--log-level` | `info` | `debug`, `info`, `warn`, or `error` |
-
-For local development, a `.env` file in the working directory is loaded automatically. Environment variables already set always win.
-
-```bash
-cp .env.example .env
-```
-
-## Command line
-
-```
-nodered-mcp                    start the server (equivalent to `nodered-mcp serve`)
-nodered-mcp serve --read-only  start with the mutating tools withheld
-nodered-mcp serve --help       list every flag
-nodered-mcp init               generate a configuration snippet for your MCP client
-nodered-mcp update             detect the install channel and upgrade in place
-nodered-mcp version            print the version
-```
-
-### The init command
-
-`init` detects which MCP clients are installed, prompts for the Node-RED URL, token, and backup directory, and **resolves the absolute path of the running binary**. The generated snippet therefore never points at a non-existent executable, which is the usual cause of a "Server disconnected" error.
-
-| Invocation | Behaviour |
+| Doc | Covers |
 |---|---|
-| `nodered-mcp init` | Print the snippet for you to paste |
-| `nodered-mcp init --write` | Write directly into the client configuration |
-| `nodered-mcp init --all` | Show every known client, not only the detected ones |
-
-`--write` performs a safe merge that preserves any other servers already configured, and saves a `.bak` of the previous file. It is supported for Claude Desktop, Cursor, and Gemini CLI. For VS Code, whose configuration is workspace-scoped, and for Claude Code, which is configured through its own CLI, `init` prints the instruction instead.
-
-`init` never renders or writes the literal Node-RED token. When a token is provided, it inserts `<NODERED_TOKEN>` instead; set `NODERED_TOKEN` in the launching environment, use the operating system keychain or credential store, or replace the placeholder manually.
-
-### The update command
-
-`update` detects how the binary was installed and upgrades it in place. The npm wrapper channel (the recommended install path) runs `npm install -g @fgjcarlos/nodered-mcp@latest` after a confirmation prompt. The Docker and standalone-binary channels print the upgrade command for the user to run themselves.
-
-| Invocation | Behaviour |
-|---|---|
-| `nodered-mcp update` | Show current and latest version, prompt for confirmation if newer |
-| `nodered-mcp update --yes` | Skip the confirmation prompt |
-| `nodered-mcp update --check` | Print the latest version and exit 0 if newer than the current one, 1 otherwise |
-
-Detection order: `/.dockerenv` (Docker) → a `@fgjcarlos/nodered-mcp` `package.json` next to the binary, or one directory up (npm) → standalone binary (install script). The npm channel reads the latest version from the public registry; no auth.
-
-## Transports
-
-**stdio** (default). The MCP client launches the binary and communicates over stdin/stdout. This is what Claude Desktop, Claude Code, Cursor, VS Code, and Gemini CLI use.
-
-**http** (streamable HTTP). A single long-running process serves several clients. The MCP endpoint is at `<addr>/mcp`.
-
-```bash
-nodered-mcp serve --transport http --http-addr :8090
-```
-
-### Authenticating the HTTP transport
-
-The HTTP transport exposes every tool — deploying flows, installing modules, stopping the runtime — to anything that can reach the port. It is therefore gated by a shared bearer token.
-
-```bash
-nodered-mcp serve --transport http --http-addr :8090 --http-token "$(openssl rand -hex 32)"
-```
-
-Clients send it as an ordinary `Authorization` header:
-
-```
-Authorization: Bearer <token>
-```
-
-**The token is mandatory whenever the listen address is reachable from off the machine, and the server refuses to start without one.** The case this catches is `:8090`: it reads as local but binds every interface. A loopback bind — `127.0.0.1:8090`, `localhost:8090`, `[::1]:8090` — does not need a token, so local development stays frictionless.
-
-```bash
-nodered-mcp serve --transport http --http-addr :8090
-# nodered-mcp: loading config: MCP_HTTP_TOKEN is required: ":8090" is reachable
-# from outside this machine ...
-```
-
-Token comparison is constant-time, so a wrong guess reveals nothing about how much of it was right, and the token never appears in a response. Rejected requests are logged with the caller's address.
-
-There is still no transport encryption here: over an untrusted network, put it behind a TLS-terminating reverse proxy. OAuth, which is what hosted web clients need, is not implemented — the MCP profile requires a full authorization server, not an extension of this.
-
-## Client integration
-
-All examples below use the stdio transport. For HTTP, see [the HTTP variant](#http-variant).
-
-### Claude Desktop
-
-**Recommended: the `.mcpb` extension.** A native installer that requires no JSON editing. Build the bundle with `scripts/build-mcpb.sh`, or download it from Releases once published, then open **Settings → Extensions → Install Extension** in Claude Desktop and select the `.mcpb` file. Claude Desktop presents a form for the Node-RED URL, token, and backup directory. The token is stored in the operating system credential store.
-
-```bash
-VERSION=v0.4.0 bash scripts/build-mcpb.sh   # requires go and npx
-```
-
-**Manual alternative.** Edit `claude_desktop_config.json` — `%APPDATA%\Claude\` on Windows, `~/Library/Application Support/Claude/` on macOS. See [`examples/claude_desktop_config.json`](./examples/claude_desktop_config.json).
-
-```json
-{
-  "mcpServers": {
-    "nodered": {
-      "command": "nodered-mcp",
-      "env": {
-        "NODERED_URL": "http://localhost:1880",
-        "NODERED_TOKEN": "your-token-if-you-have-one"
-      }
-    }
-  }
-}
-```
-
-### Claude Code
-
-```bash
-claude mcp add nodered \
-  -e NODERED_URL=http://localhost:1880 \
-  -e NODERED_TOKEN=your-token \
-  -- nodered-mcp
-```
-
-### Cursor
-
-`.cursor/mcp.json` in your workspace, or `~/.cursor/mcp.json` globally. Same shape as the Claude Desktop snippet above. See [`examples/cursor_mcp.json`](./examples/cursor_mcp.json).
-
-### VS Code
-
-`.vscode/mcp.json` in your workspace. Note the root key is `servers`, not `mcpServers`. See [`examples/vscode_mcp.json`](./examples/vscode_mcp.json).
-
-```json
-{
-  "servers": {
-    "nodered": {
-      "command": "nodered-mcp",
-      "env": {
-        "NODERED_URL": "http://localhost:1880",
-        "NODERED_TOKEN": "your-token-if-you-have-one"
-      }
-    }
-  }
-}
-```
-
-### Gemini CLI
-
-`~/.gemini/settings.json`. Same shape as the Claude Desktop snippet. See [`examples/gemini_settings.json`](./examples/gemini_settings.json).
-
-### OpenCode
-
-OpenCode uses a top-level `mcp` key (not `mcpServers`) and declares each server as `local` (spawned command) or `remote` (HTTP endpoint). Place the snippet in `~/.config/opencode/opencode.json` (user-global) or `./opencode.json` (project-local). See [`examples/opencode_config.json`](./examples/opencode_config.json).
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "nodered": {
-      "type": "local",
-      "command": ["nodered-mcp"],
-      "enabled": true,
-      "environment": {
-        "NODERED_URL": "http://localhost:1880",
-        "NODERED_TOKEN": "your-token-if-you-have-one"
-      }
-    }
-  }
-}
-```
-
-For the HTTP transport variant, use `type: "remote"` with `url` and `headers`:
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "nodered": {
-      "type": "remote",
-      "url": "http://localhost:8090/mcp",
-      "enabled": true,
-      "headers": {
-        "Authorization": "Bearer your-token"
-      }
-    }
-  }
-}
-```
-
-Restart OpenCode after editing. All 43 tools should appear under the `nodered` server.
-
-### Pi (pi-mono)
-
-Pi ships MCP support through a third-party adapter (`pi-mcp-adapter` / `pi-mcp-extension`), not in the core. Install both, then write the config:
-
-```bash
-npm install -g --ignore-scripts @earendil-works/pi-coding-agent
-pi install mcp-adapter
-```
-
-Then write `~/.pi/agent/mcp.json` (global) or `./.pi/mcp.json` (project-local). See [`examples/pi_mcp_config.json`](./examples/pi_mcp_config.json).
-
-```json
-{
-  "mcpServers": {
-    "nodered": {
-      "command": "nodered-mcp",
-      "env": {
-        "NODERED_URL": "http://localhost:1880",
-        "NODERED_TOKEN": "your-token-if-you-have-one"
-      },
-      "lifecycle": "keep-alive"
-    }
-  }
-}
-```
-
-`lifecycle: "keep-alive"` is recommended for nodered-mcp: it reconnects automatically after a Node-RED restart, which matters because Node-RED bounces during flow deployments. The default `lazy` only connects on the first tool call and disconnects after idle, which can mask connection issues.
-
-Inside Pi, run `/reload` to pick up the config, then `mcp({ connect: "nodered" })` to verify the connection and `mcp({ server: "nodered" })` to list the 43 tools.
-
-For the HTTP transport variant:
-
-```json
-{
-  "mcpServers": {
-    "nodered": {
-      "url": "http://localhost:8090/mcp",
-      "auth": "bearer",
-      "bearerToken": "your-token"
-    }
-  }
-}
-
-
-### HTTP variant
-
-Start the server once, then point the client at the endpoint rather than at a command. In clients that support `url` or `type: http`:
-
-```json
-{
-  "mcpServers": {
-    "nodered": {
-      "url": "http://localhost:8090/mcp",
-      "headers": { "Authorization": "Bearer your-token" }
-    }
-  }
-}
-```
-
-Drop the `headers` block only if the server is bound to loopback and running without a token.
-
-Restart the client after connecting. All 43 tools should appear.
-
-### OAuth (alternative to the bearer token)
-
-Web connectors that already speak OAuth 2.1 / OpenID Connect (claude.ai, custom front-ends) can identify themselves with a JWT instead of a shared secret. Configure the issuer and audience, drop the bearer token:
-
-```bash
-MCP_TRANSPORT=http
-MCP_HTTP_ADDR=:8090
-MCP_OAUTH_ISSUER=https://your-idp.example/
-MCP_OAUTH_AUDIENCE=nodered-mcp
-```
-
-On startup the server fetches `<issuer>/.well-known/openid-configuration` to discover the JWKS endpoint, then verifies every request's `Authorization: Bearer <jwt>` against the issuer's signing keys. `iss` must match the configured issuer; `aud` must match the configured audience. Discovery happens once at boot, so a misconfigured URL fails fast rather than on the first authenticated call.
-
-Configuring both `MCP_HTTP_TOKEN` and `MCP_OAUTH_ISSUER` is a configuration error and the server refuses to start.
-
-## Known limitations
-
-### Credential values are redacted
-Node-RED's admin API never returns credential values in flow responses. Fields that hold credentials (passwords, tokens, API keys stored in node properties) appear as empty strings. The MCP server has no credential-management tools.
-
-## Troubleshooting
-
-**Tools do not appear.** Confirm the binary is on the `PATH`, or use an absolute path in `command`. On Windows, escape the backslashes: `C:\\path\\nodered-mcp.exe`. Running `nodered-mcp init` resolves the path for you.
-
-**401 or 403 from Node-RED.** The token is missing or lacks the required scope. With `adminAuth` enabled, generate a token with write permission on flows.
-
-**No log output.** Logs are written to stderr; stdout is reserved for JSON-RPC frames on the stdio transport. Increase verbosity with `--log-level debug`.
-
-**HTTP transport does not connect.** Confirm `--transport http` is set and that the `--http-addr` port is free.
-
-**A write is refused with a backup error.** Backups are fail-closed by design: if the snapshot cannot be written, the write does not proceed. Check that `NODERED_BACKUP_DIR` exists and is writable.
-
-**`get_flows_state` says runtimeState is disabled; `get_node_status` says stream unavailable.** These are two different flags on two different sides of the wire:
-
-- `runtimeState.enabled` is a **Node-RED** setting (`settings.js`). It gates `GET/POST /flows/state`, used by `get_flows_state` and `set_flows_state`. Enable it in `settings.js` (`runtimeState: { enabled: true, ui: false }`) and restart Node-RED.
-- `MCP_DEBUG_STREAM` is an **MCP** env var. It gates the `/comms` WebSocket used by `get_node_status` and `get_debug_messages`. Enable it on the MCP process (`MCP_DEBUG_STREAM=on`).
-
-They are independent — neither enables the other. A single misconfigured flag can hide one tool surface while the other works fine.
-
-## Architecture
-
-```
-cmd/nodered-mcp/     entrypoint, CLI, init command
-internal/config/     environment-variable loader and validation
-internal/nodered/    HTTP client for the admin API
-internal/mcp/        MCP server: tools, resources, prompts
-```
-
-The MCP layer is deliberately thin. Each client method maps to exactly one admin endpoint; the MCP layer decides how to expose those operations as tools.
-
-Dependencies:
-
-| Component | Choice |
-|---|---|
-| Language | Go 1.25+ |
-| MCP SDK | [`mark3labs/mcp-go`](https://github.com/mark3labs/mcp-go) — stdio and streamable HTTP |
-| HTTP client | `net/http` (standard library) |
-| WebSocket | [`coder/websocket`](https://github.com/coder/websocket) — the /comms debug stream. Zero dependencies of its own |
-| Logging | `log/slog` (standard library) |
-| Dev config | [`godotenv`](https://github.com/joho/godotenv) |
-
-No frameworks, no ORM, no third-party Node-RED client.
+| [`docs/architecture.md`](./docs/architecture.md) | Source tree, dependencies, JSON-opaque flow model, backup-before-write guardrail |
+| [`docs/tools.md`](./docs/tools.md) | Catalog of the 43 MCP tools (read / write / action) |
+| [`docs/configuration.md`](./docs/configuration.md) | Environment variables and command-line flags |
+| [`docs/transports.md`](./docs/transports.md) | stdio and streamable HTTP transports, bearer auth, OAuth 2.1 |
+| [`docs/clients.md`](./docs/clients.md) | Per-MCP-client configuration snippets |
+| [`docs/troubleshooting.md`](./docs/troubleshooting.md) | Common failure modes and how to recover |
+| [`docs/roadmap.md`](./docs/roadmap.md) | Open work, accepted risks, planned versions |
+
+## Safety
+
+Handing an LLM write access to a running automation runtime demands
+guardrails. Three are built in:
+
+- Flow documents are treated as opaque JSON — no fixed Go structs,
+  no field loss.
+- Every mutating operation takes a backup of the full flow
+  configuration first and fails closed if the snapshot cannot be
+  written.
+- Wires are validated before the write reaches the runtime; dangling
+  wire targets are rejected at the MCP layer.
+
+Run with `--read-only` (or `MCP_READ_ONLY=true`) to advertise only
+the 20 read tools and withhold every mutating one at registration.
+`inject_node` is also withheld: firing an inject can send a real
+command to real hardware.
+
+Full threat model and hardening checklist:
+[`SECURITY.md`](./SECURITY.md).
 
 ## Development
 
@@ -640,35 +77,9 @@ go test ./...
 go build -o nodered-mcp ./cmd/nodered-mcp
 ```
 
-End-to-end check against a disposable instance:
-
-```bash
-docker run -it -p 1880:1880 nodered/node-red
-go build -o nodered-mcp ./cmd/nodered-mcp
-./nodered-mcp init --write
-```
-
-Then ask your client to list the Node-RED flows.
-
-Work items are tracked in [`issues/`](./issues/README.md) until the repository moves to GitHub Issues. Design rationale lives in [`docs/`](./docs/).
-
-## Security
-
-See [`SECURITY.md`](./SECURITY.md) for the threat model, the
-`MCP_NODE_DENYLIST` / `MCP_READ_ONLY` / `MCP_HTTP_TOKEN` knobs, and
-how to report a vulnerability.
-
-## Roadmap
-
-| Version | Scope | Status |
-|---|---|---|
-| v0.1 | 10 tools, 1 resource, 2 prompts, stdio transport | Released |
-| v0.2 | Streamable HTTP transport, CLI with flags and subcommands | Released |
-| v0.3 | Palette management: install, uninstall, enable, disable | Released |
-| v0.4 | `search_nodes`, settings and runtime state — 19 tools, 3 resources, 2 prompts | Released |
-| v0.5 | Read-only mode, context-efficient reads, diagnostics, context, the debug stream, granular node editing, `diff_flows`, HTTP bearer auth — 43 tools | Released |
-| v0.6 | OAuth 2.1 Resource Server for hosted web connectors | Released |
-| v0.7 | Local query cache | Planned |
+Work items live as GitHub Issues. Design decisions and historical
+audit reports live under [`docs/`](./docs/). See
+[`CONTRIBUTING.md`](./CONTRIBUTING.md) for the workflow.
 
 ## License
 
@@ -676,4 +87,7 @@ MIT. See [`LICENSE`](./LICENSE).
 
 ## Related project
 
-[`nrcc`](https://github.com/fgjcarlos/nrcc) — Node-RED Control Center, a Go and React web dashboard for administering Node-RED instances. A separate codebase with no shared code, designed to coexist with this server.
+[`nrcc`](https://github.com/fgjcarlos/nrcc) — Node-RED Control
+Center, a Go and React web dashboard for administering Node-RED
+instances. A separate codebase with no shared code, designed to
+coexist with this server.
