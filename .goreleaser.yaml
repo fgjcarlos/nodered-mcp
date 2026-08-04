@@ -9,8 +9,9 @@ before:
     # VERSION matches the tag) that fails the release if the
     # constant drifts; a sed in the before hook is the smallest
     # thing that keeps the constant honest without a manual bump.
-    - cmd: |
-        sed -i.bak -E "s/^(const VERSION = ')[^']+(';)/\1{{ .Version }}\2/" bin/install.js && rm -f bin/install.js.bak
+    - >-
+      sed -i.bak -E 's/^(const VERSION = ''')[^''']+(''';)/\1{{ .Version }}\2/'
+      bin/install.js && rm -f bin/install.js.bak
     - go mod tidy
 
 builds:
