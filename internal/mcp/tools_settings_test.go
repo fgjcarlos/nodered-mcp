@@ -80,6 +80,25 @@ func TestHandleGetDiagnostics_NotFoundHasActionableHint(t *testing.T) {
 	}
 }
 
+func TestHandleGetDiagnostics_ForbiddenHasActionableHint(t *testing.T) {
+	// NR >= 3.1 with settings.diagnostics.enabled = false returns 403.
+	// The handler must name the setting so the operator can fix it.
+	s, _ := serverWithMock(t, func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "diagnostics are disabled", http.StatusForbidden)
+	})
+	res, _ := call(t, s.handleGetDiagnostics, map[string]any{})
+	if !res.IsError {
+		t.Fatal("403 should be a typed error")
+	}
+	tc := res.Content[0].(mcp.TextContent)
+	if !strings.Contains(tc.Text, "diagnostics.enabled") {
+		t.Errorf("hint should mention diagnostics.enabled, got %q", tc.Text)
+	}
+	if !strings.Contains(tc.Text, "settings.js") {
+		t.Errorf("hint should mention settings.js, got %q", tc.Text)
+	}
+}
+
 func TestHandleListPlugins_Empty(t *testing.T) {
 	s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/plugins" {
