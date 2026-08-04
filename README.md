@@ -21,12 +21,28 @@ model.
 A Spanish version of this document is available at
 [`README.es.md`](./README.es.md).
 
-## Quickstart
+## Install
+
+Three channels are supported. Pick the one that fits:
 
 ```bash
-# 1. Install
+# npm — works on every platform. Recommended.
 npm install -g @fgjcarlos/nodered-mcp
+```
 
+```bash
+# go install — for anyone with a Go toolchain.
+go install github.com/fgjcarlos/nodered-mcp/cmd/nodered-mcp@latest
+```
+
+```bash
+# Docker — the binary runs inside the image; restart by replacing the container.
+docker pull ghcr.io/fgjcarlos/nodered-mcp:latest
+```
+
+After install, generate the snippet for your MCP client:
+
+```bash
 # 2. Generate the snippet for your MCP client
 nodered-mcp init --write
 
@@ -34,7 +50,6 @@ nodered-mcp init --write
 ```
 
 Need help? See [`docs/troubleshooting.md`](./docs/troubleshooting.md).
-
 ## Documentation
 
 The full reference lives in [`docs/`](./docs/):
