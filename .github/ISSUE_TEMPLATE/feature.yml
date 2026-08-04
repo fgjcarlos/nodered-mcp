@@ -1,0 +1,35 @@
+name: Feature request
+description: A new tool, subcommand, install channel, or behaviour.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Mirror `CONTRIBUTING.md`: three questions, in order.
+
+  - type: input
+    id: problem
+    attributes:
+      label: Problem
+      description: One sentence — what is missing or what friction are you hitting?
+      placeholder: |
+        `nodered-mcp` does not expose the Node-RED settings.js editor.
+    validations:
+      required: true
+
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Real use case
+      description: A flow you were trying to build, a client you were trying to configure, an automation that would have run if the feature existed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: shape
+    attributes:
+      label: Proposed shape (optional)
+      description: A new tool name, a new flag, a new subcommand. Skip if you do not have an opinion.
+    validations:
+      required: false

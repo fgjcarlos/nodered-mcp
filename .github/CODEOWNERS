@@ -1,0 +1,9 @@
+# CODEOWNERS — every file is owned by @fgjcarlos until a second
+# maintainer joins. Branch protection requires approval from Code
+# Owners; this file is what that protection reads.
+#
+# The pattern `*` matches every path; trailing comments are
+# ignored by GitHub. Future per-area owners would replace the
+# catch-all with explicit `path/ @user` lines.
+
+*       @fgjcarlos
