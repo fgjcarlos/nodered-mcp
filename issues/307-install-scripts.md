@@ -2,7 +2,13 @@
 
 **Labels:** distribution, dx
 **Milestone:** 4 — Distribution / DX
-**Status:** ✅ written (inert until 301 publishes a Release)
+**Status:** ⛔ superseded by #193 (2026-08)
+
+The shell install scripts were the documented install channel at the
+time of writing. After #192 ships Windows binaries on the npm channel,
+#193 retires both scripts in favour of `npm install` and `go install`.
+This file is preserved as repo history — closing actions live on
+[#193](https://github.com/fgjcarlos/nodered-mcp/issues/193).
 
 ## Context
 
