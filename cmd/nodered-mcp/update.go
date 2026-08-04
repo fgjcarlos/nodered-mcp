@@ -96,9 +96,9 @@ func runUpdate(args []string) error {
 		fmt.Fprintln(os.Stderr, "  docker compose up -d   # or however you started the container")
 		return nil
 	case channelBinary:
-		fmt.Fprintln(os.Stderr, "Detected a standalone binary install. Re-run the install script from the README")
-		fmt.Fprintln(os.Stderr, "to upgrade:")
-		fmt.Fprintln(os.Stderr, "  curl -sSL https://raw.githubusercontent.com/fgjcarlos/nodered-mcp/main/scripts/install.sh | sh")
+		fmt.Fprintln(os.Stderr, "Detected a stand-alone binary install (go install, or a manual build).")
+		fmt.Fprintln(os.Stderr, "To upgrade, re-run the same go install command:")
+		fmt.Fprintln(os.Stderr, "  go install github.com/fgjcarlos/nodered-mcp/cmd/nodered-mcp@latest")
 		return nil
 	}
 

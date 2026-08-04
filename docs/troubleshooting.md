@@ -20,12 +20,14 @@ set and that the `--http-addr` port is free.
 by design: if the snapshot cannot be written, the write does not
 proceed. Check that `NODERED_BACKUP_DIR` exists and is writable.
 
-**Windows: orphaned npm shims.** A failed `npm i -g
-@fgjcarlos/nodered-mcp` on Windows leaves three launcher files
-(`nodered-mcp`, `.cmd`, `.ps1`) in `%APPDATA%\npm\` that no
-`npm uninstall` removes. They precede `%LOCALAPPDATA%\Programs\nodered-mcp\`
-in the default PATH and shadow a working install made with
-`scripts/install.ps1`. Run
-[`scripts/cleanup-npm-shims.ps1`](../scripts/cleanup-npm-shims.ps1)
-to remove them. (Tracked as #184; the script ships in a separate
-PR.)
+**Windows: orphaned npm shims (legacy).** A `npm i -g
+@fgjcarlos/nodered-mcp` from a version before 0.5.16 could leave three
+launcher files (`nodered-mcp`, `.cmd`, `.ps1`) in `%APPDATA%\npm\` that
+no `npm uninstall` removes. After #192 the npm package ships Windows
+binaries directly, so fresh installs do not reproduce this. Users who
+inherited the orphaned shims from a pre-0.5.16 install can delete them
+with:
+
+```powershell
+Remove-Item "$env:APPDATA\npm\nodered-mcp*"
+```

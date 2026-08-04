@@ -400,12 +400,11 @@ func TestRunUpdate_DockerChannel(t *testing.T) {
 }
 
 // TestRunUpdate_BinaryChannel confirms the standalone-binary early-return
-// path prints the install.sh hint and exits nil without touching npm.
+// path prints the go install hint and exits nil without touching npm.
 //
-// Regression for issue #141: the printed URL used to be
-// `.../main/install.sh`, which 404s — the script lives under `scripts/`.
-// If this assertion breaks, the URL in update.go:101 has drifted from
-// `scripts/install.sh` again.
+// After #193 the shell install scripts are retired; the binary channel
+// now tells the user to re-run `go install`. If this assertion breaks,
+// the hint in update.go has drifted from the supported upgrade command.
 func TestRunUpdate_BinaryChannel(t *testing.T) {
 	out := captureStderr(t, func() {
 		orig := detectChannel
@@ -416,9 +415,16 @@ func TestRunUpdate_BinaryChannel(t *testing.T) {
 			t.Errorf("runUpdate should return nil on binary channel; got %v", err)
 		}
 	})
-	want := "https://raw.githubusercontent.com/fgjcarlos/nodered-mcp/main/scripts/install.sh"
+	want := "go install github.com/fgjcarlos/nodered-mcp/cmd/nodered-mcp@latest"
 	if !strings.Contains(out, want) {
 		t.Errorf("binary channel hint missing %q; got:\n%s", want, out)
+	}
+	// Belt-and-suspenders: the shell install scripts are gone, so no
+	// hint should ever point at them again.
+	for _, banned := range []string{"install.sh", "install.ps1", "raw.githubusercontent.com"} {
+		if strings.Contains(out, banned) {
+			t.Errorf("binary channel hint must not reference %q; got:\n%s", banned, out)
+		}
 	}
 }
 
