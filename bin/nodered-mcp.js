@@ -6,10 +6,11 @@
 // When the user runs `nodered-mcp ...` after `npm install -g
 // @fgjcarlos/nodered-mcp`, npm resolves the `bin` entry to this file.
 // This shim exists because the postinstall step downloads the real
-// binary as `bin/nodered-mcp` (no extension); we cannot put a shebang
-// on that one without first making sure it is executable, and we
-// cannot make it executable without it existing. So this `.js` file
-// re-execs the downloaded binary with the same argv.
+// binary as `bin/nodered-mcp` (no extension on linux/macOS,
+// `.exe` on Windows); we cannot put a shebang on the binary
+// without first making sure it is executable, and we cannot make
+// it executable without it existing. So this `.js` file re-execs
+// the downloaded binary with the same argv.
 //
 // On any error we fall back to a clear message instead of a stack
 // trace — the user's first experience of the package should not be a
@@ -21,7 +22,8 @@ const { spawn } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
 
-const real = path.join(__dirname, 'nodered-mcp');
+const exeSuffix = process.platform === 'win32' ? '.exe' : '';
+const real = path.join(__dirname, `nodered-mcp${exeSuffix}`);
 
 if (!fs.existsSync(real)) {
   console.error('nodered-mcp: binary not found.');
