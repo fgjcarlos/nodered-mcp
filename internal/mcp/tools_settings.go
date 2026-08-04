@@ -36,11 +36,20 @@ func (s *Server) handleGetDiagnostics(ctx context.Context, _ mcp.CallToolRequest
 		// A 404 here almost always means an older Node-RED rather than a real
 		// fault, and that is worth saying rather than leaving the model to guess.
 		var apiErr *nodered.APIError
-		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
-			return mcp.NewToolResultError(
-				"this Node-RED does not expose /diagnostics (added in 3.1). " +
-					"Use get_settings for what configuration is available instead.",
-			), nil
+		if errors.As(err, &apiErr) {
+			switch apiErr.StatusCode {
+			case http.StatusNotFound:
+				return mcp.NewToolResultError(
+					"this Node-RED does not expose /diagnostics (added in 3.1). " +
+						"Use get_settings for what configuration is available instead.",
+				), nil
+			case http.StatusForbidden:
+				// NR >= 3.1 returns 403 when settings.diagnostics.enabled
+				// is false. The setting name is the actionable hint.
+				return mcp.NewToolResultError(
+					"diagnostics are disabled in settings.js (set diagnostics.enabled = true and restart)",
+				), nil
+			}
 		}
 		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
 	}
