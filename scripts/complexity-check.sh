@@ -68,6 +68,12 @@ declare -a named_files=()
 declare -a named_baselines=()
 files=()
 while IFS= read -r line; do
+  # Strip a trailing CR before anything else. A Windows checkout with
+  # core.autocrlf=true rewrites this .txt to CRLF, the CR rides along on
+  # the last field, and every `(( current > baseline ))` below dies with
+  # "invalid arithmetic operator" -- while the script still prints OK and
+  # exits 0. A gate that silently stops gating is worse than no gate.
+  line=${line%$'\r'}
   # Skip blank lines and comments.
   case "$line" in
     ""|\#*) continue ;;

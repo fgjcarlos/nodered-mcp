@@ -46,7 +46,7 @@ jobs:
             echo "Skipping CRLF check on Windows (core.autocrlf may rewrite)."
             exit 0
           fi
-          crlf=$(git grep -nIE $'\r' -- '*.go' '*.sh' '*.yaml' '*.yml' '*.json' '*.md' '*.ps1' '*.js' '*.toml' 'go.mod' 'go.sum' ':!.gitattributes' || true)
+          crlf=$(git grep -nIE $'\r' -- '*.go' '*.sh' '*.yaml' '*.yml' '*.json' '*.md' '*.ps1' '*.js' '*.toml' '*.txt' 'go.mod' 'go.sum' 'Dockerfile' 'LICENSE' '.gitignore' '.dockerignore' '.env.example' ':!.gitattributes' || true)
           if [ -n "$crlf" ]; then
             echo "These files contain CRLF line endings:"
             echo "$crlf"
