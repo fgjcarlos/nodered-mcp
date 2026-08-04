@@ -650,7 +650,7 @@ go build -o nodered-mcp ./cmd/nodered-mcp
 
 Then ask your client to list the Node-RED flows.
 
-Work items are tracked in [`issues/`](./issues/README.md) until the repository moves to GitHub Issues. Design rationale lives in [`PLAN.md`](./PLAN.md).
+Work items are tracked in [`issues/`](./issues/README.md) until the repository moves to GitHub Issues. Design rationale lives in [`docs/`](./docs/).
 
 ## Security
 
