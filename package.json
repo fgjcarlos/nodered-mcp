@@ -20,7 +20,8 @@
     "postinstall": "node bin/install.js"
   },
   "files": [
-    "bin/"
+    "bin/",
+    "!bin/*_test.js"
   ],
   "engines": {
     "node": ">=18"
