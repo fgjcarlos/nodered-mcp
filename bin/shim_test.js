@@ -1,13 +1,13 @@
 'use strict';
 
-// bin/shim_test.js — regression guard for issue #80.
+// bin/shim_test.js — regression guard for issues #80 and #182.
 //
-// Verifies that bin/nodered-mcp.js, when run from a Windows checkout
-// without the postinstall-downloaded binary present, emits the
-// correct platform-aware help message instead of the cryptic
-// `Cannot find module '.../bin/nodered-mcp.js'` error reported in
-// the field. Linux/macOS users still get the existing
-// `npm install -g --force` hint.
+// Verifies that bin/nodered-mcp.js, when run without the
+// postinstall-downloaded binary present, emits the generic
+// `npm install -g --force` hint instead of a Node.js stack trace.
+// The Windows-specific hint was removed in #182 — the package.json
+// `os` field now makes npm abort on Windows before the shim runs,
+// so the shim is a Linux/macOS-only path by construction.
 //
 // Run with: node bin/shim_test.js
 // Exits 0 on success, 1 on any mismatch.
@@ -20,6 +20,12 @@ const os = require('node:os');
 function fail(msg) {
   console.error(`shim_test: FAIL: ${msg}`);
   process.exit(1);
+}
+
+const repoRoot = path.join(__dirname, '..');
+const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+if (!Array.isArray(pkg.os) || !pkg.os.includes('linux') || !pkg.os.includes('darwin')) {
+  fail(`package.json must declare os: ["linux", "darwin"]; got ${JSON.stringify(pkg.os)}`);
 }
 
 const shim = path.join(__dirname, 'nodered-mcp.js');
@@ -44,20 +50,6 @@ try {
   }
   if (!stderr.includes('npm install -g --force @fgjcarlos/nodered-mcp')) {
     fail(`expected generic reinstall hint in stderr; got: ${stderr}`);
-  }
-
-  // On non-Windows runners the Windows-specific hint must be absent.
-  if (process.platform !== 'win32' && stderr.includes('scripts/install.ps1')) {
-    fail(`non-Windows shim should not mention scripts/install.ps1; got: ${stderr}`);
-  }
-
-  // Spot-check the source for the Windows branch.
-  const src = fs.readFileSync(shim, 'utf8');
-  if (!src.includes('/main/scripts/install.ps1')) {
-    fail('shim does not reference the fixed install.ps1 URL.');
-  }
-  if (process.platform !== 'win32' && !src.includes('process.platform === \'win32\'')) {
-    fail('shim does not gate Windows hint on platform check.');
   }
 
   console.log('shim_test: PASS');
