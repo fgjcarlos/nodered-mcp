@@ -67,6 +67,7 @@ The 20 tools marked `read` are the only ones registered under
 | `get_debug_messages` | `/comms` WebSocket | read | Buffer of 500, reconnects |
 | `get_runtime_logs` | journal / stream | read | |
 | `list_plugins` | `GET /plugins` | read | editor-api |
+| `get_runtime_info` | companion to `get_diagnostics` | read | MCP server view of the runtime |
 | `get_node_status` | `/comms` WebSocket | read | |
 | `set_flows_state` | `POST /flows/state` | write | |
 | `list_backups` | local | read | |
