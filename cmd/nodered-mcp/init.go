@@ -390,7 +390,14 @@ func renderConfig(key, bin, url, token, backupDir string) string {
 
 	if key == "claude-code" {
 		var b strings.Builder
-		b.WriteString("claude mcp add nodered")
+		// -s user is not optional here. `claude mcp add` defaults to
+		// --scope local, which binds the server to the directory the
+		// command happened to run in. Someone who just installed the
+		// binary globally and pasted this from their home directory
+		// would get a server that exists in that one folder and
+		// nowhere else — with no error to explain it. The binary this
+		// command points at is global, so the registration is too.
+		b.WriteString("claude mcp add -s user nodered")
 		// Fixed order keeps the command stable and testable.
 		for _, k := range []string{"NODERED_URL", "NODERED_TOKEN", "NODERED_BACKUP_DIR"} {
 			if v, ok := env[k]; ok {

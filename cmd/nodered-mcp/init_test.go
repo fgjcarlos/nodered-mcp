@@ -158,11 +158,25 @@ func TestRenderConfig_VSCodeUsesServersKey(t *testing.T) {
 	}
 }
 
+// TestInit_ClaudeCodeCommandIsUserScoped pins the -s user flag.
+// `claude mcp add` defaults to --scope local, which records the server
+// against the *current working directory*. A user who installed the
+// binary globally and ran the generated command from their home
+// directory got a server that only existed in that one folder — the
+// command succeeded, `claude mcp list` was empty everywhere else, and
+// nothing reported an error.
+func TestInit_ClaudeCodeCommandIsUserScoped(t *testing.T) {
+	out := renderConfig("claude-code", "/bin/nodered-mcp", "http://localhost:1880", "", "backups")
+	if !strings.HasPrefix(out, "claude mcp add -s user nodered") {
+		t.Errorf("command must be user-scoped, or it registers per-directory:\n%s", out)
+	}
+}
+
 func TestInit_RendersPlaceholderForClaudeCode(t *testing.T) {
 	const literalToken = "supersecret-test-token-12345"
 	out := renderConfig("claude-code", "/bin/nodered-mcp", "http://localhost:1880", literalToken, "custom-backups")
-	if !strings.HasPrefix(out, "claude mcp add nodered") {
-		t.Errorf("expected a `claude mcp add` command, got:\n%s", out)
+	if !strings.HasPrefix(out, "claude mcp add -s user nodered") {
+		t.Errorf("expected a user-scoped `claude mcp add` command, got:\n%s", out)
 	}
 	if !strings.Contains(out, "-e NODERED_URL=http://localhost:1880") {
 		t.Errorf("URL flag missing:\n%s", out)
