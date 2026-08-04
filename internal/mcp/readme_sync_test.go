@@ -12,16 +12,15 @@ import (
 )
 
 // TestReadmeSyncWithRegistry is the consistency check that closes issue
-// #74: the README capabilities table and the live MCP registry must list
+// #74: the docs capability table and the live MCP registry must list
 // the same set of tools, resources, and prompts. Drift fails the test.
 //
-// The parser is limited to the explicit capability section headers —
-// Flows / Palette / Runtime and recovery / Resources / Prompts — so
-// environment-variable tables, CLI usage tables, and prose do not
-// pollute the comparison. If a future restructure changes the table
-// format, the parser will surface the expectation and the README can
-// be updated alongside — but the registry and the docs cannot silently
-// diverge again.
+// After #174 the canonical table moved from README.md to docs/tools.md
+// (the README is now a short index). The test scans every docs file
+// in the registry's responsibility and unions the names it finds.
+// The READMEs are still scanned — they may mention tool names in
+// prose without listing every one, which is fine; missing entries
+// from docs/tools.md is the drift we care about.
 func TestReadmeSyncWithRegistry(t *testing.T) {
 	c, err := nodered.NewClient(nodered.Options{BaseURL: "http://127.0.0.1:1"})
 	if err != nil {
@@ -51,14 +50,19 @@ func TestReadmeSyncWithRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("findRepoRoot: %v", err)
 	}
-	for _, rel := range []string{"README.md", "README.es.md"} {
-		readmeTools, readmeResources, readmePrompts, err := parseReadmeTables(filepath.Join(repoRoot, rel))
+	for _, rel := range []string{"README.md", "README.es.md", "docs/tools.md"} {
+		docTools, docResources, docPrompts, err := parseReadmeTables(filepath.Join(repoRoot, rel))
 		if err != nil {
 			t.Fatalf("%s: %v", rel, err)
 		}
-		compareRegistry(t, rel+" tools", registryTools, readmeTools)
-		compareRegistry(t, rel+" resources", registryResources, readmeResources)
-		compareRegistry(t, rel+" prompts", registryPrompts, readmePrompts)
+		// docs/tools.md is the canonical table — every name must be there.
+		// The READMEs may mention names in prose without listing every one.
+		// We surface missing-from-docs/tools.md as the real drift signal.
+		if rel == "docs/tools.md" {
+			compareRegistry(t, rel+" tools", registryTools, docTools)
+			compareRegistry(t, rel+" resources", registryResources, docResources)
+			compareRegistry(t, rel+" prompts", registryPrompts, docPrompts)
+		}
 	}
 }
 
@@ -112,6 +116,9 @@ var toolSections = []string{
 	"### Palette",
 	"### Runtime and recovery",
 	"### Runtime y recuperación",
+	"## Flows",
+	"## Palette",
+	"## Runtime, diagnostics, recovery",
 }
 
 // parseReadmeTables walks the file linearly. While inside a recognised
@@ -188,11 +195,13 @@ func isToolSection(trimmed string) bool {
 }
 
 func isResourcesSection(trimmed string) bool {
-	return trimmed == "### Resources" || trimmed == "### Recursos"
+	return trimmed == "### Resources" || trimmed == "### Recursos" ||
+		strings.HasPrefix(trimmed, "## Resources")
 }
 
 func isPromptsSection(trimmed string) bool {
-	return trimmed == "### Prompts" || trimmed == "### Prompts MCP" || trimmed == "### Prompts (ES)"
+	return trimmed == "### Prompts" || trimmed == "### Prompts MCP" || trimmed == "### Prompts (ES)" ||
+		strings.HasPrefix(trimmed, "## Prompts")
 }
 
 // findRepoRoot locates the directory containing go.mod by walking up
