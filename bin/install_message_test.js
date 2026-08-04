@@ -45,4 +45,23 @@ for (const asset of expected) {
   }
 }
 
+// The list above is only half the contract: it says what install.js
+// asks for, not what goreleaser actually uploads. Those drifted apart
+// once already -- an archives format_overrides block gave Windows a
+// .zip while install.js kept requesting a .tar.gz, so `npm i -g` on
+// Windows 404'd on every release. Assert the archive config still
+// produces the extension this map assumes.
+const releaserPath = path.join(__dirname, '..', '.goreleaser.yaml');
+const releaserSrc = fs.readFileSync(releaserPath, 'utf8');
+
+if (!/^\s*formats:\s*\[tar\.gz\]\s*$/m.test(releaserSrc)) {
+  fail('.goreleaser.yaml no longer declares `formats: [tar.gz]`; the .tar.gz names above are wrong.');
+}
+if (/^\s*format_overrides:/m.test(releaserSrc)) {
+  fail('.goreleaser.yaml has a format_overrides block; some platform now gets a different extension than the asset map expects.');
+}
+if (!/^\s*name_template:\s*"\{\{ \.ProjectName \}\}_\{\{ \.Os \}\}_\{\{ \.Arch \}\}"\s*$/m.test(releaserSrc)) {
+  fail('.goreleaser.yaml archive name_template changed; the asset map above no longer matches the published names.');
+}
+
 console.log('install_message_test: PASS');
