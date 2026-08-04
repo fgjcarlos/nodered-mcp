@@ -18,6 +18,10 @@ on:
 
 permissions:
   contents: read
+  # id-token: write is required by npm provenance so the publish
+  # step can attach a build attestation via OIDC. Without it, the
+  # package.json "provenance": true flag has no effect.
+  id-token: write
 
 jobs:
   publish:
