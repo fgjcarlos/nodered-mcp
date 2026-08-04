@@ -26,11 +26,17 @@ Edit `claude_desktop_config.json` — `%APPDATA%\Claude\` on Windows,
 ## Claude Code
 
 ```bash
-claude mcp add nodered \
+claude mcp add -s user nodered \
   -e NODERED_URL=http://localhost:1880 \
   -e NODERED_TOKEN=your-token \
   -- nodered-mcp
 ```
+
+`-s user` registers the server for your whole account. Without it
+`claude mcp add` defaults to `--scope local`, which binds the server
+to the directory you happened to run the command in — it then fails
+to appear in every other project, with no error to explain why. Check
+the result with `claude mcp list`.
 
 ## Cursor
 

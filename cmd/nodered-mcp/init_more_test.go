@@ -61,7 +61,7 @@ func TestWriteClientConfig_NonWritableTarget(t *testing.T) {
 	var buf bytes.Buffer
 	_, _ = io.Copy(&buf, r)
 	out := buf.String()
-	if !strings.Contains(out, "claude mcp add nodered") {
+	if !strings.Contains(out, "claude mcp add -s user nodered") {
 		t.Errorf("expected claude-code snippet in stdout; got %q", out)
 	}
 }
