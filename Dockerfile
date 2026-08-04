@@ -20,10 +20,10 @@ FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/nodered-mcp /usr/local/bin/nodered-mcp
 
 # A container has no MCP client attached to stdin, so the stdio transport is
-# useless here — default to HTTP. Every value is overridable at `docker run`.
+# useless here — default to HTTP. MCP_HTTP_TOKEN and NODERED_URL are supplied
+# explicitly at `docker run`; neither has a safe, portable image default.
 ENV MCP_TRANSPORT=http \
-	MCP_HTTP_ADDR=:8090 \
-	NODERED_URL=http://host.docker.internal:1880
+	MCP_HTTP_ADDR=:8090
 
 EXPOSE 8090
 ENTRYPOINT ["nodered-mcp"]

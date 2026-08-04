@@ -36,7 +36,7 @@ go install github.com/fgjcarlos/nodered-mcp/cmd/nodered-mcp@latest
 ```
 
 ```bash
-# Docker — el binario corre dentro de la imagen; reinicia reemplazando el contenedor.
+# Docker — descarga la imagen y sigue el ejemplo completo de arranque de abajo.
 docker pull ghcr.io/fgjcarlos/nodered-mcp:latest
 ```
 
@@ -50,6 +50,64 @@ nodered-mcp init --write
 ```
 
 ¿Problemas? Consulta [`docs/troubleshooting.md`](./docs/troubleshooting.md).
+
+## Docker
+
+La imagen sirve HTTP streamable en el puerto `8090`. No contiene un token
+MCP ni una URL de Node-RED: un token no se puede incluir de forma segura en
+una imagen y `host.docker.internal` no está disponible en todas las
+plataformas Docker.
+
+Define un token en tu shell y arranca el contenedor con una URL de Node-RED
+explícita y un puerto publicado solo en loopback:
+
+```bash
+export MCP_HTTP_TOKEN="$(openssl rand -hex 32)"
+
+docker run --rm --name nodered-mcp \
+  --publish 127.0.0.1:8090:8090 \
+  --env MCP_HTTP_TOKEN \
+  --env NODERED_URL=http://host.docker.internal:1880 \
+  ghcr.io/fgjcarlos/nodered-mcp:latest
+```
+
+En Docker Desktop (macOS o Windows), `host.docker.internal` llega a una
+instancia de Node-RED que se ejecuta en el host. Envía las solicitudes MCP a
+`http://127.0.0.1:8090/mcp` con `Authorization: Bearer $MCP_HTTP_TOKEN`.
+El token es obligatorio incluso con un puerto publicado solo en loopback
+porque el listener del contenedor se enlaza a todas sus interfaces.
+
+En Docker Engine para Linux, añade el mapeo host-gateway de Docker antes de
+usar ese hostname:
+
+```bash
+docker run --rm --name nodered-mcp \
+  --add-host host.docker.internal:host-gateway \
+  --publish 127.0.0.1:8090:8090 \
+  --env MCP_HTTP_TOKEN \
+  --env NODERED_URL=http://host.docker.internal:1880 \
+  ghcr.io/fgjcarlos/nodered-mcp:latest
+```
+
+Si Node-RED es otro contenedor, usa una red Docker compartida y el nombre de
+su servicio o contenedor; funciona tanto en Docker Desktop como en Linux:
+
+```bash
+docker network create nodered-mcp
+docker network connect nodered-mcp node-red
+
+docker run --rm --name nodered-mcp \
+  --network nodered-mcp \
+  --publish 127.0.0.1:8090:8090 \
+  --env MCP_HTTP_TOKEN \
+  --env NODERED_URL=http://node-red:1880 \
+  ghcr.io/fgjcarlos/nodered-mcp:latest
+```
+
+Sustituye `node-red` por el nombre real del contenedor o servicio de Compose.
+No publiques el puerto `8090` más allá de loopback salvo que el firewall del
+host y la autenticación del transporte estén configurados para esa exposición.
+
 ## Documentación
 
 La referencia completa está en [`docs/`](./docs/):
