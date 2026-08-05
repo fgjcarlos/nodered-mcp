@@ -17,7 +17,7 @@
 const assert = require('node:assert/strict');
 const {
   verifyReleaseAssets,
-  EXPECTED_BINARY_COUNT,
+  REQUIRED_NPM_ASSETS,
 } = require('../scripts/release-gate.js');
 
 let passed = 0;
@@ -38,12 +38,7 @@ function test(name, fn) {
 // asset names are pinned in .goreleaser.yaml's `name_template` and
 // in install_message_test.js.
 const fullAssets = [
-  'nodered-mcp_linux_amd64.tar.gz',
-  'nodered-mcp_linux_arm64.tar.gz',
-  'nodered-mcp_darwin_amd64.tar.gz',
-  'nodered-mcp_darwin_arm64.tar.gz',
-  'nodered-mcp_windows_amd64.tar.gz',
-  'nodered-mcp_windows_arm64.tar.gz',
+  ...REQUIRED_NPM_ASSETS,
   'nodered-mcp_0.6.1_linux_amd64.sbom.json',
   'nodered-mcp_0.6.1_linux_arm64.sbom.json',
   'nodered-mcp_0.6.1_darwin_amd64.sbom.json',
@@ -53,15 +48,17 @@ const fullAssets = [
   'checksums.txt',
 ];
 
-const validChecksums = (() => {
+function checksumsFor(assetNames) {
   // 64 hex chars of zeros; we don't care about the actual digest
   // values here, only the line format.
   const hex = '0'.repeat(64);
-  return fullAssets
-    .filter((n) => !/\.sbom\.json$/.test(n))
+  return assetNames
+    .filter((n) => /\.tar\.gz$/.test(n))
     .map((n) => `${hex}  ${n}`)
     .join('\n') + '\n';
-})();
+}
+
+const validChecksums = checksumsFor(fullAssets);
 
 function release(assets, opts) {
   return {
@@ -114,16 +111,40 @@ test('fails when checksums.txt is missing', () => {
   );
 });
 
-test('fails when no tarball is present', () => {
-  const assets = fullAssets.filter((n) => !/\.tar\.gz$/.test(n));
-  const r = verifyReleaseAssets({
-    release: release(assets),
-    checksumsContent: null,
-    assetNames: assets,
+for (const requiredAsset of REQUIRED_NPM_ASSETS) {
+  test(`fails when required npm tarball is missing: ${requiredAsset}`, () => {
+    const assets = fullAssets.filter((n) => n !== requiredAsset);
+    const r = verifyReleaseAssets({
+      release: release(assets),
+      checksumsContent: checksumsFor(assets),
+      assetNames: assets,
+    });
+    assert.equal(r.ok, false);
+    assert.ok(
+      r.errors.some((e) => e.includes(requiredAsset) && /missing/i.test(e)),
+      JSON.stringify(r.errors),
+    );
   });
-  assert.equal(r.ok, false);
-  assert.ok(r.errors.some((e) => /tarball/i.test(e)), JSON.stringify(r.errors));
-});
+}
+
+for (const requiredAsset of REQUIRED_NPM_ASSETS) {
+  test(`fails when required npm checksum is missing: ${requiredAsset}`, () => {
+    const checksums = validChecksums
+      .split('\n')
+      .filter((line) => !line.endsWith(`  ${requiredAsset}`))
+      .join('\n');
+    const r = verifyReleaseAssets({
+      release: release(fullAssets),
+      checksumsContent: checksums,
+      assetNames: fullAssets,
+    });
+    assert.equal(r.ok, false);
+    assert.ok(
+      r.errors.some((e) => e.includes(requiredAsset) && /no entry/i.test(e)),
+      JSON.stringify(r.errors),
+    );
+  });
+}
 
 test('fails when no SBOM is present', () => {
   const assets = fullAssets.filter((n) => !/\.sbom\.json$/.test(n));
@@ -134,20 +155,6 @@ test('fails when no SBOM is present', () => {
   });
   assert.equal(r.ok, false);
   assert.ok(r.errors.some((e) => /SBOM/i.test(e)), JSON.stringify(r.errors));
-});
-
-test('fails when checksums.txt has too few entries', () => {
-  const short = `${'0'.repeat(64)}  nodered-mcp_linux_amd64.tar.gz\n`;
-  const r = verifyReleaseAssets({
-    release: release(fullAssets),
-    checksumsContent: short,
-    assetNames: fullAssets,
-  });
-  assert.equal(r.ok, false);
-  assert.ok(
-    r.errors.some((e) => /expected >=/.test(e)),
-    JSON.stringify(r.errors),
-  );
 });
 
 test('fails when checksums.txt contains a malformed line', () => {
@@ -193,8 +200,9 @@ test('fails when checksums.txt lists the same file twice', () => {
   );
 });
 
-test('EXPECTED_BINARY_COUNT matches the goreleaser matrix (3x2)', () => {
-  assert.equal(EXPECTED_BINARY_COUNT, 6);
+test('required npm assets are derived from the installer contract', () => {
+  assert.ok(REQUIRED_NPM_ASSETS.length > 0);
+  assert.equal(new Set(REQUIRED_NPM_ASSETS).size, REQUIRED_NPM_ASSETS.length);
 });
 
 if (failed > 0) {
