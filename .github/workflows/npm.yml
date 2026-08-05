@@ -61,6 +61,12 @@ jobs:
           fetch-tags: true
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        # No registry-url here: setting it tells actions/setup-node
+        # to write a runtime .npmrc that routes npm publish through
+        # a tokenless path the registry rejects with E404 on scoped
+        # packages. The platform packages step uses NPM_SECRET
+        # directly; the main package step uses NPM_SECRET too,
+        # without --provenance (see comment in publish main package).
         with:
           node-version: 20
 
@@ -189,13 +195,12 @@ jobs:
             # add one after the package exists, and the first
             # publish creates the scoped package). Publish without
             # --provenance so the registry accepts the create; the
-            # main package below still publishes with --provenance
-            # via OIDC (Trusted Publisher is configured for
-            # @fgjcarlos/nodered-mcp). Add Trusted Publisher per
-            # platform package once each exists on npmjs, then
-            # restore --provenance here. ponytail: keep simple,
-            # upgrade after each platform package has at least one
-            # public version.
+            # main package below also publishes without --provenance
+            # using the NPM_SECRET bypass-2FA token. Add Trusted
+            # Publisher per platform package once each exists on
+            # npmjs, then restore --provenance here. ponytail: keep
+            # simple, upgrade after each platform package has at
+            # least one public version.
             npm publish --access public --tag next "./$tarball"
             echo "published ${scope}@${version}"
           done
@@ -230,15 +235,13 @@ jobs:
           done
 
       - name: publish main package
-        # Trusted Publisher is configured for @fgjcarlos/nodered-mcp
-        # in the npmjs package settings (workflow npm.yml, no env).
-        # Authenticate via OIDC by removing the NPM_SECRET-based
-        # ~/.npmrc so npm falls through to the OIDC id-token in
-        # the actions/setup-node step. Without this, npm prefers
-        # the literal token over the OIDC token and the registry
-        # rejects --provenance publish with "Two-factor
-        # authentication is required but an automation token was
-        # specified".
+        # Use NPM_SECRET (bypass-2FA automation token) instead of
+        # the OIDC Trusted Publisher path. The OIDC fall-through
+        # requires actions/setup-node with registry-url, which
+        # collides with the platform packages step above. Publish
+        # without provenance and rely on the registry integrity
+        # hash for tamper detection (same model the platform
+        # packages use). TODO: revisit once OIDC works end-to-end.
         env:
           NPM_SECRET: ${{ secrets.NPM_SECRET }}
         run: |
@@ -247,16 +250,15 @@ jobs:
             echo "@fgjcarlos/nodered-mcp@${version} is already published; nothing to do."
             exit 0
           fi
-          rm -f ~/.npmrc
-          npm publish --access public --provenance --tag next
+          echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
+          npm publish --access public --tag next
 
-      - name: verify main package integrity and provenance
+      - name: verify main package integrity
         run: |
           version=$(jq -r .version package.json)
           integrity=$(npm view "@fgjcarlos/nodered-mcp@${version}" dist.integrity)
-          attestation=$(npm view "@fgjcarlos/nodered-mcp@${version}" dist.attestations.url)
-          if [ -z "$integrity" ] || [ -z "$attestation" ]; then
-            echo "main package lacks registry integrity or provenance"
+          if [ -z "$integrity" ]; then
+            echo "main package lacks registry integrity"
             exit 1
           fi
 
