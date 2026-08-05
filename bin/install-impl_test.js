@@ -34,6 +34,7 @@ const {
   promote,
   downloadWithTimeout,
   PACKAGE_VERSION,
+  DOWNLOAD_RETRIES,
 } = require('./install-impl');
 
 let failures = 0;
@@ -266,6 +267,10 @@ async function testSuccessPath() {
     if (!fs.existsSync(marker)) fail(`success: .installed marker missing`);
     const markerText = fs.readFileSync(marker, 'utf8').trim();
     assertEq(markerText, PACKAGE_VERSION, 'success: marker version matches package');
+    const leakedArchive = path.join(s.binDir, s.assetName);
+    if (fs.existsSync(leakedArchive)) {
+      fail(`success: transport archive must not be copied into bin/: ${leakedArchive}`);
+    }
   } finally {
     cleanup(s);
   }
@@ -388,9 +393,8 @@ async function testDownloadTimeout() {
 // flaky download that recovers within the retry budget must succeed
 // and the install must complete normally.
 //
-// The first call to downloadWithTimeout is always the checksums.txt
-// fetch, which goes through a single attempt (not the retry wrapper).
-// To exercise the retry behavior we throw only on the asset URL.
+// The first call to downloadWithTimeout is the checksums.txt fetch.
+// To isolate asset retry behavior, that request succeeds immediately.
 async function testRetryRecoversFromTransientTransport() {
   const s = makeScenario();
   let calls = 0;
@@ -448,10 +452,11 @@ async function testRetryExhaustsAfterBudget() {
     }
     if (!threw) fail('retry exhaust: _run should have rejected');
     // 1 checksums call + retries attempts on the asset URL.
-    // The exact count depends on DOWNLOAD_RETRIES (default 3 → 3 asset
-    // attempts), but the upper bound is bounded.
-    if (calls < 2) fail(`retry exhaust: downloadWithTimeout called ${calls} times, expected at least 2`);
-    if (calls > 10) fail(`retry exhaust: downloadWithTimeout called ${calls} times, expected <= retries-budget`);
+    assertEq(
+      calls,
+      1 + DOWNLOAD_RETRIES,
+      `retry exhaust: one checksums call plus ${DOWNLOAD_RETRIES} asset attempts`,
+    );
     if (fs.existsSync(path.join(s.binDir, 'nodered-mcp'))) {
       fail('retry exhaust: target binary must NOT exist after persistent failure');
     }
@@ -460,6 +465,87 @@ async function testRetryExhaustsAfterBudget() {
     }
     if (fs.existsSync(s.stagingDir)) {
       fail('retry exhaust: staging dir must be cleaned up');
+    }
+  } finally {
+    cleanup(s);
+  }
+}
+
+// checksums.txt is part of the install's network path and must receive
+// the same bounded retry protection as the larger release asset.
+async function testChecksumsRetryRecoversFromTransientTransport() {
+  const s = makeScenario();
+  let checksumsCalls = 0;
+  let assetCalls = 0;
+  const deps = makeDeps(s, {
+    downloadWithTimeout: async (url, _timeoutMs) => {
+      if (url.endsWith('/checksums.txt')) {
+        checksumsCalls += 1;
+        if (checksumsCalls < DOWNLOAD_RETRIES) {
+          throw new Error('ECONNRESET checksums (simulated transient)');
+        }
+        return Buffer.from(s.checksumsTxt, 'utf8');
+      }
+      if (url.endsWith('/' + s.assetName)) {
+        assetCalls += 1;
+        return Buffer.from(s.tarball);
+      }
+      throw new Error(`unexpected download url in test: ${url}`);
+    },
+  });
+  try {
+    const result = await _run(deps, ctx(s));
+    assertEq(result.skipped, false, 'checksums retry: skipped=false');
+    assertEq(
+      checksumsCalls,
+      DOWNLOAD_RETRIES,
+      `checksums retry: recovered on attempt ${DOWNLOAD_RETRIES}`,
+    );
+    assertEq(assetCalls, 1, 'checksums retry: asset downloaded once');
+  } finally {
+    cleanup(s);
+  }
+}
+
+async function testChecksumsRetryExhaustsAfterBudget() {
+  const s = makeScenario();
+  let checksumsCalls = 0;
+  let assetCalls = 0;
+  const deps = makeDeps(s, {
+    downloadWithTimeout: async (url, _timeoutMs) => {
+      if (url.endsWith('/checksums.txt')) {
+        checksumsCalls += 1;
+        throw new Error('ECONNRESET checksums (simulated persistent)');
+      }
+      assetCalls += 1;
+      throw new Error(`asset should not be requested after checksums failure: ${url}`);
+    },
+  });
+  try {
+    let threw = false;
+    try {
+      await _run(deps, ctx(s));
+    } catch (err) {
+      threw = true;
+      if (!/ECONNRESET checksums/.test(err.message)) {
+        fail(`checksums retry exhaust: unexpected error: ${err.message}`);
+      }
+    }
+    if (!threw) fail('checksums retry exhaust: _run should have rejected');
+    assertEq(
+      checksumsCalls,
+      DOWNLOAD_RETRIES,
+      `checksums retry exhaust: stopped after ${DOWNLOAD_RETRIES} attempts`,
+    );
+    assertEq(assetCalls, 0, 'checksums retry exhaust: asset was not requested');
+    if (fs.existsSync(path.join(s.binDir, 'nodered-mcp'))) {
+      fail('checksums retry exhaust: target binary must NOT exist');
+    }
+    if (fs.existsSync(path.join(s.binDir, '.installed'))) {
+      fail('checksums retry exhaust: marker must NOT be written');
+    }
+    if (fs.existsSync(s.stagingDir)) {
+      fail('checksums retry exhaust: staging dir must be cleaned up');
     }
   } finally {
     cleanup(s);
@@ -662,6 +748,8 @@ async function main() {
   await runTest('testDownloadTimeout', testDownloadTimeout);
   await runTest('testRetryRecoversFromTransientTransport', testRetryRecoversFromTransientTransport);
   await runTest('testRetryExhaustsAfterBudget', testRetryExhaustsAfterBudget);
+  await runTest('testChecksumsRetryRecoversFromTransientTransport', testChecksumsRetryRecoversFromTransientTransport);
+  await runTest('testChecksumsRetryExhaustsAfterBudget', testChecksumsRetryExhaustsAfterBudget);
   await runTest('testExtractionFailure', testExtractionFailure);
   await runTest('testPromotionFailure', testPromotionFailure);
   await runTest('testSkipIfInstalled', testSkipIfInstalled);
