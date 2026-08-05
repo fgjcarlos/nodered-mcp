@@ -9,6 +9,8 @@
 //
 //	nodered-mcp [serve] [flags]   run the server (default command)
 //	nodered-mcp init [--all]      interactively generate a client config snippet
+//	nodered-mcp setup [--force]  idempotent transactional setup (writes receipt)
+//	nodered-mcp doctor [--plan]  re-verify the last setup receipt (read-only)
 //	nodered-mcp update [--check]  detect the install channel and upgrade in place
 //	nodered-mcp version           print the version and exit
 package main
@@ -96,12 +98,16 @@ func run(args []string) error {
 		return nil
 	case "init":
 		return runInit(args)
+	case "setup":
+		return runSetup(args)
+	case "doctor":
+		return runDoctor(args)
 	case "update":
 		return runUpdate(args)
 	case "serve":
 		return serve(args)
 	default:
-		return fmt.Errorf("unknown command %q (use serve|init|update|version)", cmd)
+		return fmt.Errorf("unknown command %q (use serve|init|setup|doctor|update|version)", cmd)
 	}
 }
 
