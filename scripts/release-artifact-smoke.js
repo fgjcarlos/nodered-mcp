@@ -134,9 +134,17 @@ function npmCommand() {
   return process.platform === 'win32' ? 'npm.cmd' : 'npm';
 }
 
+function runNpm(args, options) {
+  return execFileAsync(npmCommand(), args, {
+    ...(options || {}),
+    // npm is a .cmd shim on Windows; execFile requires the command
+    // shell there, while Unix keeps direct argv execution.
+    shell: process.platform === 'win32',
+  });
+}
+
 async function packPackage(packDir) {
-  const { stdout } = await execFileAsync(
-    npmCommand(),
+  const { stdout } = await runNpm(
     ['pack', '--json', '--pack-destination', packDir, REPO_ROOT],
     { cwd: REPO_ROOT, maxBuffer: 10 * 1024 * 1024 },
   );
@@ -148,8 +156,7 @@ async function packPackage(packDir) {
 }
 
 async function installPacked(tarball, prefix, baseUrl) {
-  return execFileAsync(
-    npmCommand(),
+  return runNpm(
     [
       '--prefix', prefix,
       'install', '--global',
@@ -172,8 +179,7 @@ async function installPacked(tarball, prefix, baseUrl) {
 }
 
 async function packageRoot(prefix) {
-  const { stdout } = await execFileAsync(
-    npmCommand(),
+  const { stdout } = await runNpm(
     ['root', '--global', '--prefix', prefix],
     { maxBuffer: 1024 * 1024 },
   );
