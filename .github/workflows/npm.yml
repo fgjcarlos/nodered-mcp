@@ -156,9 +156,9 @@ jobs:
       #   6. publish the main package only after all native packages exist
       #
       # Step 7 (idempotency) is the registry check in the inner loop.
-      # Step 8 (do not move `latest` until native deps are complete)
-      # is enforced by failing closed if any platform package is
-      # missing above.
+      # Every new package first lands under the `next` canary tag.
+      # `latest` is promoted only after registry metadata and a fresh
+      # install from npm have passed below.
       - name: publish platform packages
         env:
           NPM_SECRET: ${{ secrets.NPM_SECRET }}
@@ -185,7 +185,7 @@ jobs:
               echo "${scope}@${version} already published; skipping"
               continue
             fi
-            npm publish --access public --provenance "$tarball"
+            npm publish --access public --provenance --tag next "$tarball"
             echo "published ${scope}@${version}"
           done
 
@@ -229,7 +229,7 @@ jobs:
             exit 0
           fi
           echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
-          npm publish --access public --provenance
+          npm publish --access public --provenance --tag next
 
       - name: verify main package integrity and provenance
         run: |
@@ -238,6 +238,46 @@ jobs:
           attestation=$(npm view "@fgjcarlos/nodered-mcp@${version}" dist.attestations.url)
           if [ -z "$integrity" ] || [ -z "$attestation" ]; then
             echo "main package lacks registry integrity or provenance"
+            exit 1
+          fi
+
+      - name: install and launch canary from npm registry
+        run: |
+          set -euo pipefail
+          version=$(jq -r .version package.json)
+          prefix=$(mktemp -d)
+          trap 'rm -rf "$prefix"' EXIT
+          npm install --global --prefix "$prefix" --ignore-scripts --no-audit --no-fund \
+            "@fgjcarlos/nodered-mcp@${version}"
+          reported=$($prefix/bin/nodered-mcp version)
+          if [[ "$reported" != *"$version"* ]]; then
+            echo "canary executable reported '$reported', expected $version"
+            exit 1
+          fi
+          echo "canary install passed: $reported"
+
+      - name: promote verified packages to latest
+        env:
+          NPM_SECRET: ${{ secrets.NPM_SECRET }}
+        run: |
+          set -euo pipefail
+          echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
+          version=$(jq -r .version package.json)
+          for pkg in \
+            nodered-mcp-win32-x64 \
+            nodered-mcp-win32-arm64 \
+            nodered-mcp-linux-x64 \
+            nodered-mcp-linux-arm64 \
+            nodered-mcp-darwin-x64 \
+            nodered-mcp-darwin-arm64; do
+            npm dist-tag add "@fgjcarlos/${pkg}@${version}" latest
+          done
+          # Promote the user-facing package last: until this command,
+          # npm install @latest still resolves the previous release.
+          npm dist-tag add "@fgjcarlos/nodered-mcp@${version}" latest
+          latest=$(npm view @fgjcarlos/nodered-mcp dist-tags.latest)
+          if [ "$latest" != "$version" ]; then
+            echo "latest tag is $latest, expected $version"
             exit 1
           fi
 
