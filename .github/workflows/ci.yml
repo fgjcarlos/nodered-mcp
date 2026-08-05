@@ -116,7 +116,11 @@ jobs:
   # v0.6.0 release behind a 404. They are plain node scripts with no
   # dependencies, so there is nothing to install.
   npm-wrapper:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
@@ -125,6 +129,7 @@ jobs:
           node-version: 18  # the floor declared in package.json engines
 
       - name: node bin tests
+        shell: bash
         run: |
           set -euo pipefail
           for t in bin/*_test.js; do
