@@ -33,7 +33,7 @@ jobs:
           node scripts/build-platform-packages.js --version 0.7.0 --dist dist --out npm-packages
           ls -la npm-packages/
 
-      - name: attempt real publish of the REAL workflow tarball
+      - name: attempt real publish of the REAL workflow tarball v2
         env:
           NPM_SECRET: ${{ secrets.NPM_SECRET }}
         run: |
