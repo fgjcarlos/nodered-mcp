@@ -16,8 +16,8 @@
 // Flow:
 //   1. Skip if a complete previous install is on disk
 //      (target binary + .installed marker whose version matches).
-//   2. Fetch checksums.txt from the same release tag.
-//   3. Fetch the tarball with a bounded timeout.
+//   2. Fetch checksums.txt from the same release tag with bounded retry.
+//   3. Fetch the tarball with a bounded timeout and retry.
 //   4. Verify SHA-256 of the tarball against checksums.txt.
 //   5. Stage the tarball in os.tmpdir() and extract into a per-run
 //      staging directory.
@@ -349,7 +349,10 @@ function promote(stagingArchiveDir, binDir, assetName, exeSuffix, deps) {
     return finalTarget;
   }
   for (const entry of entries) {
-    if (entry.name === binaryName) continue;
+    // In a flat GoReleaser archive, the downloaded tarball and the
+    // extracted files share stagingArchiveDir. Never promote the
+    // transport archive itself into the installed package's bin/.
+    if (entry.name === binaryName || entry.name === assetName) continue;
     if (!entry.isFile()) continue;
     const src = path.join(stagingArchiveDir, entry.name);
     const dst = path.join(binDir, entry.name);
@@ -416,9 +419,10 @@ async function _run(deps, ctx) {
 
     const checksumsUrl =
       `https://github.com/${REPO}/releases/download/v${version}/checksums.txt`;
-    const checksumsTxt = await deps.downloadWithTimeout(
+    const checksumsTxt = await deps.downloadWithRetry(
       checksumsUrl,
       CHECKSUMS_TIMEOUT_MS,
+      DOWNLOAD_RETRIES,
     );
     const expectedHash = deps.parseChecksumsTxt(checksumsTxt, assetName);
     if (!expectedHash) {
