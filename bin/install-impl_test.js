@@ -372,7 +372,10 @@ async function testPromotionFailure() {
     renameSync: (a, b) => {
       // Fail the second rename (the one that places the binary at
       // its final target) so we exercise the rollback branch.
-      if (String(b).endsWith('/nodered-mcp') && String(a).includes('.tmp-')) {
+      if (
+        path.basename(String(b)) === 'nodered-mcp' &&
+        path.basename(String(a)).startsWith('nodered-mcp.tmp-')
+      ) {
         throw new Error('simulated promote failure');
       }
       return fs.renameSync(a, b);
