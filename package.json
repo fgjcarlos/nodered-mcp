@@ -24,7 +24,8 @@
     "node": ">=18"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "//": "optionalDependencies pinned to the same exact version as the main package. npm's own os/cpu filter on each platform package selects exactly one at install time, replacing the legacy postinstall downloader (#257).",
   "optionalDependencies": {

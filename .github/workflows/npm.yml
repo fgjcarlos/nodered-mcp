@@ -14,14 +14,20 @@ name: npm
 #
 # The trigger below makes the order deterministic: this workflow
 # only sees a tag once release.yml has reported `completed` with
-# `success`. Inside the job, scripts/release-gate.js verifies the
-# GitHub Release carries checksums.txt and every required tarball,
-# and scripts/build-platform-packages.js assembles the six native
-# npm packages from goreleaser's dist/. Then the publication step
-# publishes the six platform packages first and the main package
-# last, in the order the issue mandates. Any failure inside the
-# gate exits non-zero before `npm publish` is touched, so a
-# half-built release cannot ship a working npm wrapper.
+# `success`. The two jobs run in parallel: publish-platforms uses
+# NPM_SECRET (a bypass-2FA automation token) to publish the six
+# scoped platform packages, and publish-main uses OIDC via the
+# GitHub Actions Trusted Publisher configured for
+# @fgjcarlos/nodered-mcp in the npmjs package settings. The main
+# package cannot be published with NPM_SECRET because the registry
+# rejects any automation token once Trusted Publisher is configured
+# for the package, and the OIDC path requires actions/setup-node
+# with registry-url, which collides with the platform packages
+# step — hence the job split.
+#
+# Order semantics: a partial release (platforms only, or main only)
+# is recoverable on rerun. The CLI smoke test below runs only after
+# both jobs succeed.
 on:
   workflow_run:
     workflows: ["release"]
@@ -36,7 +42,7 @@ permissions:
   id-token: write
 
 jobs:
-  publish:
+  publish-platforms:
     # Skip the job entirely when release.yml did not succeed; an
     # aborted, cancelled, or failed release means assets are
     # incomplete and npm publish must not happen. The head_branch
@@ -64,9 +70,7 @@ jobs:
         # No registry-url here: setting it tells actions/setup-node
         # to write a runtime .npmrc that routes npm publish through
         # a tokenless path the registry rejects with E404 on scoped
-        # packages. The platform packages step uses NPM_SECRET
-        # directly; the main package step uses NPM_SECRET too,
-        # without --provenance (see comment in publish main package).
+        # packages. We use NPM_SECRET directly in the publish step.
         with:
           node-version: 20
 
@@ -145,25 +149,11 @@ jobs:
             exit 1
           fi
 
-      - name: pack main package before publication
-        run: npm pack --json --pack-destination npm-packages .
-
-      # Publish the six native packages first, then the main package.
-      # npm versions are immutable, so a retry of an already-published
-      # exact version is a no-op (`npm publish` on a live version
-      # fails with E403). The registry check before publish keeps a
-      # re-run idempotent without leaving partial-release states
-      # (which is the partial-publication risk the issue calls out).
-      #
-      # Steps 4-6 of the issue's publication ordering map to:
-      #   4. publish or verify the six platform packages first
-      #   5. confirm all six exact versions are readable from the registry
-      #   6. publish the main package only after all native packages exist
-      #
-      # Step 7 (idempotency) is the registry check in the inner loop.
-      # Every new package first lands under the `next` canary tag.
-      # `latest` is promoted only after registry metadata and a fresh
-      # install from npm have passed below.
+      # Publish the six native packages. npm versions are immutable,
+      # so a retry of an already-published exact version is a no-op
+      # (`npm publish` on a live version fails with E403). The
+      # registry check before publish keeps a re-run idempotent
+      # without leaving partial-release states.
       - name: publish platform packages
         env:
           NPM_SECRET: ${{ secrets.NPM_SECRET }}
@@ -184,7 +174,6 @@ jobs:
               echo "platform tarball missing: $tarball"
               exit 1
             fi
-            # Resolve the scoped package name to check the registry.
             scope="@fgjcarlos/${pkg}"
             if npm view "${scope}@${version}" version >/dev/null 2>&1; then
               echo "${scope}@${version} already published; skipping"
@@ -195,12 +184,11 @@ jobs:
             # add one after the package exists, and the first
             # publish creates the scoped package). Publish without
             # --provenance so the registry accepts the create; the
-            # main package below also publishes without --provenance
-            # using the NPM_SECRET bypass-2FA token. Add Trusted
-            # Publisher per platform package once each exists on
-            # npmjs, then restore --provenance here. ponytail: keep
-            # simple, upgrade after each platform package has at
-            # least one public version.
+            # main package publishes via OIDC in the publish-main
+            # job. Add Trusted Publisher per platform package once
+            # each exists on npmjs, then restore --provenance here.
+            # ponytail: keep simple, upgrade after each platform
+            # package has at least one public version.
             npm publish --access public --tag next "./$tarball"
             echo "published ${scope}@${version}"
           done
@@ -234,31 +222,84 @@ jobs:
             echo "verified integrity for ${scope}@${version}"
           done
 
-      - name: publish main package
-        # Use NPM_SECRET (bypass-2FA automation token) instead of
-        # the OIDC Trusted Publisher path. The OIDC fall-through
-        # requires actions/setup-node with registry-url, which
-        # collides with the platform packages step above. Publish
-        # without provenance and rely on the registry integrity
-        # hash for tamper detection (same model the platform
-        # packages use). TODO: revisit once OIDC works end-to-end.
+      - name: promote platform packages to latest
         env:
           NPM_SECRET: ${{ secrets.NPM_SECRET }}
+          VERSION: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
+          version="${VERSION#v}"
+          for pkg in \
+            nodered-mcp-win32-x64 \
+            nodered-mcp-win32-arm64 \
+            nodered-mcp-linux-x64 \
+            nodered-mcp-linux-arm64 \
+            nodered-mcp-darwin-x64 \
+            nodered-mcp-darwin-arm64; do
+            npm dist-tag add "@fgjcarlos/${pkg}@${version}" latest
+          done
+
+  publish-main:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'v')
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.workflow_run.head_branch }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      # actions/setup-node with registry-url is the supported way
+      # to attach the OIDC id-token to npm publish on the workflows
+      # in the npmjs Trusted Publisher settings. Trusted Publisher
+      # is configured for @fgjcarlos/nodered-mcp in the npmjs
+      # package settings (workflow npm.yml, no environment).
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: verify package.json version matches the tag
+        env:
+          EXPECTED: ${{ env.TAG }}
+        run: |
+          actual=$(jq -r .version package.json)
+          expected="${EXPECTED#v}"
+          if [ "$actual" != "$expected" ]; then
+            echo "package.json version ($actual) does not match tag $EXPECTED (expected $expected)"
+            exit 1
+          fi
+
+      - name: pack main package
+        run: npm pack --json --pack-destination npm-packages .
+
+      - name: publish main package
+        # OIDC auth via Trusted Publisher. The .npmrc file does not
+        # mention NPM_SECRET — actions/setup-node v7 with
+        # registry-url attaches the OIDC id-token to npm publish.
+        # If a previous step leaked a NPM_SECRET into ~/.npmrc, it
+        # would override OIDC and the registry would reject with
+        # E403 Two-factor authentication required.
         run: |
           version=$(jq -r .version package.json)
           if npm view "@fgjcarlos/nodered-mcp@${version}" version >/dev/null 2>&1; then
             echo "@fgjcarlos/nodered-mcp@${version} is already published; nothing to do."
             exit 0
           fi
-          echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
-          npm publish --access public --tag next
+          rm -f ~/.npmrc
+          npm publish --access public --provenance --tag next
 
-      - name: verify main package integrity
+      - name: verify main package integrity and provenance
         run: |
           version=$(jq -r .version package.json)
           integrity=$(npm view "@fgjcarlos/nodered-mcp@${version}" dist.integrity)
-          if [ -z "$integrity" ]; then
-            echo "main package lacks registry integrity"
+          attestation=$(npm view "@fgjcarlos/nodered-mcp@${version}" dist.attestations.url)
+          if [ -z "$integrity" ] || [ -z "$attestation" ]; then
+            echo "main package lacks registry integrity or provenance"
             exit 1
           fi
 
@@ -277,24 +318,11 @@ jobs:
           fi
           echo "canary install passed: $reported"
 
-      - name: promote verified packages to latest
-        env:
-          NPM_SECRET: ${{ secrets.NPM_SECRET }}
+      - name: promote main package to latest
+        # actions/setup-node with registry-url is set in this job,
+        # so npm dist-tag uses OIDC as well.
         run: |
-          set -euo pipefail
-          echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
           version=$(jq -r .version package.json)
-          for pkg in \
-            nodered-mcp-win32-x64 \
-            nodered-mcp-win32-arm64 \
-            nodered-mcp-linux-x64 \
-            nodered-mcp-linux-arm64 \
-            nodered-mcp-darwin-x64 \
-            nodered-mcp-darwin-arm64; do
-            npm dist-tag add "@fgjcarlos/${pkg}@${version}" latest
-          done
-          # Promote the user-facing package last: until this command,
-          # npm install @latest still resolves the previous release.
           npm dist-tag add "@fgjcarlos/nodered-mcp@${version}" latest
           latest=$(npm view @fgjcarlos/nodered-mcp dist-tags.latest)
           if [ "$latest" != "$version" ]; then
