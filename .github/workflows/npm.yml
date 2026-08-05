@@ -197,7 +197,7 @@ jobs:
             # restore --provenance here. ponytail: keep simple,
             # upgrade after each platform package has at least one
             # public version.
-            npm publish --access public --tag next "$tarball"
+            npm publish --access public --tag next "./$tarball"
             echo "published ${scope}@${version}"
           done
 
