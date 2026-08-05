@@ -139,7 +139,7 @@ function unsupportedPlatformMessage(platform, arch) {
 // HTTPS GET that resolves with the full response body as a Buffer, or
 // rejects on a wall-clock timeout, non-2xx status, or transport error.
 // Follows exactly one redirect (GitHub releases redirect 302 to S3).
-function downloadWithTimeout(url, timeoutMs) {
+function downloadWithTimeout(url, timeoutMs, redirectsRemaining = 1) {
   return new Promise((resolve, reject) => {
     let settled = false;
     let activeRes = null;
@@ -174,13 +174,28 @@ function downloadWithTimeout(url, timeoutMs) {
           const next = res.headers.location;
           clearTimeout(timer);
           res.resume();
-          if (!next || !/^https?:\/\//i.test(next)) {
+          if (!next) {
             settled = true;
             return reject(
-              new Error(`redirect from ${url} is not an absolute URL: ${next}`),
+              new Error(`redirect from ${url} has no Location header`),
             );
           }
-          downloadWithTimeout(next, timeoutMs).then(resolve, reject);
+          if (redirectsRemaining <= 0) {
+            settled = true;
+            return reject(new Error(`too many redirects while downloading ${url}`));
+          }
+          let nextUrl;
+          try {
+            nextUrl = new URL(next, url).toString();
+          } catch (_) {
+            settled = true;
+            return reject(new Error(`invalid redirect from ${url}: ${next}`));
+          }
+          downloadWithTimeout(
+            nextUrl,
+            timeoutMs,
+            redirectsRemaining - 1,
+          ).then(resolve, reject);
           return;
         }
 
