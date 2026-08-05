@@ -3,15 +3,15 @@
 // bin/install-impl.js — checksum-verified, atomic-promotion install
 // for the @fgjcarlos/nodered-mcp postinstall hook.
 //
-// This is the authoritative code path for npm-install installs. It
-// lives next to bin/install.js on purpose: that file is hand-bumped
-// to match the goreleaser tag and is verified by .github/workflows/
-// npm.yml before publish. Touching it from a PR is forbidden by the
-// repo's exclusion list (#218 / #219). All postinstall logic lives
-// here instead, so this file is goreleaser-independent.
-//
-// VERSION is read from package.json at runtime (not hardcoded) so the
-// goreleaser before-hook does not need to rewrite us.
+// This is the authoritative code path for npm-install installs.
+// VERSION is read from package.json at runtime (not hardcoded) so
+// the goreleaser before-hook does not need to rewrite us. A
+// previous bin/install.js sibling (hand-bumped to match the
+// goreleaser tag, with the npm publish workflow gating against
+// its VERSION constant) was retired in #242 because the
+// goreleaser before-hook never actually rewrote it — the
+// exclusion list was a fiction. Today, package.json#version is
+// the single source of truth and this file consumes it directly.
 //
 // Flow:
 //   1. Skip if a complete previous install is on disk

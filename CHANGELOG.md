@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format
 follows [Keep a Changelog 1.1](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+
+- fix(release): retire `bin/install.js` (#242). The npm wrapper's
+  authoritative install code path is `bin/install-impl.js`, which
+  reads its version from `package.json` at runtime and is
+  goreleaser-independent. The hand-bumped `bin/install.js VERSION`
+  constant and the npm.yml grep that gated it were a fiction:
+  `.goreleaser.yaml` only runs `go mod tidy` as a before-hook and
+  never rewrote `bin/install.js`. Dropping the file, the gate, and
+  the `.goreleaser.yaml` comment makes `package.json#version` the
+  single source of truth again.
+
 ## [0.6.0] - 2026-08-04
 
 Minor bump. Adds the version-detection foundation plus the
