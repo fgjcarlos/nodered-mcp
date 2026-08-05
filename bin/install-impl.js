@@ -191,6 +191,14 @@ function makeStagingDir() {
   return path.join(os.tmpdir(), `nodered-mcp-install-${id}`);
 }
 
+// Layout invariant: goreleaser `name_template`
+// (`{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}`) produces archives whose
+// top-level entry is a subdir named after the asset minus the `.tar.gz`
+// suffix — e.g. `nodered-mcp_linux_amd64/`. The extraction below expects
+// that subdir; if `.goreleaser.yaml` `name_template` ever changes, this
+// code and `bin/install_message_test.js` (which enforces the invariant
+// on the goreleaser side) must change in lockstep.
+
 // Stage the tarball on disk and extract it into the same staging dir.
 // The goreleaser archive unpacks into a single subdirectory
 // (`nodered-mcp_<os>_<arch>/`); we keep that layout intact so the
