@@ -6,24 +6,60 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-05
+
 ### Added
 
-- test(release): validate real GoReleaser and npm artifacts before
-  publication (#258). `scripts/release-snapshot.js` runs goreleaser
-  in `--snapshot` mode and inspects every generated archive against
-  the installer's expectations: flat-or-wrapped layout support, the
-  right `.exe` suffix on Windows, non-empty binaries, and an
-  internally consistent `checksums.txt`. Wired into `ci.yml` as a
-  required job on every PR and into `release.yml` as a prerequisite
-  to the publish job, so a half-built release cannot ship a working
-  GitHub Release. `bin/release-snapshot_test.js` exercises the
-  inspection helpers with synthetic tarballs so the contract is
-  covered on every CI runner, including Windows and matrix entries
-  without goreleaser. The inspected snapshot is also passed unchanged
-  to Windows and Ubuntu jobs, which pack the npm package, install it
-  through the production postinstall, compare the installed binary's
-  digest with the GoReleaser archive, launch the CLI, and verify retry,
-  redirect, checksum-failure, and cleanup behavior before publication.
+- feat(npm): ship native binaries through npm-native platform
+  packages and remove the postinstall downloader (#257). The main
+  `@fgjcarlos/nodered-mcp` package now lists six scoped platform
+  packages as exact-version `optionalDependencies`, and npm's own
+  `os`/`cpu` filter selects the right one at install time. The
+  `bin/nodered-mcp.js` wrapper resolves the matching platform
+  package from `node_modules` and re-execs its native executable
+  with inherited stdio, argv, signals and environment. Registry
+  integrity replaces the legacy checksum-verified GitHub
+  downloader, so a future GitHub Release deletion no longer
+  breaks installation of an already-published npm version.
+
+### Removed
+
+- `bin/install-impl.js`, `bin/tar.js`, `bin/install-impl_test.js`,
+  `bin/tar_test.js`, `bin/install_message_test.js` — retired with
+  the postinstall downloader; no supported code path consumes them.
+- The `postinstall` lifecycle script from the main package's
+  `package.json`. `npm install -g --ignore-scripts` now works.
+
+### Changed
+
+- `bin/nodered-mcp.js` rewritten as a platform resolver with
+  distinct actionable errors for unsupported OS/architecture,
+  missing optional package, non-executable native binary, and
+  child-process startup failure.
+- `scripts/release-gate.js` derives its required-asset list from
+  the same goreleaser `name_template` that
+  `scripts/build-platform-packages.js` consumes, keeping the
+  release gate and the npm publisher aligned.
+- `.github/workflows/npm.yml` reordered into the eight-step
+  publication ordering the issue mandates: build → validate →
+  assemble platform packages → publish six natives → verify
+  registry → publish main. Idempotent: a re-run of an
+  already-published exact version is a no-op, never a partial
+  release.
+- README.md and README.es.md updated to describe the new channel
+  and drop the legacy timeout/retry env-var documentation.
+
+### Added (test infra)
+
+- `scripts/build-platform-packages.js` (producer) and
+  `bin/build-platform-packages_test.js` (in-memory suite) cover
+  the assemble-and-publish path with synthetic goreleaser
+  archives, exercising both the flat and the wrapped layouts.
+- The real-artifact gate from #258 builds and inspects all six
+  GoReleaser archives, assembles the corresponding npm packages
+  with `npm pack`, installs the packed main/native pair with
+  lifecycle scripts disabled, compares native binary digests and
+  launches the CLI on Linux, Windows and macOS before publication.
 
 ## [0.6.3] - 2026-08-05
 

@@ -1,293 +1,159 @@
 #!/usr/bin/env node
 'use strict';
 
-// End-to-end npm smoke for the exact artifacts produced by GoReleaser.
-// The workflow downloads dist/ from the snapshot job, then this script:
-//   1. packs the real npm package;
-//   2. serves checksums.txt and the host archive from loopback;
-//   3. installs the tarball through the production postinstall;
-//   4. proves the installed native bytes match the snapshot archive;
-//   5. launches the npm CLI shim; and
-//   6. verifies checksum failure leaves no binary or staging directory.
+// End-to-end smoke for the exact GoReleaser snapshot and the npm-native
+// distribution introduced in 0.7.0. It builds all six platform packages,
+// installs the host package with scripts disabled, compares native bytes,
+// launches the real CLI, and verifies the missing-optional error path.
 
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
-const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 
 const execFileAsync = promisify(execFile);
-const { assetFor } = require('../bin/install-impl');
-const { extract } = require('../bin/tar');
+const { TARGETS, targetFor } = require('../bin/platform-packages');
+const { buildOne } = require('./build-platform-packages');
+const { extractTarGz } = require('./archive');
 
 const REPO_ROOT = path.join(__dirname, '..');
-
-function sha256(filePath) {
-  return crypto
-    .createHash('sha256')
-    .update(fs.readFileSync(filePath))
-    .digest('hex');
-}
-
-function stagingDirs() {
-  return new Set(
-    fs.readdirSync(os.tmpdir())
-      .filter((name) => name.startsWith('nodered-mcp-install-')),
-  );
-}
-
-function assertNoNewStaging(before, label) {
-  const leaked = [...stagingDirs()].filter((name) => !before.has(name));
-  if (leaked.length > 0) {
-    throw new Error(`${label}: leaked staging directories: ${leaked.join(', ')}`);
-  }
-}
-
-function tamperChecksum(text, assetName) {
-  const lines = text.split(/\r?\n/);
-  let replaced = false;
-  const result = lines.map((line) => {
-    const parts = /^([a-fA-F0-9]{64})(\s+)(\S+)$/.exec(line.trim());
-    if (!parts || parts[3] !== assetName) return line;
-    replaced = true;
-    return `${'0'.repeat(64)}${parts[2]}${parts[3]}`;
-  });
-  if (!replaced) {
-    throw new Error(`checksums.txt has no entry for ${assetName}`);
-  }
-  return result.join('\n');
-}
-
-async function startFixtureServer(distDir, assetName) {
-  const archivePath = path.join(distDir, assetName);
-  const checksumsPath = path.join(distDir, 'checksums.txt');
-  if (!fs.existsSync(archivePath) || !fs.existsSync(checksumsPath)) {
-    throw new Error(`fixture missing ${assetName} or checksums.txt in ${distDir}`);
-  }
-  const checksums = fs.readFileSync(checksumsPath, 'utf8');
-  const counts = { checksums: 0, archive: 0 };
-  let mode = 'happy';
-
-  const server = http.createServer((req, res) => {
-    const pathname = new URL(req.url, 'http://127.0.0.1').pathname;
-    if (pathname === '/checksums.txt') {
-      counts.checksums += 1;
-      if (mode === 'happy' && counts.checksums === 1) {
-        res.writeHead(503);
-        res.end('simulated transient checksum failure');
-        return;
-      }
-      const body = mode === 'checksum-mismatch'
-        ? tamperChecksum(checksums, assetName)
-        : checksums;
-      setTimeout(() => {
-        res.writeHead(200, { 'content-type': 'text/plain' });
-        res.end(body);
-      }, 50);
-      return;
-    }
-    if (pathname === `/${assetName}`) {
-      res.writeHead(302, { location: `/files/${assetName}` });
-      res.end();
-      return;
-    }
-    if (pathname === `/files/${assetName}`) {
-      counts.archive += 1;
-      if (mode === 'happy' && counts.archive === 1) {
-        res.writeHead(503);
-        res.end('simulated transient archive failure');
-        return;
-      }
-      setTimeout(() => {
-        res.writeHead(200, { 'content-type': 'application/gzip' });
-        fs.createReadStream(archivePath).pipe(res);
-      }, 50);
-      return;
-    }
-    res.writeHead(404);
-    res.end('not found');
-  });
-
-  await new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', resolve);
-  });
-  const address = server.address();
-  return {
-    baseUrl: `http://127.0.0.1:${address.port}`,
-    counts,
-    setMode(next) {
-      mode = next;
-      counts.checksums = 0;
-      counts.archive = 0;
-    },
-    close: () => new Promise((resolve, reject) => {
-      server.close((err) => err ? reject(err) : resolve());
-    }),
-  };
-}
 
 function npmCommand() {
   return process.platform === 'win32' ? 'npm.cmd' : 'npm';
 }
 
-function runNpm(args, options) {
-  return execFileAsync(npmCommand(), args, {
-    ...(options || {}),
-    // npm is a .cmd shim on Windows; execFile requires the command
-    // shell there, while Unix keeps direct argv execution.
-    shell: process.platform === 'win32',
+function run(command, args, options = {}) {
+  return execFileAsync(command, args, {
+    ...options,
+    shell: process.platform === 'win32' && command.endsWith('.cmd'),
+    maxBuffer: 20 * 1024 * 1024,
   });
 }
 
-async function packPackage(packDir) {
+function runNpm(args, options = {}) {
+  return run(npmCommand(), args, options);
+}
+
+function sha256(filePath) {
+  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+async function packMain(outDir) {
   const { stdout } = await runNpm(
-    ['pack', '--json', '--pack-destination', packDir, REPO_ROOT],
-    { cwd: REPO_ROOT, maxBuffer: 10 * 1024 * 1024 },
+    ['pack', '--json', '--pack-destination', outDir, REPO_ROOT],
+    { cwd: REPO_ROOT },
   );
-  const result = JSON.parse(stdout);
-  if (!Array.isArray(result) || !result[0] || !result[0].filename) {
+  const packed = JSON.parse(stdout);
+  if (!Array.isArray(packed) || !packed[0]?.filename) {
     throw new Error(`npm pack returned an unexpected result: ${stdout}`);
   }
-  return path.join(packDir, result[0].filename);
+  return path.join(outDir, packed[0].filename);
 }
 
-async function installPacked(tarball, prefix, baseUrl) {
-  return runNpm(
-    [
-      '--prefix', prefix,
-      'install', '--global',
-      '--no-audit', '--no-fund', '--foreground-scripts',
-      tarball,
-    ],
-    {
-      cwd: REPO_ROOT,
-      env: {
-        ...process.env,
-        CI: 'true',
-        NODERED_MCP_TEST_RELEASE_BASE_URL: baseUrl,
-        NODERED_MCP_DOWNLOAD_TIMEOUT_MS: '10000',
-        NODERED_MCP_CHECKSUMS_TIMEOUT_MS: '10000',
-        NODERED_MCP_DOWNLOAD_RETRIES: '3',
-      },
-      maxBuffer: 20 * 1024 * 1024,
-    },
-  );
+async function expectedBinary(distDir, target, tmpRoot) {
+  const out = path.join(tmpRoot, 'expected');
+  await fsp.mkdir(out, { recursive: true });
+  const archive = path.join(distDir, target.asset);
+  extractTarGz(archive, out);
+  const direct = path.join(out, target.binary);
+  if (fs.existsSync(direct)) return direct;
+  const wrapped = path.join(out, target.asset.replace(/\.tar\.gz$/, ''), target.binary);
+  if (fs.existsSync(wrapped)) return wrapped;
+  throw new Error(`${target.asset} does not contain ${target.binary}`);
 }
 
-async function packageRoot(prefix) {
-  const { stdout } = await runNpm(
-    ['root', '--global', '--prefix', prefix],
-    { maxBuffer: 1024 * 1024 },
+async function install(consumer, tarballs) {
+  await fsp.mkdir(consumer, { recursive: true });
+  await fsp.writeFile(
+    path.join(consumer, 'package.json'),
+    JSON.stringify({ name: 'nodered-mcp-smoke-consumer', version: '1.0.0', private: true }) + '\n',
   );
-  return path.join(stdout.trim(), '@fgjcarlos', 'nodered-mcp');
-}
-
-async function expectedBinaryHash(distDir, assetName, binaryName, tmpRoot) {
-  const extracted = path.join(tmpRoot, 'expected');
-  await fsp.mkdir(extracted, { recursive: true });
-  await extract(path.join(distDir, assetName), extracted);
-  const wrapped = path.join(
-    extracted,
-    assetName.replace(/\.tar\.gz$/, ''),
+  await runNpm(
+    ['install', '--ignore-scripts', '--omit=optional', '--no-audit', '--no-fund', ...tarballs],
+    { cwd: consumer, env: { ...process.env, CI: 'true' } },
   );
-  const archiveRoot = fs.existsSync(wrapped) ? wrapped : extracted;
-  const binaryPath = path.join(archiveRoot, binaryName);
-  if (!fs.existsSync(binaryPath)) {
-    throw new Error(`snapshot archive does not contain ${binaryName}`);
-  }
-  return sha256(binaryPath);
 }
 
 async function main() {
-  const distArg = process.argv.indexOf('--dist-dir');
+  const distIndex = process.argv.indexOf('--dist-dir');
   const distDir = path.resolve(
-    distArg >= 0 ? process.argv[distArg + 1] : path.join(REPO_ROOT, 'dist'),
+    distIndex >= 0 ? process.argv[distIndex + 1] : path.join(REPO_ROOT, 'dist'),
   );
-  const assetName = assetFor(process.platform, process.arch);
-  if (!assetName) {
-    throw new Error(`unsupported smoke platform ${process.platform}-${process.arch}`);
-  }
-  const binaryName =
-    `nodered-mcp${process.platform === 'win32' ? '.exe' : ''}`;
-  const tmpRoot = await fsp.mkdtemp(
-    path.join(os.tmpdir(), 'nodered-mcp-artifact-smoke-'),
-  );
-  let fixture;
+  const version = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8')).version;
+  const host = targetFor(process.platform, process.arch);
+  if (!host) throw new Error(`unsupported smoke platform ${process.platform}-${process.arch}`);
+
+  const tmpRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'nodered-mcp-artifact-smoke-'));
   try {
-    const packDir = path.join(tmpRoot, 'pack');
-    await fsp.mkdir(packDir, { recursive: true });
-    const tarball = await packPackage(packDir);
-    fixture = await startFixtureServer(distDir, assetName);
+    const packagesDir = path.join(tmpRoot, 'packages');
+    const produced = [];
+    for (const target of TARGETS) {
+      produced.push(await buildOne({
+        target,
+        distDir,
+        outDir: packagesDir,
+        version,
+        licenseSrc: path.join(REPO_ROOT, 'LICENSE'),
+      }));
+    }
+    if (produced.length !== TARGETS.length) {
+      throw new Error(`expected ${TARGETS.length} native packages, built ${produced.length}`);
+    }
+    const hostPackage = produced.find((item) => item.key === host.key);
+    const mainTarball = await packMain(packagesDir);
 
-    const beforeSuccess = stagingDirs();
-    const prefix = path.join(tmpRoot, 'prefix');
-    await installPacked(tarball, prefix, fixture.baseUrl);
-    assertNoNewStaging(beforeSuccess, 'successful install');
-    if (fixture.counts.checksums < 2 || fixture.counts.archive < 2) {
-      throw new Error(
-        `retry/redirect fixture was not exercised: ${JSON.stringify(fixture.counts)}`,
-      );
+    // --ignore-scripts is intentional: the new channel must work under
+    // corporate policies that disable lifecycle scripts. The explicit
+    // host tarball is a root dependency, while the main package's other
+    // optional dependencies are omitted to keep this test registry-free.
+    const consumer = path.join(tmpRoot, 'consumer');
+    await install(consumer, [mainTarball, hostPackage.tarball]);
+    const mainRoot = path.join(consumer, 'node_modules', '@fgjcarlos', 'nodered-mcp');
+    const nativeRoot = path.join(consumer, 'node_modules', '@fgjcarlos', `nodered-mcp-${host.key}`);
+    const installedBinary = path.join(nativeRoot, 'bin', host.binary);
+    if (!fs.existsSync(installedBinary)) throw new Error(`installed binary missing: ${installedBinary}`);
+    const expected = await expectedBinary(distDir, host, tmpRoot);
+    if (sha256(installedBinary) !== sha256(expected)) {
+      throw new Error('installed native bytes differ from the GoReleaser artifact');
     }
 
-    const root = await packageRoot(prefix);
-    const installedBinary = path.join(root, 'bin', binaryName);
-    if (!fs.existsSync(installedBinary)) {
-      throw new Error(`installed native binary missing: ${installedBinary}`);
-    }
-    const expectedHash = await expectedBinaryHash(
-      distDir,
-      assetName,
-      binaryName,
-      tmpRoot,
+    const shim = path.join(mainRoot, 'bin', 'nodered-mcp.js');
+    const launched = await run(process.execPath, [shim, 'version'], {
+      cwd: consumer,
+      env: process.env,
+    });
+    const versionOutput = `${launched.stdout || ''}${launched.stderr || ''}`.trim();
+    if (!versionOutput) throw new Error('native CLI returned an empty version');
+
+    const missingConsumer = path.join(tmpRoot, 'missing-optional');
+    await install(missingConsumer, [mainTarball]);
+    const missingShim = path.join(
+      missingConsumer,
+      'node_modules',
+      '@fgjcarlos',
+      'nodered-mcp',
+      'bin',
+      'nodered-mcp.js',
     );
-    if (sha256(installedBinary) !== expectedHash) {
-      throw new Error('installed binary bytes differ from the GoReleaser archive');
-    }
-    if (fs.existsSync(path.join(root, 'bin', assetName))) {
-      throw new Error('transport archive leaked into the installed bin directory');
-    }
-
-    const shim = path.join(root, 'bin', 'nodered-mcp.js');
-    const { stdout: version } = await execFileAsync(
-      process.execPath,
-      [shim, 'version'],
-      { env: process.env, maxBuffer: 1024 * 1024 },
-    );
-    if (!version.trim()) {
-      throw new Error('npm CLI launched but returned an empty version');
-    }
-
-    fixture.setMode('checksum-mismatch');
-    const beforeFailure = stagingDirs();
-    const failedPrefix = path.join(tmpRoot, 'failed-prefix');
-    let rejected = false;
+    let missingFailed = false;
     try {
-      await installPacked(tarball, failedPrefix, fixture.baseUrl);
+      await run(process.execPath, [missingShim, 'version'], { cwd: missingConsumer });
     } catch (err) {
-      rejected = true;
+      missingFailed = true;
       const output = `${err.stdout || ''}\n${err.stderr || ''}`;
-      if (!/checksum mismatch/.test(output)) {
-        throw new Error(`expected checksum mismatch, got: ${output}`);
+      if (!output.includes(host.packageName) || !/omit=optional/.test(output)) {
+        throw new Error(`missing optional dependency error is unclear: ${output}`);
       }
     }
-    if (!rejected) {
-      throw new Error('tampered checksum install unexpectedly succeeded');
-    }
-    assertNoNewStaging(beforeFailure, 'checksum mismatch');
-    const failedRoot = await packageRoot(failedPrefix);
-    if (fs.existsSync(path.join(failedRoot, 'bin', binaryName))) {
-      throw new Error('checksum mismatch left a native binary installed');
-    }
+    if (!missingFailed) throw new Error('shim unexpectedly ran without its native optional package');
 
     process.stdout.write(
-      `release-artifact-smoke: PASS ${process.platform}-${process.arch} ${version.trim()}\n`,
+      `release-artifact-smoke: PASS ${host.key} (${produced.length} packages) ${versionOutput}\n`,
     );
   } finally {
-    if (fixture) await fixture.close();
     await fsp.rm(tmpRoot, { recursive: true, force: true });
   }
 }

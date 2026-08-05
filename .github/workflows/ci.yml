@@ -110,11 +110,12 @@ jobs:
       - name: go build
         run: go build ./...
 
-  # The npm wrapper in bin/ has its own guards and nothing was running them.
-  # install_message_test.js is the one that fails when the asset map drifts
-  # away from what goreleaser publishes -- the exact break that stalled the
-  # v0.6.0 release behind a 404. They are plain node scripts with no
-  # dependencies, so there is nothing to install.
+  # The npm wrapper in bin/ has its own guards and nothing was
+  # running them. shim_test.js covers the platform-resolver contract;
+  # build-platform-packages_test.js covers the npm-tarball producer;
+  # npm_release_gate_test.js covers the GitHub-Release-side gate.
+  # They are plain node scripts with no dependencies, so there is
+  # nothing to install.
   npm-wrapper:
     strategy:
       fail-fast: false
@@ -182,7 +183,7 @@ jobs:
 
   # Issue #258: real-artifact contract gate. Runs goreleaser in
   # --snapshot mode against the PR's source tree, then inspects every
-  # generated archive against the installer's expectations. Catches
+  # generated archive against the native-package contract. Catches
   # .goreleaser.yaml drifts before they ship as a broken release. The
   # in-memory bin/release-snapshot_test.js also runs in the npm-wrapper
   # matrix above for the Windows / non-goreleaser path.
@@ -227,14 +228,14 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # Consume the exact snapshot bytes through npm's production
-  # postinstall, then launch the installed native CLI on both hosts.
+  # Build npm-native packages from the exact snapshot bytes and launch
+  # the installed CLI with lifecycle scripts disabled on every OS.
   release-artifact-smoke:
     needs: release-snapshot
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4

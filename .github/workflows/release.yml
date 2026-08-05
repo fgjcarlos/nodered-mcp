@@ -11,7 +11,7 @@ permissions:
 jobs:
   # Issue #258: real-artifact inspection. Run goreleaser in
   # --snapshot mode against the tag's source tree, then assert
-  # every generated archive matches the installer's expectations
+  # every generated archive matches the native-package expectations
   # (flat layout, correct binary naming per platform, non-empty
   # binaries, checksums.txt internally consistent). Fails before
   # the publish job runs, so a half-built release cannot publish
@@ -60,7 +60,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
