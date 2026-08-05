@@ -5,7 +5,6 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/diag-npm-publish.yml'
-  workflow_dispatch:
 
 jobs:
   diag:
@@ -15,27 +14,19 @@ jobs:
         env:
           NPM_SECRET: ${{ secrets.NPM_SECRET }}
         run: |
-          echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
-          mkdir -p /tmp/diag
+          set -euo pipefail
+          printf "%s\n" \
+            "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
+          mkdir -p /tmp/diag/bin
           cd /tmp/diag
-          cat > package.json <<'EOF'
-{
-  "name": "@fgjcarlos/nodered-mcp-diag-20260805",
-  "version": "0.0.1",
-  "description": "diag scratch — delete after",
-  "license": "MIT",
-  "publishConfig": { "access": "public" }
-}
-EOF
-          mkdir -p bin
-          echo '#!/usr/bin/env node' > bin/run.js
-          echo 'console.log("diag");' >> bin/run.js
-          echo "--- npm view @fgjcarlos/nodered-mcp-diag-20260805 (should be E404 GET):"
-          npm view @fgjcarlos/nodered-mcp-diag-20260805 version 2>&1 | head -5
+          printf "%s" '{ "name": "@fgjcarlos/nodered-mcp-diag-20260805", "version": "0.0.1", "description": "diag scratch", "license": "MIT", "publishConfig": { "access": "public" } }' > package.json
+          printf "%s\n" '#!/usr/bin/env node' 'console.log("diag");' > bin/run.js
+          echo "--- npm view (should be E404 GET):"
+          npm view @fgjcarlos/nodered-mcp-diag-20260805 version 2>&1 | head -5 || true
           echo "--- npm pack:"
           npm pack 2>&1 | tail -3
           TARBALL=$(ls *.tgz | head -1)
           echo "--- npm publish NO --provenance:"
-          npm publish --access public --tag next "$TARBALL" 2>&1 | tail -30
+          npm publish --access public --tag next "$TARBALL" 2>&1 | tail -30 || true
           echo "--- now unpublish to clean registry:"
-          npm unpublish @fgjcarlos/nodered-mcp-diag-20260805@0.0.1 --force 2>&1 | tail -5
+          npm unpublish @fgjcarlos/nodered-mcp-diag-20260805@0.0.1 --force 2>&1 | tail -5 || true
