@@ -26,7 +26,7 @@ La versión en inglés de este documento está en
 Tres canales soportados. Elige el que mejor te encaje:
 
 ```bash
-# npm — funciona en todas las plataformas. Recomendado.
+# npm — Linux, macOS y Windows en amd64/arm64. Recomendado.
 npm install -g @fgjcarlos/nodered-mcp
 ```
 

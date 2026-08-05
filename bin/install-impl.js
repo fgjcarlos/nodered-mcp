@@ -53,26 +53,24 @@ const ASSET_MAP = {
   'linux-arm64':  'nodered-mcp_linux_arm64.tar.gz',
   'darwin-x64':   'nodered-mcp_darwin_amd64.tar.gz',
   'darwin-arm64': 'nodered-mcp_darwin_arm64.tar.gz',
+  'win32-x64':    'nodered-mcp_windows_amd64.tar.gz',
+  'win32-arm64':  'nodered-mcp_windows_arm64.tar.gz',
 };
 
 function assetFor(platform, arch) {
   return ASSET_MAP[`${platform}-${arch}`] || null;
 }
 
-// Windows and unsupported platforms fall through to scripts/install.ps1
-// (issue #182 / #192 retired the npm wrapper for Windows). The message
-// points at the corrected /main/scripts/install.ps1 URL, not the legacy
-// /main/install.ps1 path that #80 had to delete, and tells the user how
-// to remove the broken launcher from PATH.
+// Every GoReleaser archive has a matching npm entry. Unsupported
+// platforms fail before any download and point to the remaining
+// supported installation channels without resurrecting retired scripts.
 function unsupportedPlatformMessage(platform, arch) {
   if (assetFor(platform, arch)) return null;
   const key = `${platform}-${arch}`;
   return [
     `@fgjcarlos/nodered-mcp: no npm-installable binary for ${key}.`,
-    'On Windows, install via scripts/install.ps1:',
-    `  irm https://raw.githubusercontent.com/${REPO}/main/scripts/install.ps1 | iex`,
-    'If a previous install left a broken npm shim, remove it first:',
-    '  npm uninstall -g @fgjcarlos/nodered-mcp',
+    'Use Docker, or install from source with Go:',
+    `  go install github.com/${REPO}/cmd/nodered-mcp@latest`,
   ].join('\n');
 }
 

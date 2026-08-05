@@ -93,15 +93,17 @@ function buildChecksumLine(buffer, assetName) {
 
 // A fresh tmp binDir + staging + a synthetic tarball buffer for the
 // happy-path dep stub. Returns everything a test needs.
-function makeScenario() {
+function makeScenario(options = {}) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'install-impl-test-'));
   const binDir = path.join(tmpRoot, 'bin');
   fs.mkdirSync(binDir, { recursive: true });
   const stagingDir = path.join(tmpRoot, 'staging');
-  const assetName = 'nodered-mcp_linux_amd64.tar.gz';
-  const archiveRoot = 'nodered-mcp_linux_amd64';
-  const binaryContent = '#!/bin/sh\necho "fake nodered-mcp v' + PACKAGE_VERSION + '"\n';
-  const tarball = buildTarGzFixture(archiveRoot, 'nodered-mcp', binaryContent);
+  const assetName = options.assetName || 'nodered-mcp_linux_amd64.tar.gz';
+  const archiveRoot = options.archiveRoot || 'nodered-mcp_linux_amd64';
+  const binaryName = options.binaryName || 'nodered-mcp';
+  const binaryContent = options.binaryContent ||
+    '#!/bin/sh\necho "fake nodered-mcp v' + PACKAGE_VERSION + '"\n';
+  const tarball = buildTarGzFixture(archiveRoot, binaryName, binaryContent);
   const checksumsTxt = buildChecksumLine(tarball, assetName);
   return { tmpRoot, binDir, stagingDir, assetName, archiveRoot, tarball, checksumsTxt };
 }
@@ -177,25 +179,25 @@ function testAssetMapContract() {
     ['linux',  'arm64', 'nodered-mcp_linux_arm64.tar.gz'],
     ['darwin', 'x64',   'nodered-mcp_darwin_amd64.tar.gz'],
     ['darwin', 'arm64', 'nodered-mcp_darwin_arm64.tar.gz'],
+    ['win32',  'x64',   'nodered-mcp_windows_amd64.tar.gz'],
+    ['win32',  'arm64', 'nodered-mcp_windows_arm64.tar.gz'],
   ];
   for (const [p, a, expected] of supported) {
     assertEq(assetFor(p, a), expected, `assetFor(${p}, ${a})`);
     assertEq(unsupportedPlatformMessage(p, a), null, `unsupportedPlatformMessage(${p}, ${a}) null`);
   }
-  for (const [p, a] of [['win32', 'x64'], ['win32', 'arm64']]) {
-    const msg = unsupportedPlatformMessage(p, a);
-    if (msg === null) fail(`unsupportedPlatformMessage(${p}, ${a}) should not be null`);
-    assertContains(msg, `${p}-${a}`, `win msg platform label`);
-    assertContains(msg, '/main/scripts/install.ps1', `win msg install URL`);
-    assertContains(msg, 'npm uninstall -g @fgjcarlos/nodered-mcp', `win msg uninstall hint`);
-    if (msg.includes('/main/install.ps1') && !msg.includes('/main/scripts/install.ps1')) {
-      fail(`win msg references legacy /main/install.ps1 path`);
-    }
+  const msg = unsupportedPlatformMessage('freebsd', 'x64');
+  assertEq(msg === null, false, 'freebsd must be unsupported');
+  assertContains(msg, 'freebsd-x64', 'unsupported platform label');
+  assertContains(
+    msg,
+    'go install github.com/fgjcarlos/nodered-mcp/cmd/nodered-mcp@latest',
+    'unsupported platform Go hint',
+  );
+  if (msg.includes('install.ps1') || msg.includes('install.sh')) {
+    fail(`unsupported platform message must not reference retired installers; got ${msg}`);
   }
-  assertEq(unsupportedPlatformMessage('freebsd', 'x64') === null, false, 'freebsd must be unsupported');
-  assertContains(unsupportedPlatformMessage('freebsd', 'x64'), 'freebsd-x64', 'freebsd label');
 }
-
 function testParseChecksumsTxt() {
   const text = [
     '# goreleaser comment line',
@@ -243,6 +245,31 @@ async function testSuccessPath() {
     if (!fs.existsSync(marker)) fail(`success: .installed marker missing`);
     const markerText = fs.readFileSync(marker, 'utf8').trim();
     assertEq(markerText, PACKAGE_VERSION, 'success: marker version matches package');
+  } finally {
+    cleanup(s);
+  }
+}
+
+async function testWindowsSuccessPath() {
+  const s = makeScenario({
+    assetName: 'nodered-mcp_windows_amd64.tar.gz',
+    archiveRoot: 'nodered-mcp_windows_amd64',
+    binaryName: 'nodered-mcp.exe',
+    binaryContent: 'fake Windows nodered-mcp v' + PACKAGE_VERSION + '\n',
+  });
+  try {
+    const result = await _run(
+      makeDeps(s),
+      ctx(s, { platform: 'win32', arch: 'x64', exeSuffix: '.exe' }),
+    );
+    assertEq(result.skipped, false, 'windows success: skipped=false');
+    const target = path.join(s.binDir, 'nodered-mcp.exe');
+    if (!fs.existsSync(target)) fail(`windows success: target binary missing at ${target}`);
+    const st = fs.statSync(target);
+    if (!st.isFile() || st.size === 0) fail('windows success: target must be a non-empty regular file');
+    if (fs.existsSync(s.stagingDir)) fail('windows success: staging dir not cleaned up');
+    const marker = path.join(s.binDir, '.installed');
+    assertEq(fs.readFileSync(marker, 'utf8').trim(), PACKAGE_VERSION, 'windows success: marker version matches package');
   } finally {
     cleanup(s);
   }
@@ -345,7 +372,10 @@ async function testPromotionFailure() {
     renameSync: (a, b) => {
       // Fail the second rename (the one that places the binary at
       // its final target) so we exercise the rollback branch.
-      if (String(b).endsWith('/nodered-mcp') && String(a).includes('.tmp-')) {
+      if (
+        path.basename(String(b)) === 'nodered-mcp' &&
+        path.basename(String(a)).startsWith('nodered-mcp.tmp-')
+      ) {
         throw new Error('simulated promote failure');
       }
       return fs.renameSync(a, b);
@@ -452,22 +482,25 @@ async function testRollbackOnUnsupportedPlatform() {
   try {
     let threw = false;
     try {
-      await _run(makeDeps(s), ctx(s, { platform: 'win32', arch: 'x64' }));
+      await _run(makeDeps(s), ctx(s, { platform: 'freebsd', arch: 'x64' }));
     } catch (err) {
       threw = true;
       if (!err.message.includes('no npm-installable binary')) {
         fail(`unsupported platform: message should be friendly; got ${err.message}`);
       }
-      if (!err.message.includes('/main/scripts/install.ps1')) {
-        fail(`unsupported platform: message should reference install.ps1; got ${err.message}`);
+      if (!err.message.includes('go install github.com/fgjcarlos/nodered-mcp/cmd/nodered-mcp@latest')) {
+        fail(`unsupported platform: message should provide the Go path; got ${err.message}`);
+      }
+      if (err.message.includes('install.ps1') || err.message.includes('install.sh')) {
+        fail(`unsupported platform: message must not reference retired scripts; got ${err.message}`);
       }
     }
-    if (!threw) fail(`unsupported platform: _run should have rejected`);
+    if (!threw) fail('unsupported platform: _run should have rejected');
     if (fs.existsSync(path.join(s.binDir, 'nodered-mcp'))) {
-      fail(`unsupported platform: no binary should be written for unsupported platforms`);
+      fail('unsupported platform: no binary should be written for unsupported platforms');
     }
     if (fs.existsSync(s.stagingDir)) {
-      fail(`unsupported platform: staging dir must not exist`);
+      fail('unsupported platform: staging dir must not exist');
     }
   } finally {
     cleanup(s);
@@ -481,6 +514,7 @@ async function main() {
   testParseChecksumsTxt();
   testVerifyChecksum();
   await testSuccessPath();
+  await testWindowsSuccessPath();
   await testChecksumMismatch();
   await testDownloadTimeout();
   await testExtractionFailure();
