@@ -32,6 +32,7 @@
 // binDir is left untouched. The prior install (if any) keeps working.
 
 const https = require('node:https');
+const http = require('node:http');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
@@ -150,7 +151,19 @@ function downloadWithTimeout(url, timeoutMs) {
       reject(new Error(`download timed out after ${timeoutMs}ms: ${url}`));
     }, timeoutMs);
 
-    const req = https.get(
+    const transport = url.startsWith('https://')
+      ? https
+      : url.startsWith('http://')
+        ? http
+        : null;
+    if (!transport) {
+      settled = true;
+      clearTimeout(timer);
+      reject(new Error(`unsupported download protocol: ${url}`));
+      return;
+    }
+
+    const req = transport.get(
       url,
       { headers: { 'User-Agent': 'nodered-mcp-install' } },
       (res) => {
