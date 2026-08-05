@@ -1,0 +1,35 @@
+name: diag-npm-publish
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: attempt real publish of dummy scoped package
+        env:
+          NPM_SECRET: ${{ secrets.NPM_SECRET }}
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
+          mkdir -p /tmp/diag
+          cd /tmp/diag
+          cat > package.json <<'EOF'
+{
+  "name": "@fgjcarlos/nodered-mcp-diag-20260805",
+  "version": "0.0.1",
+  "description": "diag scratch — delete after",
+  "license": "MIT",
+  "publishConfig": { "access": "public" }
+}
+EOF
+          mkdir -p bin
+          echo '#!/usr/bin/env node' > bin/run.js
+          echo 'console.log("diag");' >> bin/run.js
+          echo "--- npm pack:"
+          npm pack 2>&1 | tail -3
+          TARBALL=$(ls *.tgz)
+          echo "--- npm publish NO --provenance:"
+          npm publish --access public --tag next "$TARBALL" 2>&1 | tail -20
+          echo "--- now unpublish to clean registry:"
+          npm unpublish @fgjcarlos/nodered-mcp-diag-20260805@0.0.1 --force 2>&1 | tail -5
