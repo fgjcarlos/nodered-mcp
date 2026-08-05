@@ -26,7 +26,7 @@ A Spanish version of this document is available at
 Three channels are supported. Pick the one that fits:
 
 ```bash
-# npm — works on every platform. Recommended.
+# npm — Linux, macOS and Windows on amd64/arm64. Recommended.
 npm install -g @fgjcarlos/nodered-mcp
 ```
 
