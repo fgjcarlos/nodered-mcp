@@ -118,6 +118,11 @@ async function testBuildOneFlatLayout() {
       licenseSrc,
     });
     if (!fs.existsSync(result.tarball)) fail(`tarball not created at ${result.tarball}`);
+    assertEq(
+      path.basename(result.tarball),
+      'nodered-mcp-linux-x64-9.9.9.tgz',
+      'tarball filename matches publication workflow contract',
+    );
     const entries = await readTarball(result.tarball);
     assertContains(entries.join('\n'), 'package/package.json', 'tarball has npm package manifest');
     assertContains(entries.join('\n'), 'package/bin/', 'tarball has bin/');
