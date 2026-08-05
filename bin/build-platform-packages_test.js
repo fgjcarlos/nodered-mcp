@@ -81,7 +81,10 @@ async function makeSyntheticDist(dir, layout) {
 async function readTarball(tarballPath) {
   // Use system tar to enumerate entries without depending on a
   // node-tar version.
-  const out = execFileSync('tar', ['-tzf', tarballPath], { encoding: 'utf8' });
+  const out = execFileSync('tar', ['-tzf', path.basename(tarballPath)], {
+    cwd: path.dirname(tarballPath),
+    encoding: 'utf8',
+  });
   return out.split('\n').filter((l) => l.length > 0);
 }
 
@@ -122,7 +125,11 @@ async function testBuildOneFlatLayout() {
     assertContains(entries.join('\n'), 'package/LICENSE', 'tarball has LICENSE');
 
     // Manifest version must match.
-    const manifest = JSON.parse(execFileSync('tar', ['-xzOf', result.tarball, 'package/package.json'], { encoding: 'utf8' }));
+    const manifest = JSON.parse(execFileSync(
+      'tar',
+      ['-xzOf', path.basename(result.tarball), 'package/package.json'],
+      { cwd: path.dirname(result.tarball), encoding: 'utf8' },
+    ));
     assertEq(manifest.version, '9.9.9', 'manifest version stamped');
     assertEq(manifest.os[0], 'linux', 'manifest os pinned');
     assertEq(manifest.cpu[0], 'x64', 'manifest cpu pinned');
