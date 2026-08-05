@@ -1,6 +1,10 @@
 name: diag-npm-publish
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diag-npm-publish.yml'
   workflow_dispatch:
 
 jobs:
@@ -26,10 +30,12 @@ EOF
           mkdir -p bin
           echo '#!/usr/bin/env node' > bin/run.js
           echo 'console.log("diag");' >> bin/run.js
+          echo "--- npm view @fgjcarlos/nodered-mcp-diag-20260805 (should be E404 GET):"
+          npm view @fgjcarlos/nodered-mcp-diag-20260805 version 2>&1 | head -5
           echo "--- npm pack:"
           npm pack 2>&1 | tail -3
-          TARBALL=$(ls *.tgz)
+          TARBALL=$(ls *.tgz | head -1)
           echo "--- npm publish NO --provenance:"
-          npm publish --access public --tag next "$TARBALL" 2>&1 | tail -20
+          npm publish --access public --tag next "$TARBALL" 2>&1 | tail -30
           echo "--- now unpublish to clean registry:"
           npm unpublish @fgjcarlos/nodered-mcp-diag-20260805@0.0.1 --force 2>&1 | tail -5
