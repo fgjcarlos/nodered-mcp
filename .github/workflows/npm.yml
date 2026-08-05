@@ -274,8 +274,6 @@ jobs:
             exit 1
           fi
 
-      - name: pack main package
-        run: npm pack --json --pack-destination npm-packages .
 
       - name: publish main package
         # OIDC auth via Trusted Publisher. The .npmrc file does not
@@ -291,7 +289,12 @@ jobs:
             exit 0
           fi
           rm -f ~/.npmrc
-          npm publish --access public --provenance --tag next
+          # Pass "." so npm packs the current directory (the main
+          # package) on the fly. Earlier iterations used a separate
+          # `npm pack` step that wrote into npm-packages/ and then
+          # failed to open the result (ENOENT) due to a race between
+          # pack and read on the runner filesystem.
+          npm publish --access public --provenance --tag next .
 
       - name: verify main package integrity and provenance
         run: |
