@@ -35,6 +35,7 @@ const {
   downloadWithTimeout,
   PACKAGE_VERSION,
   DOWNLOAD_RETRIES,
+  releaseBaseUrl,
 } = require('./install-impl');
 
 let failures = 0;
@@ -248,6 +249,35 @@ function testVerifyChecksum() {
   assertThrows(() => verifyChecksum(buf, 'not-hex'), 'verifyChecksum malformed expected throws');
   assertThrows(() => verifyChecksum(buf, ''), 'verifyChecksum empty expected throws');
   assertThrows(() => verifyChecksum(buf, undefined), 'verifyChecksum undefined expected throws');
+}
+
+function testReleaseBaseUrl() {
+  assertEq(
+    releaseBaseUrl('1.2.3', {}),
+    'https://github.com/fgjcarlos/nodered-mcp/releases/download/v1.2.3',
+    'releaseBaseUrl canonical URL',
+  );
+  assertEq(
+    releaseBaseUrl('1.2.3', {
+      CI: 'true',
+      NODERED_MCP_TEST_RELEASE_BASE_URL: 'http://127.0.0.1:4321/',
+    }),
+    'http://127.0.0.1:4321',
+    'releaseBaseUrl loopback override',
+  );
+  assertThrows(
+    () => releaseBaseUrl('1.2.3', {
+      NODERED_MCP_TEST_RELEASE_BASE_URL: 'http://127.0.0.1:4321',
+    }),
+    'releaseBaseUrl rejects override outside CI',
+  );
+  assertThrows(
+    () => releaseBaseUrl('1.2.3', {
+      CI: 'true',
+      NODERED_MCP_TEST_RELEASE_BASE_URL: 'https://example.com/releases',
+    }),
+    'releaseBaseUrl rejects non-loopback override',
+  );
 }
 
 // ---------- end-to-end _run tests -----------------------------------
@@ -741,6 +771,7 @@ async function main() {
   testAssetMapContract();
   testParseChecksumsTxt();
   testVerifyChecksum();
+  testReleaseBaseUrl();
   await runTest('testSuccessPath', testSuccessPath);
   await runTest('testWindowsSuccessPath', testWindowsSuccessPath);
   await runTest('testWrappedLayoutRegression', testWrappedLayoutRegression);
