@@ -229,7 +229,7 @@ async function testWindowsArchiveExpectsExe() {
       fail('windows archive with .exe suffix missing: inspectArchive should have failed');
     } else {
       const joined = result.errors.join(' ');
-      assertContains(joined, 'expected binary', 'windows archive error names the missing binary');
+      assertContains(joined, 'exactly one binary', 'windows archive error names the missing binary');
     }
   } finally {
     await cleanup();
@@ -248,6 +248,32 @@ async function testEmptyBinaryFails() {
       archivePath: produced[assetName].filePath,
     });
     if (result.ok) fail('empty linux binary: inspectArchive should have failed');
+  } finally {
+    await cleanup();
+  }
+}
+
+async function testDuplicateBinaryFails() {
+  const binary = expectedBinaryName('linux-x64');
+  const assetName = ASSET_MAP['linux-x64'];
+  const wrappedRoot = assetName.replace(/\.tar\.gz$/, '');
+  const { cleanup, produced } = await makeDistFixture({
+    [assetName]: [
+      { name: binary, content: 'flat' },
+      { name: `${wrappedRoot}/${binary}`, content: 'wrapped' },
+    ],
+  });
+  try {
+    const result = await inspectArchive({
+      assetName,
+      archivePath: produced[assetName].filePath,
+    });
+    if (result.ok) fail('duplicate binary: inspectArchive should have failed');
+    assertContains(
+      result.errors.join(' '),
+      'exactly one binary',
+      'duplicate binary error identifies cardinality contract',
+    );
   } finally {
     await cleanup();
   }
@@ -397,6 +423,7 @@ async function main() {
   await runTest('testWrappedLayoutArchiveOk', testWrappedLayoutArchiveOk);
   await runTest('testWindowsArchiveExpectsExe', testWindowsArchiveExpectsExe);
   await runTest('testEmptyBinaryFails', testEmptyBinaryFails);
+  await runTest('testDuplicateBinaryFails', testDuplicateBinaryFails);
   await runTest('testWrongSuffixOnUnixFails', testWrongSuffixOnUnixFails);
   await runTest('testInspectAllSixAssetsPass', testInspectAllSixAssetsPass);
   await runTest('testInspectAllMissingArchive', testInspectAllMissingArchive);
