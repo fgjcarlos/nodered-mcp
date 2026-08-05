@@ -40,28 +40,19 @@ go install github.com/fgjcarlos/nodered-mcp/cmd/nodered-mcp@latest
 docker pull ghcr.io/fgjcarlos/nodered-mcp:latest
 ```
 
-The npm channel runs a checksum-verified, atomic postinstall. The
-tarball is downloaded from the matching GitHub release, its SHA-256
-is verified against the release's `checksums.txt`, the archive is
-extracted into a per-run staging directory under `os.tmpdir()`, and
-the binary is moved into place via a temp file + atomic rename. On
-any failure — bad checksum, download timeout, corrupted archive, or
-promotion error — the staging directory is removed and `bin/` is
-left untouched, so a partial install never overwrites a working
-prior one. The wrapper writes a `.installed` marker only after the
-binary is in place; subsequent `npm install` calls skip the
-download when the marker version matches. Re-installs fire
-automatically when the marker is missing or stale (corrupt prior
-install, version upgrade).
+The npm channel ships native binaries per platform through npm's
+own `optionalDependencies` registry mechanism. Running `npm install -g
+@fgjcarlos/nodered-mcp` resolves one of six scoped platform packages
+(`@fgjcarlos/nodered-mcp-<plat>-<arch>`) via npm's `os`/`cpu` filter,
+and the wrapper at `bin/nodered-mcp.js` re-execs the matching
+executable. No lifecycle scripts run during install — `npm install -g
+--ignore-scripts @fgjcarlos/nodered-mcp` works for environments that
+disable postinstall scripts. Registry integrity replaces the legacy
+checksum-verified GitHub downloader.
 
-For slow, proxied, VPN, or otherwise unreliable connections, the npm
-installer supports these positive-integer environment overrides:
-
-- `NODERED_MCP_DOWNLOAD_TIMEOUT_MS` — release archive timeout in milliseconds (default: `120000`).
-- `NODERED_MCP_CHECKSUMS_TIMEOUT_MS` — `checksums.txt` timeout in milliseconds (default: `30000`).
-- `NODERED_MCP_DOWNLOAD_RETRIES` — maximum attempts for each download (default: `3`).
-
-Invalid, empty, or non-positive values fall back to their defaults.
+The GitHub Release still ships the same six `.tar.gz` archives for
+direct downloads (e.g. `go install`-style consumers and CI caches),
+but the npm channel no longer downloads them at install time.
 
 After install, generate the snippet for your MCP client:
 

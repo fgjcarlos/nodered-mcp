@@ -7,10 +7,9 @@
 // This script is the consumer of release.yml's output. It is called
 // from .github/workflows/npm.yml after release.yml reports success;
 // if any check below fails, the script exits non-zero and npm publish
-// is skipped. The npm wrapper's postinstall downloads a tarball
-// whose URL embeds the tag — publishing while the tarball is missing
-// or when checksums.txt is malformed breaks fresh `npm install -g`
-// runs silently, so the gate is intentionally strict.
+// is skipped. The npm publisher consumes these exact tarballs to build
+// native platform packages, so a missing or malformed release asset
+// must block publication.
 //
 // The same verifyReleaseAssets() function is unit-tested by
 // bin/npm_release_gate_test.js with synthetic fixtures, so the
@@ -30,12 +29,25 @@ const https = require('node:https');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { ASSET_MAP } = require('../bin/install-impl.js');
+const { TARGETS } = require('../bin/platform-packages');
 
-// The installer is the only authority for npm-supported platforms.
-// Deriving this list here prevents a release gate change from drifting
-// away from the tarballs postinstall will actually download.
-const REQUIRED_NPM_ASSETS = [...new Set(Object.values(ASSET_MAP))];
+// Issue #257: bin/install-impl.js is retired. The goreleaser asset
+// names that the GitHub Release must carry (and that the platform
+// packages under npm/<key>/package.json wrap) are derived from
+// the same goreleaser `name_template` that lives in .goreleaser.yaml:
+//   "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+//
+// The list is small and stable; pin it here in lockstep with
+// .goreleaser.yaml. scripts/release-snapshot.js (issue #258) carries
+// the same list and verifies the on-disk bytes. If a future change
+// to goreleaser drifts, the snapshot job fails the release before
+// npm publish sees it.
+//
+// Asset names mapped to the npm package name they feed into; both
+// halves of this object are the single source of truth for the
+// release gate.
+const REQUIRED_ASSETS = TARGETS.map((target) => target.asset);
+const REQUIRED_NPM_ASSETS = [...new Set(REQUIRED_ASSETS)];
 
 // Pattern for one line of checksums.txt. Goreleaser emits
 // sha256sum-style lines: `<hex64>  <filename>`. Both leading and
@@ -53,8 +65,8 @@ function verifyReleaseAssets({ release, checksumsContent, assetNames }) {
     errors.push('Release is a draft');
   }
 
-  // Asset set must include checksums, every tarball npm postinstall
-  // can download, and at least one SBOM for downstream consumers.
+  // Asset set must include checksums, every tarball the npm platform
+  // package producer consumes, and at least one SBOM.
   const hasChecksums = assetNames.includes('checksums.txt');
   if (!hasChecksums) {
     errors.push('checksums.txt is missing from the release');

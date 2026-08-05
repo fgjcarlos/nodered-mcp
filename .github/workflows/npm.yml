@@ -3,23 +3,25 @@ name: npm
 # npm publication is gated on the release workflow's success.
 #
 # release.yml produces the GitHub Release (binaries, checksums.txt,
-# SBOMs) for the tag. The npm wrapper's postinstall downloads a
-# tarball whose URL is built from the tag, so if this workflow runs
-# before release.yml finishes (or before its assets are queryable),
-# a fresh `npm install -g` 404s on the tarball — and npm versions
-# are immutable, so a retry is a no-op. The previous design fired
-# both workflows on tag push and let the scheduler race them;
-# publishing could land before any binary was uploaded, with no
-# signal at the publish step that anything was wrong.
+# SBOMs) for the tag. The npm channel as of 0.7.0 (#257) ships the
+# six native binaries as separate npm packages — see the
+# `optionalDependencies` block in package.json — and a thin wrapper
+# that re-execs the matching one for process.platform / process.arch.
+# Because npm registry integrity now replaces the custom checksum
+# path, the publish gate is the asset contract on the GitHub Release
+# (goreleaser produced everything the wrapper expects) plus the
+# exact-version pin between the seven packages.
 #
 # The trigger below makes the order deterministic: this workflow
 # only sees a tag once release.yml has reported `completed` with
-# `success`. Inside the job, scripts/release-gate.js then verifies
-# the GitHub Release carries checksums.txt, at least one tarball,
-# and at least one SBOM, and that checksums.txt is internally
-# consistent. Any failure inside the gate exits non-zero before
-# `npm publish` is touched, so a half-built release cannot ship a
-# working npm wrapper.
+# `success`. Inside the job, scripts/release-gate.js verifies the
+# GitHub Release carries checksums.txt and every required tarball,
+# and scripts/build-platform-packages.js assembles the six native
+# npm packages from goreleaser's dist/. Then the publication step
+# publishes the six platform packages first and the main package
+# last, in the order the issue mandates. Any failure inside the
+# gate exits non-zero before `npm publish` is touched, so a
+# half-built release cannot ship a working npm wrapper.
 on:
   workflow_run:
     workflows: ["release"]
@@ -58,12 +60,11 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      # The version match check runs inline with the read because GitHub
-      # Actions' step-output parser rejects any value that looks like a
-      # number ("0.5.3" is treated as a float). Passing the value
-      # through `>> $GITHUB_OUTPUT` and then interpolating it in a
-      # later step throws `Invalid format '0.5.3'`. Reading + checking
-      # in the same shell avoids the issue entirely and is shorter.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
       - name: verify package.json version matches the tag
         env:
           EXPECTED: ${{ env.TAG }}
@@ -77,26 +78,148 @@ jobs:
 
       # Verify the GitHub Release for this tag actually carries the
       # exact assets the npm wrapper depends on. release.yml is the
-      # producer; this step is the consumer's gate. It derives that
-      # asset contract from bin/install-impl.js, so installer support
-      # and publication eligibility cannot drift. A "succeeded"
-      # workflow_run that left the Release empty (goreleaser config
-      # drift, SBOM step errored out, draft toggle flipped on, etc.)
-      # fails here, before npm is touched.
+      # producer; this step is the consumer's gate. The asset names
+      # come from the goreleaser `name_template` and are also the
+      # list scripts/build-platform-packages.js consumes, so the
+      # release gate and the npm publisher cannot drift. A
+      # "succeeded" workflow_run that left the Release empty
+      # (goreleaser config drift, SBOM step errored out, draft
+      # toggle flipped on, etc.) fails here, before npm is touched.
       - name: verify release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/release-gate.js "$TAG" "${{ github.repository }}"
 
-      # npm publish reads NODE_AUTH_TOKEN from env, but on a fresh
-      # runner the empty ~/.npmrc can shadow it; writing the token to
-      # .npmrc avoids that race entirely. The file lives in the
-      # runner's home and is not committed.
-      # Re-pushing a tag to retry a failed goreleaser run re-triggers this
-      # workflow, and npm versions are immutable — a blind `npm publish`
-      # would fail the job with a 403 for a version that is already live.
-      # The registry check makes the retry a no-op instead.
-      - name: publish
+      # Download the exact archives already published by release.yml;
+      # rebuilding here could produce bytes different from the GitHub
+      # Release. scripts/build-platform-packages.js then pairs each with
+      # the matching manifest under npm/<key>/package.json and emits
+      # one npm-ready .tgz per platform. The .tgz files end up under
+      # npm-packages/ ready for `npm publish`.
+      - name: download published native archives
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$TAG" \
+            --repo "${{ github.repository }}" \
+            --pattern '*.tar.gz' \
+            --pattern 'checksums.txt' \
+            --dir dist
+
+      - name: verify downloaded archive checksums
+        run: |
+          cd dist
+          sha256sum --ignore-missing --check checksums.txt
+
+      - name: assemble platform packages
+        env:
+          VERSION: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          node scripts/build-platform-packages.js \
+            --version "${VERSION#v}" \
+            --dist dist \
+            --out npm-packages
+
+      # Pre-flight: every required platform package must be
+      # buildable before publish touches the registry. The script
+      # already fails closed; this is belt-and-braces so the
+      # failure mode names each missing platform explicitly.
+      - name: verify platform packages built
+        run: |
+          expected="nodered-mcp-win32-x64 nodered-mcp-win32-arm64 nodered-mcp-linux-x64 nodered-mcp-linux-arm64 nodered-mcp-darwin-x64 nodered-mcp-darwin-arm64"
+          missing=""
+          for pkg in $expected; do
+            if ! ls "npm-packages/${pkg}-$(jq -r .version package.json).tgz" >/dev/null 2>&1; then
+              missing="$missing $pkg"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "missing platform packages:$missing"
+            exit 1
+          fi
+
+      - name: pack main package before publication
+        run: npm pack --json --pack-destination npm-packages .
+
+      # Publish the six native packages first, then the main package.
+      # npm versions are immutable, so a retry of an already-published
+      # exact version is a no-op (`npm publish` on a live version
+      # fails with E403). The registry check before publish keeps a
+      # re-run idempotent without leaving partial-release states
+      # (which is the partial-publication risk the issue calls out).
+      #
+      # Steps 4-6 of the issue's publication ordering map to:
+      #   4. publish or verify the six platform packages first
+      #   5. confirm all six exact versions are readable from the registry
+      #   6. publish the main package only after all native packages exist
+      #
+      # Step 7 (idempotency) is the registry check in the inner loop.
+      # Step 8 (do not move `latest` until native deps are complete)
+      # is enforced by failing closed if any platform package is
+      # missing above.
+      - name: publish platform packages
+        env:
+          NPM_SECRET: ${{ secrets.NPM_SECRET }}
+          VERSION: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
+          version="${VERSION#v}"
+          cd npm-packages
+          for pkg in \
+            nodered-mcp-win32-x64 \
+            nodered-mcp-win32-arm64 \
+            nodered-mcp-linux-x64 \
+            nodered-mcp-linux-arm64 \
+            nodered-mcp-darwin-x64 \
+            nodered-mcp-darwin-arm64; do
+            tarball="${pkg}-${version}.tgz"
+            if [ ! -f "$tarball" ]; then
+              echo "platform tarball missing: $tarball"
+              exit 1
+            fi
+            # Resolve the scoped package name to check the registry.
+            scope="@fgjcarlos/${pkg}"
+            if npm view "${scope}@${version}" version >/dev/null 2>&1; then
+              echo "${scope}@${version} already published; skipping"
+              continue
+            fi
+            npm publish --access public --provenance "$tarball"
+            echo "published ${scope}@${version}"
+          done
+
+      - name: verify all platform packages are live
+        env:
+          VERSION: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          version="${VERSION#v}"
+          for pkg in \
+            nodered-mcp-win32-x64 \
+            nodered-mcp-win32-arm64 \
+            nodered-mcp-linux-x64 \
+            nodered-mcp-linux-arm64 \
+            nodered-mcp-darwin-x64 \
+            nodered-mcp-darwin-arm64; do
+            scope="@fgjcarlos/${pkg}"
+            verified=""
+            for attempt in 1 2 3 4 5; do
+              integrity=$(npm view "${scope}@${version}" dist.integrity 2>/dev/null || true)
+              attestation=$(npm view "${scope}@${version}" dist.attestations.url 2>/dev/null || true)
+              if [ -n "$integrity" ] && [ -n "$attestation" ]; then
+                verified=yes
+                break
+              fi
+              sleep $((attempt * 3))
+            done
+            if [ -z "$verified" ]; then
+              echo "platform package lacks registry integrity or provenance: ${scope}@${version}"
+              exit 1
+            fi
+            echo "verified integrity and provenance for ${scope}@${version}"
+          done
+
+      - name: publish main package
         env:
           NPM_SECRET: ${{ secrets.NPM_SECRET }}
         run: |
@@ -106,20 +229,24 @@ jobs:
             exit 0
           fi
           echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
-          npm publish --access public
+          npm publish --access public --provenance
 
-      # Mark the broken 0.6.2 release as deprecated. The npm registry
-      # keeps the tarball visible (npm versions are immutable) so users
-      # with version pins can still install, but the install command
-      # surfaces a one-line warning pointing at 0.6.3. Idempotent: npm
-      # deprecate returns success when the marker is already in place.
-      # Gate on 0.6.3 specifically so future patches don't accidentally
-      # deprecate themselves if the workflow template ever shifts.
-      - name: deprecate 0.6.2
-        if: env.TAG == 'v0.6.3'
+      - name: verify main package integrity and provenance
+        run: |
+          version=$(jq -r .version package.json)
+          integrity=$(npm view "@fgjcarlos/nodered-mcp@${version}" dist.integrity)
+          attestation=$(npm view "@fgjcarlos/nodered-mcp@${version}" dist.attestations.url)
+          if [ -z "$integrity" ] || [ -z "$attestation" ]; then
+            echo "main package lacks registry integrity or provenance"
+            exit 1
+          fi
+
+      - name: deprecate broken 0.6.2 npm release
         env:
           NPM_SECRET: ${{ secrets.NPM_SECRET }}
         run: |
-          echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
-          npm deprecate "@fgjcarlos/nodered-mcp@0.6.2" \
-            "postinstall cannot promote a binary from the actual GoReleaser archive layout. Upgrade to 0.6.3 or later: https://github.com/fgjcarlos/nodered-mcp/issues/256"
+          if npm view "@fgjcarlos/nodered-mcp@0.6.2" version >/dev/null 2>&1; then
+            echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
+            npm deprecate "@fgjcarlos/nodered-mcp@0.6.2" \
+              "Broken Windows installer; upgrade to @fgjcarlos/nodered-mcp@latest"
+          fi

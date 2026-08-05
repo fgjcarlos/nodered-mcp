@@ -2,11 +2,11 @@
 'use strict';
 
 // scripts/release-snapshot.js — run goreleaser in --snapshot mode and
-// inspect every generated archive against the installer's expectations.
+// inspect every generated archive against the native-package contract.
 //
 // Background: the 0.6.2 release shipped because the unit tests only
 // verified synthetic tarballs the test harness had constructed
-// itself. Both producer (goreleaser) and consumer (the npm postinstall)
+// itself. Both producer (goreleaser) and consumer (the npm packager)
 // can agree on a contract that does not match what the release flow
 // actually emits. Issue #258 mandates that CI consume the artifacts
 // goreleaser produces — flat layout, correct .exe naming, real
@@ -27,61 +27,28 @@ const { execFileSync } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { ASSET_MAP } = require('../bin/install-impl');
+const { TARGETS, binaryNameFor } = require('../bin/platform-packages');
 
 const DIST = path.join(__dirname, '..', 'dist');
 const CHECKSUM_FILE = 'checksums.txt';
 
-// Mirror the supported platform matrix in bin/install-impl.js. The
-// assetFor() function is the authoritative source — derive the
-// required asset names from it instead of hardcoding here.
-const REQUIRED_ASSETS = [...new Set(Object.values(ASSET_MAP))];
+const REQUIRED_ASSETS = TARGETS.map((target) => target.asset);
 
 // Map process-style platform/arch to the goreleaser asset key.
 function keyFromAsset(assetName) {
-  for (const [key, name] of Object.entries(ASSET_MAP)) {
-    if (name === assetName) return key;
-  }
-  return null;
+  return TARGETS.find((target) => target.asset === assetName)?.key || null;
 }
 
-// `tar -tzf` reads tar.gz listings with the system tar. We delegate
-// to it because it is the most battle-tested ustar parser available
-// on every CI runner (Linux, macOS, Windows-bash). The fallback path
-// for runners without a usable system tar uses bin/tar.js to extract
-// into a staging directory and then readdirSync the result; this is
-// slower but lets Windows runners participate.
+// `tar -tzf` reads tar.gz listings with the system tar available on
+// every GitHub-hosted runner. Passing a basename from the archive's
+// directory avoids GNU tar treating a Windows drive letter as a host.
 async function listArchive(archivePath) {
-  try {
-    const out = execFileSync('tar', ['-tzf', archivePath], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    return out.split('\n').filter((l) => l.length > 0);
-  } catch (err) {
-    // tar binary missing or returned non-zero. Fall back to in-process
-    // extraction with bin/tar.js so Windows runners can still
-    // participate even when the system tar is the BSD variant with
-    // subtly different flags.
-    const { extract } = require('../bin/tar');
-    const tmp = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'snapshot-list-'));
-    try {
-      await extract(archivePath, tmp);
-      const walk = (dir, prefix = '') => {
-        const entries = fs.readdirSync(dir, { withFileTypes: true });
-        const result = [];
-        for (const e of entries) {
-          const rel = prefix ? `${prefix}/${e.name}` : e.name;
-          if (e.isDirectory()) result.push(...walk(path.join(dir, e.name), rel));
-          else result.push(rel);
-        }
-        return result;
-      };
-      return walk(tmp);
-    } finally {
-      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
-    }
-  }
+  const out = execFileSync('tar', ['-tzf', path.basename(archivePath)], {
+    cwd: path.dirname(archivePath),
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  return out.split('\n').filter((line) => line.length > 0);
 }
 
 // Read the SHA-256 of an asset file.
@@ -108,7 +75,7 @@ async function readChecksumsTxt(distDir) {
 // Windows) and non-empty.
 function expectedBinaryName(key) {
   const [platform] = key.split('-');
-  return platform === 'win32' ? 'nodered-mcp.exe' : 'nodered-mcp';
+  return binaryNameFor(platform);
 }
 
 async function inspectArchive({ assetName, archivePath }) {
@@ -128,8 +95,8 @@ async function inspectArchive({ assetName, archivePath }) {
   // Path semantics: goreleaser v2 with wrap_in_directory:false puts
   // the binary at the archive root. Legacy configs with
   // wrap_in_directory:true put it at <archiveRoot>/<binary>. Accept
-  // both layouts because the installer's stageExtract accepts both
-  // (#256). Reject if the binary is missing from BOTH layouts.
+  // both layouts so existing and current GoReleaser output can be
+  // packaged. Reject if the binary is missing from BOTH layouts.
   const expectedRooted = binary;
   const expectedWrapped =
     `${assetName.replace(/\.tar\.gz$/, '')}/${binary}`;
@@ -142,13 +109,14 @@ async function inspectArchive({ assetName, archivePath }) {
       `${assetName}: expected exactly one binary at ${expectedRooted} or ${expectedWrapped}; found ${binaryEntries.length}; entries=${JSON.stringify(entries)}`,
     );
   } else {
-    // Walk the archive in-process to confirm the binary is non-empty.
-    // We accept both layouts and resolve the staged archive dir
-    // exactly the way install-impl's stageExtract does.
-    const { extract } = require('../bin/tar');
+    // Extract the real archive to confirm the selected binary is a
+    // non-empty regular file.
     const tmp = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'snapshot-inspect-'));
     try {
-      await extract(archivePath, tmp);
+      execFileSync('tar', ['-xzf', path.basename(archivePath), '-C', tmp], {
+        cwd: path.dirname(archivePath),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
       const wrappedDir = path.join(tmp, assetName.replace(/\.tar\.gz$/, ''));
       const stagedDir = fs.existsSync(wrappedDir) ? wrappedDir : tmp;
       const binPath = path.join(stagedDir, binary);

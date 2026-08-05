@@ -4,7 +4,7 @@
 // scripts/release-snapshot.js inspect helpers.
 //
 // Issue #258: the release-snapshot.js script is the producer-side
-// gate that fails CI if goreleaser outputs drift from the installer's
+// gate that fails CI if goreleaser outputs drift from the packager's
 // contract. The script consumes goreleaser in CI; this test exercises
 // the inspection helpers with synthetic tarballs so the suite runs on
 // any node install without goreleaser present (Windows matrix,
@@ -42,7 +42,8 @@ const {
   keyFromAsset,
   REQUIRED_ASSETS,
 } = require('../scripts/release-snapshot.js');
-const { ASSET_MAP } = require('./install-impl.js');
+const { TARGETS } = require('./platform-packages.js');
+const ASSET_MAP = Object.fromEntries(TARGETS.map(({ key, asset }) => [key, asset]));
 
 let failures = 0;
 function fail(msg) {

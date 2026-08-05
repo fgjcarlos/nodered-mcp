@@ -40,15 +40,21 @@ go install github.com/fgjcarlos/nodered-mcp/cmd/nodered-mcp@latest
 docker pull ghcr.io/fgjcarlos/nodered-mcp:latest
 ```
 
-El instalador de npm verifica el checksum y promociona el binario de forma
-atómica. Para conexiones lentas, mediante proxy, VPN o poco fiables admite
-estas variables de entorno con valores enteros positivos:
+El canal de npm publica binarios nativos por plataforma usando el
+mecanismo `optionalDependencies` del registro. Al ejecutar `npm install
+-g @fgjcarlos/nodered-mcp`, npm resuelve uno de los seis paquetes
+de plataforma con scope (`@fgjcarlos/nodered-mcp-<plat>-<arch>`)
+filtrando por `os`/`cpu`, y el wrapper en `bin/nodered-mcp.js`
+re-executa el ejecutable correspondiente. No se ejecutan scripts
+de lifecycle durante la instalación — `npm install -g --ignore-scripts
+@fgjcarlos/nodered-mcp` funciona en entornos que desactivan
+postinstall. La integridad del registro reemplaza al verificador de
+checksum que descargaba desde GitHub.
 
-- `NODERED_MCP_DOWNLOAD_TIMEOUT_MS` — timeout del archivo de la release en milisegundos (por defecto: `120000`).
-- `NODERED_MCP_CHECKSUMS_TIMEOUT_MS` — timeout de `checksums.txt` en milisegundos (por defecto: `30000`).
-- `NODERED_MCP_DOWNLOAD_RETRIES` — número máximo de intentos por descarga (por defecto: `3`).
-
-Los valores vacíos, no válidos o no positivos usan el valor por defecto.
+La GitHub Release sigue publicando los mismos seis archivos `.tar.gz`
+para descargas directas (consumidores tipo `go install` o cachés
+de CI), pero el canal de npm ya no los descarga en tiempo de
+instalación.
 
 Tras instalar, genera el snippet para tu cliente MCP:
 

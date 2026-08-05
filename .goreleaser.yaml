@@ -8,10 +8,9 @@ before:
     # each hook with shlex and execs it directly, so `&&`, pipes and
     # nested quoting do not work here (#218 tried a sed one-liner and
     # every release died with "invalid command line string"). We only
-    # need `go mod tidy` here — the npm wrapper's authoritative
-    # install code path (bin/install-impl.js) reads its version from
+    # need `go mod tidy` here — the npm wrapper reads its version from
     # package.json at runtime, so no source rewrite is needed for the
-    # npm wrapper to track the release tag (#242).
+    # npm wrapper to track the release tag (#242, #257).
     - go mod tidy
 
 builds:

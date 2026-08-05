@@ -35,7 +35,7 @@ function test(name, fn) {
 
 // Synthetic asset name set matching what goreleaser actually uploads
 // for one full build. Required tarballs come directly from the
-// installer contract; the SBOM names mirror .goreleaser.yaml.
+// native package contract; the SBOM names mirror .goreleaser.yaml.
 const fullAssets = [
   ...REQUIRED_NPM_ASSETS,
   'nodered-mcp_0.6.1_linux_amd64.sbom.json',
@@ -199,7 +199,7 @@ test('fails when checksums.txt lists the same file twice', () => {
   );
 });
 
-test('required npm assets are derived from the installer contract', () => {
+test('required npm assets are derived from the native package contract', () => {
   assert.ok(REQUIRED_NPM_ASSETS.length > 0);
   assert.equal(new Set(REQUIRED_NPM_ASSETS).size, REQUIRED_NPM_ASSETS.length);
 });
