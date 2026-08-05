@@ -12,5 +12,5 @@
     "bin/nodered-mcp",
     "LICENSE"
   ],
-  "publishConfig": { "access": "public", "provenance": true }
+  "publishConfig": { "access": "public" }
 }
