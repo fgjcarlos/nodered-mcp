@@ -4,20 +4,6 @@ All notable changes to this project are documented here. The format
 follows [Keep a Changelog 1.1](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Added
-
-- feat(cli): `setup` and `doctor` subcommands backed by a transactional
-  Plan → Apply → Verify lifecycle foundation. `setup` is idempotent
-  (re-runs are no-ops unless the managed state has drifted); `doctor`
-  is read-only and re-verifies the last successful receipt, exiting 2
-  on drift. Receipts live under
-  `$XDG_STATE_HOME/nodered-mcp/receipts/<plan>.json` and survive across
-  invocations so the next setup can skip already-applied work and
-  future remove/rollback (#230) and update-contract (#228) commands
-  can build on the same foundation.
-
 ## [0.6.0] - 2026-08-04
 
 Minor bump. Adds the version-detection foundation plus the

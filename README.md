@@ -63,24 +63,6 @@ nodered-mcp init --write
 # 3. Restart your MCP client; 44 tools appear under the "nodered" server
 ```
 
-For first-time bootstrap or recovery, `setup` creates a default config
-directory and writes a managed `.env.example` you can edit; `doctor`
-re-verifies the last successful setup and reports drift. Both commands
-are idempotent and write a receipt under `$XDG_STATE_HOME/nodered-mcp/receipts/`:
-
-```bash
-# One-shot bootstrap. Safe to re-run; a second invocation is a no-op
-# unless the managed state has drifted.
-nodered-mcp setup
-
-# Read-only check: re-verifies the last setup receipt and exits 2 on drift.
-nodered-mcp doctor
-
-# Force a re-apply when the receipt says everything is fine but you want
-# the latest managed `.env.example` shape.
-nodered-mcp setup --force
-```
-
 Need help? See [`docs/troubleshooting.md`](./docs/troubleshooting.md).
 
 ## Docker
