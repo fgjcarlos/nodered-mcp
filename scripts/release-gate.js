@@ -30,12 +30,12 @@ const https = require('node:https');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+const { ASSET_MAP } = require('../bin/install-impl.js');
 
-// Minimum number of tarballs checksums.txt must reference. Goreleaser
-// builds six os/arch pairs (see .goreleaser.yaml: goos x goarch = 3x2),
-// so 6 is the floor — anything below means a build silently dropped a
-// target.
-const EXPECTED_BINARY_COUNT = 6;
+// The installer is the only authority for npm-supported platforms.
+// Deriving this list here prevents a release gate change from drifting
+// away from the tarballs postinstall will actually download.
+const REQUIRED_NPM_ASSETS = [...new Set(Object.values(ASSET_MAP))];
 
 // Pattern for one line of checksums.txt. Goreleaser emits
 // sha256sum-style lines: `<hex64>  <filename>`. Both leading and
@@ -53,19 +53,17 @@ function verifyReleaseAssets({ release, checksumsContent, assetNames }) {
     errors.push('Release is a draft');
   }
 
-  // Asset set must include the three classes the npm wrapper and
-  // downstream consumers rely on. checksums.txt is the goreleaser
-  // contract; SBOMs ship one per binary so we only require >=1;
-  // tarballs must include at least one platform so any fresh
-  // `npm install -g` can succeed.
+  // Asset set must include checksums, every tarball npm postinstall
+  // can download, and at least one SBOM for downstream consumers.
   const hasChecksums = assetNames.includes('checksums.txt');
   if (!hasChecksums) {
     errors.push('checksums.txt is missing from the release');
   }
 
-  const tarballs = assetNames.filter((n) => /\.tar\.gz$/.test(n));
-  if (tarballs.length < 1) {
-    errors.push('No tarball assets found (nodered-mcp_*.tar.gz)');
+  for (const asset of REQUIRED_NPM_ASSETS) {
+    if (!assetNames.includes(asset)) {
+      errors.push(`Required npm tarball is missing from the release: ${asset}`);
+    }
   }
 
   const sboms = assetNames.filter((n) => /\.sbom\.json$/.test(n));
@@ -81,15 +79,10 @@ function verifyReleaseAssets({ release, checksumsContent, assetNames }) {
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
 
-    if (lines.length < EXPECTED_BINARY_COUNT) {
-      errors.push(
-        `checksums.txt has ${lines.length} entries; expected >= ${EXPECTED_BINARY_COUNT}`,
-      );
-    }
-
     const malformed = [];
     const unknown = [];
     const seen = new Set();
+    const checksumCounts = new Map();
     for (const line of lines) {
       const m = CHECKSUM_LINE_RE.exec(line);
       if (!m) {
@@ -101,6 +94,7 @@ function verifyReleaseAssets({ release, checksumsContent, assetNames }) {
         errors.push(`checksums.txt lists ${filename} more than once`);
       }
       seen.add(filename);
+      checksumCounts.set(filename, (checksumCounts.get(filename) || 0) + 1);
       if (!assetNames.includes(filename)) {
         unknown.push(filename);
       }
@@ -112,6 +106,11 @@ function verifyReleaseAssets({ release, checksumsContent, assetNames }) {
       errors.push(
         `checksums.txt references files not in the release: ${unknown.join('; ')}`,
       );
+    }
+    for (const asset of REQUIRED_NPM_ASSETS) {
+      if ((checksumCounts.get(asset) || 0) === 0) {
+        errors.push(`checksums.txt has no entry for required npm tarball: ${asset}`);
+      }
     }
   }
 
@@ -214,7 +213,7 @@ async function main() {
 
 module.exports = {
   verifyReleaseAssets,
-  EXPECTED_BINARY_COUNT,
+  REQUIRED_NPM_ASSETS,
   CHECKSUM_LINE_RE,
 };
 
