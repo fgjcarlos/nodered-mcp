@@ -40,6 +40,16 @@ go install github.com/fgjcarlos/nodered-mcp/cmd/nodered-mcp@latest
 docker pull ghcr.io/fgjcarlos/nodered-mcp:latest
 ```
 
+El instalador de npm verifica el checksum y promociona el binario de forma
+atómica. Para conexiones lentas, mediante proxy, VPN o poco fiables admite
+estas variables de entorno con valores enteros positivos:
+
+- `NODERED_MCP_DOWNLOAD_TIMEOUT_MS` — timeout del archivo de la release en milisegundos (por defecto: `120000`).
+- `NODERED_MCP_CHECKSUMS_TIMEOUT_MS` — timeout de `checksums.txt` en milisegundos (por defecto: `30000`).
+- `NODERED_MCP_DOWNLOAD_RETRIES` — número máximo de intentos por descarga (por defecto: `3`).
+
+Los valores vacíos, no válidos o no positivos usan el valor por defecto.
+
 Tras instalar, genera el snippet para tu cliente MCP:
 
 ```bash

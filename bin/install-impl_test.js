@@ -34,6 +34,7 @@ const {
   promote,
   downloadWithTimeout,
   PACKAGE_VERSION,
+  DOWNLOAD_RETRIES,
 } = require('./install-impl');
 
 let failures = 0;
@@ -59,13 +60,15 @@ function assertThrows(fn, label) {
 
 // ---------- fixture builders ----------------------------------------
 
-// Build a synthetic .tar.gz in memory containing one regular file
-// inside `<archiveRoot>/<name>` with the given content. Mirrors the
-// header layout used by bin/tar_test.js so we know tar.js can read it.
-function buildTarGzFixture(archiveRoot, name, content) {
+// Build a synthetic .tar.gz in memory containing one regular file.
+// Pass `archiveRoot` to wrap the entry in a subdirectory (legacy
+// goreleaser layout); omit it for the flat layout goreleaser v2
+// emits by default. Mirrors the header layout used by bin/tar_test.js
+// so we know tar.js can read it.
+function buildTarGzFixture(name, content, archiveRoot) {
   const body = Buffer.from(content, 'utf8');
   const header = Buffer.alloc(512);
-  const fullName = `${archiveRoot}/${name}`;
+  const fullName = archiveRoot ? `${archiveRoot}/${name}` : name;
   header.write(fullName, 0, 'utf8');
   header.write('0000644', 100, 'utf8');
   header.write('0000000', 108, 'utf8');
@@ -93,17 +96,22 @@ function buildChecksumLine(buffer, assetName) {
 
 // A fresh tmp binDir + staging + a synthetic tarball buffer for the
 // happy-path dep stub. Returns everything a test needs.
+//
+// Default layout is FLAT (matches goreleaser v2 with
+// `wrap_in_directory: false`, which is what real releases ship with
+// since 0.6.2 and what #256 is fixing). Pass `archiveRoot` for the
+// regression suite that exercises the legacy wrapped layout.
 function makeScenario(options = {}) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'install-impl-test-'));
   const binDir = path.join(tmpRoot, 'bin');
   fs.mkdirSync(binDir, { recursive: true });
   const stagingDir = path.join(tmpRoot, 'staging');
   const assetName = options.assetName || 'nodered-mcp_linux_amd64.tar.gz';
-  const archiveRoot = options.archiveRoot || 'nodered-mcp_linux_amd64';
+  const archiveRoot = options.archiveRoot; // undefined => flat
   const binaryName = options.binaryName || 'nodered-mcp';
   const binaryContent = options.binaryContent ||
     '#!/bin/sh\necho "fake nodered-mcp v' + PACKAGE_VERSION + '"\n';
-  const tarball = buildTarGzFixture(archiveRoot, binaryName, binaryContent);
+  const tarball = buildTarGzFixture(binaryName, binaryContent, archiveRoot);
   const checksumsTxt = buildChecksumLine(tarball, assetName);
   return { tmpRoot, binDir, stagingDir, assetName, archiveRoot, tarball, checksumsTxt };
 }
@@ -116,6 +124,17 @@ function makeDeps(scenario, overrides) {
       if (url.endsWith('/' + scenario.assetName)) return Buffer.from(scenario.tarball);
       throw new Error(`unexpected download url in test: ${url}`);
     },
+    downloadWithRetry: async (url, timeoutMs, retries) => {
+      // Use the production retry wrapper so the tests cover the
+      // exact backoff / budget logic in install-impl.js. Override
+      // downloadWithTimeout via the `deps` arg below to simulate
+      // transient transport failures.
+      const { downloadWithRetry } = require('./install-impl');
+      return downloadWithRetry(url, timeoutMs, retries, {
+        downloadWithTimeout: deps.downloadWithTimeout,
+        sleep: () => Promise.resolve(), // tests skip real backoff waits
+      });
+    },
     parseChecksumsTxt,
     verifyChecksum,
     stageExtract: async (tarballBuffer, stagingDir, assetName) => {
@@ -123,7 +142,10 @@ function makeDeps(scenario, overrides) {
       const tarballPath = path.join(stagingDir, assetName);
       await fsp.writeFile(tarballPath, tarballBuffer);
       await realExtract(tarballPath, stagingDir);
-      return path.join(stagingDir, assetName.replace(/\.tar\.gz$/, ''));
+      // Mirror the production layout detection: prefer the wrapped
+      // subdir when it exists, else use the staging dir itself.
+      const wrappedDir = path.join(stagingDir, assetName.replace(/\.tar\.gz$/, ''));
+      return fs.existsSync(wrappedDir) ? wrappedDir : stagingDir;
     },
     promote,
     extract: realExtract,
@@ -245,6 +267,10 @@ async function testSuccessPath() {
     if (!fs.existsSync(marker)) fail(`success: .installed marker missing`);
     const markerText = fs.readFileSync(marker, 'utf8').trim();
     assertEq(markerText, PACKAGE_VERSION, 'success: marker version matches package');
+    const leakedArchive = path.join(s.binDir, s.assetName);
+    if (fs.existsSync(leakedArchive)) {
+      fail(`success: transport archive must not be copied into bin/: ${leakedArchive}`);
+    }
   } finally {
     cleanup(s);
   }
@@ -253,7 +279,11 @@ async function testSuccessPath() {
 async function testWindowsSuccessPath() {
   const s = makeScenario({
     assetName: 'nodered-mcp_windows_amd64.tar.gz',
-    archiveRoot: 'nodered-mcp_windows_amd64',
+    // Flat layout — what goreleaser v2 actually emits with
+    // `wrap_in_directory: false`. Issue #256: 0.6.2's postinstall
+    // searched for the binary inside a wrapped subdir that real
+    // releases never produced, so npm install on Windows 404-promoted
+    // nothing.
     binaryName: 'nodered-mcp.exe',
     binaryContent: 'fake Windows nodered-mcp v' + PACKAGE_VERSION + '\n',
   });
@@ -270,6 +300,30 @@ async function testWindowsSuccessPath() {
     if (fs.existsSync(s.stagingDir)) fail('windows success: staging dir not cleaned up');
     const marker = path.join(s.binDir, '.installed');
     assertEq(fs.readFileSync(marker, 'utf8').trim(), PACKAGE_VERSION, 'windows success: marker version matches package');
+  } finally {
+    cleanup(s);
+  }
+}
+
+// Regression for the wrapped layout. Older goreleaser configs and
+// future `wrap_in_directory: true` flips produce a subdir named
+// after the asset minus `.tar.gz`. Issue #256 requires backward
+// compatibility so a config drift fails safely instead of breaking
+// npm installs. The installer must detect the wrapped subdir when
+// present and promote the binary from inside it.
+async function testWrappedLayoutRegression() {
+  const s = makeScenario({
+    assetName: 'nodered-mcp_linux_amd64.tar.gz',
+    archiveRoot: 'nodered-mcp_linux_amd64',
+  });
+  try {
+    const result = await _run(makeDeps(s), ctx(s));
+    assertEq(result.skipped, false, 'wrapped layout: skipped=false');
+    const target = path.join(s.binDir, 'nodered-mcp');
+    if (!fs.existsSync(target)) fail(`wrapped layout: target binary missing at ${target}`);
+    const st = fs.statSync(target);
+    if (!st.isFile() || st.size === 0) fail('wrapped layout: target must be a non-empty regular file');
+    if (fs.existsSync(s.stagingDir)) fail('wrapped layout: staging dir not cleaned up');
   } finally {
     cleanup(s);
   }
@@ -329,6 +383,169 @@ async function testDownloadTimeout() {
     }
     if (fs.existsSync(s.stagingDir)) {
       fail(`download timeout: staging dir must be cleaned up after failure`);
+    }
+  } finally {
+    cleanup(s);
+  }
+}
+
+// Issue #256: bounded retries on transient transport failures. A
+// flaky download that recovers within the retry budget must succeed
+// and the install must complete normally.
+//
+// The first call to downloadWithTimeout is the checksums.txt fetch.
+// To isolate asset retry behavior, that request succeeds immediately.
+async function testRetryRecoversFromTransientTransport() {
+  const s = makeScenario();
+  let calls = 0;
+  const deps = makeDeps(s, {
+    downloadWithTimeout: async (url, _timeoutMs) => {
+      calls += 1;
+      if (url.endsWith('/checksums.txt')) return Buffer.from(s.checksumsTxt, 'utf8');
+      if (url.endsWith('/' + s.assetName)) {
+        // Throw the first 2 asset attempts, succeed on the 3rd.
+        if (calls < 4) {
+          throw new Error('ECONNRESET (simulated transient)');
+        }
+        return Buffer.from(s.tarball);
+      }
+      throw new Error(`unexpected download url in test: ${url}`);
+    },
+  });
+  try {
+    const result = await _run(deps, ctx(s));
+    assertEq(result.skipped, false, 'retry: skipped=false');
+    // 1 checksums call + 3 asset calls (2 fail + 1 success) = 4 total.
+    assertEq(calls, 4, `retry: downloadWithTimeout called ${calls} times, expected 4`);
+    const target = path.join(s.binDir, 'nodered-mcp');
+    if (!fs.existsSync(target)) fail(`retry: target binary missing at ${target}`);
+    const marker = path.join(s.binDir, '.installed');
+    if (!fs.existsSync(marker)) fail('retry: marker missing after recovery');
+  } finally {
+    cleanup(s);
+  }
+}
+
+// Issue #256: bounded retries on persistent transport failures. The
+// retry wrapper must give up after the configured budget and let
+// the error propagate; the install must leave binDir untouched.
+async function testRetryExhaustsAfterBudget() {
+  const s = makeScenario();
+  let calls = 0;
+  const deps = makeDeps(s, {
+    downloadWithTimeout: async (url, _timeoutMs) => {
+      calls += 1;
+      if (url.endsWith('/checksums.txt')) return Buffer.from(s.checksumsTxt, 'utf8');
+      // Always throw on the asset URL → the retry budget is exhausted.
+      throw new Error('ECONNRESET (simulated persistent)');
+    },
+  });
+  try {
+    let threw = false;
+    try {
+      await _run(deps, ctx(s));
+    } catch (err) {
+      threw = true;
+      if (!/ECONNRESET/.test(err.message)) {
+        fail(`retry exhaust: should propagate original transport error; got ${err.message}`);
+      }
+    }
+    if (!threw) fail('retry exhaust: _run should have rejected');
+    // 1 checksums call + retries attempts on the asset URL.
+    assertEq(
+      calls,
+      1 + DOWNLOAD_RETRIES,
+      `retry exhaust: one checksums call plus ${DOWNLOAD_RETRIES} asset attempts`,
+    );
+    if (fs.existsSync(path.join(s.binDir, 'nodered-mcp'))) {
+      fail('retry exhaust: target binary must NOT exist after persistent failure');
+    }
+    if (fs.existsSync(path.join(s.binDir, '.installed'))) {
+      fail('retry exhaust: marker must NOT be written after persistent failure');
+    }
+    if (fs.existsSync(s.stagingDir)) {
+      fail('retry exhaust: staging dir must be cleaned up');
+    }
+  } finally {
+    cleanup(s);
+  }
+}
+
+// checksums.txt is part of the install's network path and must receive
+// the same bounded retry protection as the larger release asset.
+async function testChecksumsRetryRecoversFromTransientTransport() {
+  const s = makeScenario();
+  let checksumsCalls = 0;
+  let assetCalls = 0;
+  const deps = makeDeps(s, {
+    downloadWithTimeout: async (url, _timeoutMs) => {
+      if (url.endsWith('/checksums.txt')) {
+        checksumsCalls += 1;
+        if (checksumsCalls < DOWNLOAD_RETRIES) {
+          throw new Error('ECONNRESET checksums (simulated transient)');
+        }
+        return Buffer.from(s.checksumsTxt, 'utf8');
+      }
+      if (url.endsWith('/' + s.assetName)) {
+        assetCalls += 1;
+        return Buffer.from(s.tarball);
+      }
+      throw new Error(`unexpected download url in test: ${url}`);
+    },
+  });
+  try {
+    const result = await _run(deps, ctx(s));
+    assertEq(result.skipped, false, 'checksums retry: skipped=false');
+    assertEq(
+      checksumsCalls,
+      DOWNLOAD_RETRIES,
+      `checksums retry: recovered on attempt ${DOWNLOAD_RETRIES}`,
+    );
+    assertEq(assetCalls, 1, 'checksums retry: asset downloaded once');
+  } finally {
+    cleanup(s);
+  }
+}
+
+async function testChecksumsRetryExhaustsAfterBudget() {
+  const s = makeScenario();
+  let checksumsCalls = 0;
+  let assetCalls = 0;
+  const deps = makeDeps(s, {
+    downloadWithTimeout: async (url, _timeoutMs) => {
+      if (url.endsWith('/checksums.txt')) {
+        checksumsCalls += 1;
+        throw new Error('ECONNRESET checksums (simulated persistent)');
+      }
+      assetCalls += 1;
+      throw new Error(`asset should not be requested after checksums failure: ${url}`);
+    },
+  });
+  try {
+    let threw = false;
+    try {
+      await _run(deps, ctx(s));
+    } catch (err) {
+      threw = true;
+      if (!/ECONNRESET checksums/.test(err.message)) {
+        fail(`checksums retry exhaust: unexpected error: ${err.message}`);
+      }
+    }
+    if (!threw) fail('checksums retry exhaust: _run should have rejected');
+    assertEq(
+      checksumsCalls,
+      DOWNLOAD_RETRIES,
+      `checksums retry exhaust: stopped after ${DOWNLOAD_RETRIES} attempts`,
+    );
+    assertEq(assetCalls, 0, 'checksums retry exhaust: asset was not requested');
+    if (fs.existsSync(path.join(s.binDir, 'nodered-mcp'))) {
+      fail('checksums retry exhaust: target binary must NOT exist');
+    }
+    if (fs.existsSync(path.join(s.binDir, '.installed'))) {
+      fail('checksums retry exhaust: marker must NOT be written');
+    }
+    if (fs.existsSync(s.stagingDir)) {
+      fail('checksums retry exhaust: staging dir must be cleaned up');
     }
   } finally {
     cleanup(s);
@@ -509,20 +726,36 @@ async function testRollbackOnUnsupportedPlatform() {
 
 // ---------- runner ---------------------------------------------------
 
+async function runTest(name, fn) {
+  const before = failures;
+  try {
+    await fn();
+  } catch (err) {
+    fail(`${name}: uncaught exception: ${err.message}`);
+  }
+  const status = failures > before ? 'FAIL' : 'PASS';
+  console.log(`install-impl_test: ${status} ${name}`);
+}
+
 async function main() {
   testAssetMapContract();
   testParseChecksumsTxt();
   testVerifyChecksum();
-  await testSuccessPath();
-  await testWindowsSuccessPath();
-  await testChecksumMismatch();
-  await testDownloadTimeout();
-  await testExtractionFailure();
-  await testPromotionFailure();
-  await testSkipIfInstalled();
-  await testReinstallOnVersionMismatch();
-  await testReinstallOnCorruptedPrior();
-  await testRollbackOnUnsupportedPlatform();
+  await runTest('testSuccessPath', testSuccessPath);
+  await runTest('testWindowsSuccessPath', testWindowsSuccessPath);
+  await runTest('testWrappedLayoutRegression', testWrappedLayoutRegression);
+  await runTest('testChecksumMismatch', testChecksumMismatch);
+  await runTest('testDownloadTimeout', testDownloadTimeout);
+  await runTest('testRetryRecoversFromTransientTransport', testRetryRecoversFromTransientTransport);
+  await runTest('testRetryExhaustsAfterBudget', testRetryExhaustsAfterBudget);
+  await runTest('testChecksumsRetryRecoversFromTransientTransport', testChecksumsRetryRecoversFromTransientTransport);
+  await runTest('testChecksumsRetryExhaustsAfterBudget', testChecksumsRetryExhaustsAfterBudget);
+  await runTest('testExtractionFailure', testExtractionFailure);
+  await runTest('testPromotionFailure', testPromotionFailure);
+  await runTest('testSkipIfInstalled', testSkipIfInstalled);
+  await runTest('testReinstallOnVersionMismatch', testReinstallOnVersionMismatch);
+  await runTest('testReinstallOnCorruptedPrior', testReinstallOnCorruptedPrior);
+  await runTest('testRollbackOnUnsupportedPlatform', testRollbackOnUnsupportedPlatform);
 
   if (failures === 0) {
     console.log('install-impl_test: PASS');

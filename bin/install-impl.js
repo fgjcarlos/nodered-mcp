@@ -16,8 +16,8 @@
 // Flow:
 //   1. Skip if a complete previous install is on disk
 //      (target binary + .installed marker whose version matches).
-//   2. Fetch checksums.txt from the same release tag.
-//   3. Fetch the tarball with a bounded timeout.
+//   2. Fetch checksums.txt from the same release tag with bounded retry.
+//   3. Fetch the tarball with a bounded timeout and retry.
 //   4. Verify SHA-256 of the tarball against checksums.txt.
 //   5. Stage the tarball in os.tmpdir() and extract into a per-run
 //      staging directory.
@@ -40,8 +40,40 @@ const crypto = require('node:crypto');
 const { extract } = require('./tar');
 
 const REPO = 'fgjcarlos/nodered-mcp';
-const DOWNLOAD_TIMEOUT_MS = 30000;
-const CHECKSUMS_TIMEOUT_MS = 10000;
+
+// Defaults tolerate a multi-megabyte binary on a slow but progressing
+// connection. They are conservative on purpose: a too-aggressive
+// timeout strands otherwise-valid installs, and the issue history is
+// full of 30s timeouts failing on mobile or proxied links (#256).
+// Operators can override per-run via env vars without recompiling.
+const DEFAULT_DOWNLOAD_TIMEOUT_MS = 120000;
+const DEFAULT_CHECKSUMS_TIMEOUT_MS = 30000;
+const DEFAULT_DOWNLOAD_RETRIES = 3;
+
+// Env vars are the override surface. Empty / non-positive-integer
+// values fall back to the documented default so a typo cannot
+// silently disable the timeout or retry ceiling.
+function readPositiveIntEnv(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === null || raw === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) return fallback;
+  return n;
+}
+
+const DOWNLOAD_TIMEOUT_MS = readPositiveIntEnv(
+  'NODERED_MCP_DOWNLOAD_TIMEOUT_MS',
+  DEFAULT_DOWNLOAD_TIMEOUT_MS,
+);
+const CHECKSUMS_TIMEOUT_MS = readPositiveIntEnv(
+  'NODERED_MCP_CHECKSUMS_TIMEOUT_MS',
+  DEFAULT_CHECKSUMS_TIMEOUT_MS,
+);
+const DOWNLOAD_RETRIES = readPositiveIntEnv(
+  'NODERED_MCP_DOWNLOAD_RETRIES',
+  DEFAULT_DOWNLOAD_RETRIES,
+);
+
 const PACKAGE_VERSION = require('../package.json').version;
 
 // Goreleaser publishes a .tar.gz for every os/arch combo we support.
@@ -145,6 +177,41 @@ function downloadWithTimeout(url, timeoutMs) {
   });
 }
 
+// Retry a transport call with bounded attempts and exponential backoff.
+// Used for downloads that can fail on a transient network blip
+// (proxy reset, mobile handoff, GitHub redirect flapping). Checksum
+// mismatch is NOT a transport error — it lives behind the download,
+// after the bytes are on disk — so this wrapper must NOT be used to
+// wrap the verifyChecksum step. Doing so would mask a corrupted
+// release asset as a retryable transient and never fail closed.
+//
+// `deps` is the test seam: production callers pass a default dep
+// that includes the real `downloadWithTimeout` and `setTimeout`-based
+// `sleep`. Tests pass a stubbed `sleep` to skip real backoff waits
+// so the suite finishes in milliseconds.
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function defaultRetryDeps() {
+  return { downloadWithTimeout, sleep };
+}
+
+async function downloadWithRetry(url, timeoutMs, retries, deps) {
+  const d = deps || defaultRetryDeps();
+  const attempt = async (n) => {
+    try {
+      return await d.downloadWithTimeout(url, timeoutMs);
+    } catch (err) {
+      if (n >= retries) throw err;
+      const backoff = Math.min(2000 * Math.pow(2, n), 30000);
+      await d.sleep(backoff);
+      return attempt(n + 1);
+    }
+  };
+  return attempt(1);
+}
+
 // Goreleaser's checksums.txt is one line per asset:
 //   "<64-hex-digest>  <filename>"
 // with two spaces. We accept one-or-more spaces to be lenient. Lines
@@ -190,23 +257,30 @@ function makeStagingDir() {
 }
 
 // Layout invariant: goreleaser `name_template`
-// (`{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}`) produces archives whose
-// top-level entry is a subdir named after the asset minus the `.tar.gz`
-// suffix — e.g. `nodered-mcp_linux_amd64/`. The extraction below expects
-// that subdir; if `.goreleaser.yaml` `name_template` ever changes, this
-// code and `bin/install_message_test.js` (which enforces the invariant
-// on the goreleaser side) must change in lockstep.
+// (`{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}`) historically produced
+// archives whose top-level entry was a subdirectory named after the
+// asset minus the `.tar.gz` suffix — e.g. `nodered-mcp_linux_amd64/`.
+// goreleaser v2 defaults `archives.wrap_in_directory` to `false`, so
+// the same `name_template` now produces a flat archive where the
+// binary lives directly in the archive root. Issue #256 ships the
+// fix; this code accepts BOTH layouts so a future goreleaser config
+// flip fails safely instead of silently breaking npm installs. If
+// `.goreleaser.yaml` `name_template` ever changes, the layout
+// detection below and `bin/install_message_test.js` must change in
+// lockstep.
 
 // Stage the tarball on disk and extract it into the same staging dir.
-// The goreleaser archive unpacks into a single subdirectory
-// (`nodered-mcp_<os>_<arch>/`); we keep that layout intact so the
-// promotion step can refer to files by their archive-relative path.
+// Then locate the directory that holds the binary: prefer the wrapped
+// subdir (`<staging>/<archiveName>/`) when it exists, else use the
+// staging dir itself for the flat layout. Extras (README, LICENSE,
+// examples) are copied from whichever directory the binary lives in.
 async function stageExtract(tarballBuffer, stagingDir, assetName, deps) {
   deps.mkdirSync(stagingDir, { recursive: true });
   const tarballPath = path.join(stagingDir, assetName);
   await fsp.writeFile(tarballPath, tarballBuffer);
   await deps.extract(tarballPath, stagingDir);
-  return path.join(stagingDir, assetName.replace(/\.tar\.gz$/, ''));
+  const wrappedDir = path.join(stagingDir, assetName.replace(/\.tar\.gz$/, ''));
+  return deps.existsSync(wrappedDir) ? wrappedDir : stagingDir;
 }
 
 // Promote the staged archive into binDir. The binary is moved first
@@ -275,7 +349,10 @@ function promote(stagingArchiveDir, binDir, assetName, exeSuffix, deps) {
     return finalTarget;
   }
   for (const entry of entries) {
-    if (entry.name === binaryName) continue;
+    // In a flat GoReleaser archive, the downloaded tarball and the
+    // extracted files share stagingArchiveDir. Never promote the
+    // transport archive itself into the installed package's bin/.
+    if (entry.name === binaryName || entry.name === assetName) continue;
     if (!entry.isFile()) continue;
     const src = path.join(stagingArchiveDir, entry.name);
     const dst = path.join(binDir, entry.name);
@@ -342,9 +419,10 @@ async function _run(deps, ctx) {
 
     const checksumsUrl =
       `https://github.com/${REPO}/releases/download/v${version}/checksums.txt`;
-    const checksumsTxt = await deps.downloadWithTimeout(
+    const checksumsTxt = await deps.downloadWithRetry(
       checksumsUrl,
       CHECKSUMS_TIMEOUT_MS,
+      DOWNLOAD_RETRIES,
     );
     const expectedHash = deps.parseChecksumsTxt(checksumsTxt, assetName);
     if (!expectedHash) {
@@ -355,7 +433,14 @@ async function _run(deps, ctx) {
 
     const assetUrl =
       `https://github.com/${REPO}/releases/download/v${version}/${assetName}`;
-    const buffer = await deps.downloadWithTimeout(assetUrl, DOWNLOAD_TIMEOUT_MS);
+    // Retry transport only. Checksum mismatch is verified below
+    // against the bytes-on-disk result of this call and is never
+    // treated as a retryable condition (see downloadWithRetry).
+    const buffer = await deps.downloadWithRetry(
+      assetUrl,
+      DOWNLOAD_TIMEOUT_MS,
+      DOWNLOAD_RETRIES,
+    );
 
     deps.verifyChecksum(buffer, expectedHash);
 
@@ -382,6 +467,7 @@ async function _run(deps, ctx) {
 function defaultDeps() {
   return {
     downloadWithTimeout,
+    downloadWithRetry,
     parseChecksumsTxt,
     verifyChecksum,
     extract,
@@ -418,6 +504,7 @@ module.exports = {
   assetFor,
   unsupportedPlatformMessage,
   downloadWithTimeout,
+  downloadWithRetry,
   parseChecksumsTxt,
   verifyChecksum,
   stageExtract,
@@ -428,6 +515,12 @@ module.exports = {
   ASSET_MAP,
   PACKAGE_VERSION,
   REPO,
+  DOWNLOAD_TIMEOUT_MS,
+  CHECKSUMS_TIMEOUT_MS,
+  DOWNLOAD_RETRIES,
+  DEFAULT_DOWNLOAD_TIMEOUT_MS,
+  DEFAULT_CHECKSUMS_TIMEOUT_MS,
+  DEFAULT_DOWNLOAD_RETRIES,
 };
 
 if (require.main === module) {

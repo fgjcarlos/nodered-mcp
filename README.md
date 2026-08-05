@@ -54,6 +54,15 @@ download when the marker version matches. Re-installs fire
 automatically when the marker is missing or stale (corrupt prior
 install, version upgrade).
 
+For slow, proxied, VPN, or otherwise unreliable connections, the npm
+installer supports these positive-integer environment overrides:
+
+- `NODERED_MCP_DOWNLOAD_TIMEOUT_MS` — release archive timeout in milliseconds (default: `120000`).
+- `NODERED_MCP_CHECKSUMS_TIMEOUT_MS` — `checksums.txt` timeout in milliseconds (default: `30000`).
+- `NODERED_MCP_DOWNLOAD_RETRIES` — maximum attempts for each download (default: `3`).
+
+Invalid, empty, or non-positive values fall back to their defaults.
+
 After install, generate the snippet for your MCP client:
 
 ```bash
