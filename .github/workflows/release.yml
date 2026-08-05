@@ -9,7 +9,37 @@ permissions:
   contents: write
 
 jobs:
+  # Issue #258: real-artifact inspection. Run goreleaser in
+  # --snapshot mode against the tag's source tree, then assert
+  # every generated archive matches the installer's expectations
+  # (flat layout, correct binary naming per platform, non-empty
+  # binaries, checksums.txt internally consistent). Fails before
+  # the publish job runs, so a half-built release cannot publish
+  # a working GitHub Release. The same snapshot script also runs
+  # on every PR via ci.yml's release-snapshot job.
+  release-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: install goreleaser
+        run: |
+          set -euo pipefail
+          curl -sSL https://github.com/goreleaser/goreleaser/releases/download/v2.4.8/goreleaser_Linux_x86_64.tar.gz \
+            | tar -xz -C /usr/local/bin goreleaser
+          goreleaser --version
+
+      - name: run release-snapshot
+        run: node scripts/release-snapshot.js
+
   goreleaser:
+    needs: release-snapshot
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4

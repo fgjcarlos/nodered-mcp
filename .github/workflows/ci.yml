@@ -179,3 +179,30 @@ jobs:
             GOOS=${target%/*} GOARCH=${target#*/} go build -o /dev/null ./cmd/nodered-mcp
             echo "ok $target"
           done
+
+  # Issue #258: real-artifact contract gate. Runs goreleaser in
+  # --snapshot mode against the PR's source tree, then inspects every
+  # generated archive against the installer's expectations. Catches
+  # .goreleaser.yaml drifts before they ship as a broken release. The
+  # in-memory bin/release-snapshot_test.js also runs in the npm-wrapper
+  # matrix above for the Windows / non-goreleaser path.
+  release-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: install goreleaser
+        run: |
+          set -euo pipefail
+          curl -sSL https://github.com/goreleaser/goreleaser/releases/download/v2.4.8/goreleaser_Linux_x86_64.tar.gz \
+            | tar -xz -C /usr/local/bin goreleaser
+          goreleaser --version
+
+      - name: run release-snapshot
+        run: node scripts/release-snapshot.js
