@@ -230,6 +230,15 @@ jobs:
           done
 
       - name: publish main package
+        # Trusted Publisher is configured for @fgjcarlos/nodered-mcp
+        # in the npmjs package settings (workflow npm.yml, no env).
+        # Authenticate via OIDC by removing the NPM_SECRET-based
+        # ~/.npmrc so npm falls through to the OIDC id-token in
+        # the actions/setup-node step. Without this, npm prefers
+        # the literal token over the OIDC token and the registry
+        # rejects --provenance publish with "Two-factor
+        # authentication is required but an automation token was
+        # specified".
         env:
           NPM_SECRET: ${{ secrets.NPM_SECRET }}
         run: |
@@ -238,7 +247,7 @@ jobs:
             echo "@fgjcarlos/nodered-mcp@${version} is already published; nothing to do."
             exit 0
           fi
-          echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
+          rm -f ~/.npmrc
           npm publish --access public --provenance --tag next
 
       - name: verify main package integrity and provenance
