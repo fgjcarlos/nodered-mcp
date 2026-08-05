@@ -41,6 +41,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 const { TARGETS, binaryNameFor } = require('../bin/platform-packages');
+const { extractTarGz } = require('./archive');
 
 const ROOT = path.join(__dirname, '..');
 const DEFAULT_DIST = path.join(ROOT, 'dist');
@@ -82,12 +83,7 @@ function parseArgs(argv) {
 async function extractBinary(assetPath, platform) {
   const out = await fsp.mkdtemp(path.join(os.tmpdir(), 'np-pkg-'));
   try {
-    // GNU tar on Windows treats `C:\...` after -f as a remote host.
-    // Run beside the archive and pass only its basename instead.
-    execFileSync('tar', ['-xzf', path.basename(assetPath), '-C', out], {
-      cwd: path.dirname(assetPath),
-      stdio: 'pipe',
-    });
+    extractTarGz(assetPath, out);
     const binary = binaryNameFor(platform);
     const direct = path.join(out, binary);
     if (fs.existsSync(direct)) return { staging: out, binary };

@@ -17,6 +17,7 @@ const path = require('node:path');
 const execFileAsync = promisify(execFile);
 const { TARGETS, targetFor } = require('../bin/platform-packages');
 const { buildOne } = require('./build-platform-packages');
+const { extractTarGz } = require('./archive');
 
 const REPO_ROOT = path.join(__dirname, '..');
 
@@ -56,9 +57,7 @@ async function expectedBinary(distDir, target, tmpRoot) {
   const out = path.join(tmpRoot, 'expected');
   await fsp.mkdir(out, { recursive: true });
   const archive = path.join(distDir, target.asset);
-  await run('tar', ['-xzf', path.basename(archive), '-C', out], {
-    cwd: path.dirname(archive),
-  });
+  extractTarGz(archive, out);
   const direct = path.join(out, target.binary);
   if (fs.existsSync(direct)) return direct;
   const wrapped = path.join(out, target.asset.replace(/\.tar\.gz$/, ''), target.binary);

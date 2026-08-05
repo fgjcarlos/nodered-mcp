@@ -28,6 +28,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { TARGETS, binaryNameFor } = require('../bin/platform-packages');
+const { extractTarGz } = require('./archive');
 
 const DIST = path.join(__dirname, '..', 'dist');
 const CHECKSUM_FILE = 'checksums.txt';
@@ -113,10 +114,7 @@ async function inspectArchive({ assetName, archivePath }) {
     // non-empty regular file.
     const tmp = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'snapshot-inspect-'));
     try {
-      execFileSync('tar', ['-xzf', path.basename(archivePath), '-C', tmp], {
-        cwd: path.dirname(archivePath),
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
+      extractTarGz(archivePath, tmp);
       const wrappedDir = path.join(tmp, assetName.replace(/\.tar\.gz$/, ''));
       const stagedDir = fs.existsSync(wrappedDir) ? wrappedDir : tmp;
       const binPath = path.join(stagedDir, binary);
