@@ -1,0 +1,53 @@
+name: diag-npm-publish-abs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diag-npm-publish-abs.yml'
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          ref: v0.7.0
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: build tarball
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git checkout v0.7.0 -- npm/ scripts/build-platform-packages.js
+          mkdir -p dist
+          gh release download "v0.7.0" --repo "${{ github.repository }}" --pattern '*.tar.gz' --pattern 'checksums.txt' --dir dist
+          cd dist && sha256sum --ignore-missing --check checksums.txt && cd ..
+          node scripts/build-platform-packages.js --version 0.7.0 --dist dist --out npm-packages
+          PWD_REAL=$(realpath npm-packages)
+          echo "PWD_REAL=$PWD_REAL" >> $GITHUB_ENV
+          echo "--- contents:"
+          ls -la npm-packages/
+
+      - name: try with ABSOLUTE path
+        env:
+          NPM_SECRET: ${{ secrets.NPM_SECRET }}
+        run: |
+          printf "%s\n" "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
+          cd ${{ env.PWD_REAL }}
+          # only do win32-x64, win32-arm64, linux-x64; darwin-x64 is already published
+          for pkg in nodered-mcp-win32-x64 nodered-mcp-win32-arm64 nodered-mcp-linux-x64; do
+            tarball="${pkg}-0.7.0.tgz"
+            if [ ! -f "$tarball" ]; then echo "missing $tarball"; continue; fi
+            if npm view "@fgjcarlos/${pkg}@0.7.0" version >/dev/null 2>&1; then
+              echo "already published, skip"
+              continue
+            fi
+            echo "--- publishing ABSOLUTE $(pwd)/$tarball ---"
+            npm publish --access public --tag next "$(pwd)/$tarball" 2>&1 | tail -8 || true
+          done
