@@ -34,9 +34,8 @@ function test(name, fn) {
 }
 
 // Synthetic asset name set matching what goreleaser actually uploads
-// for one full build (6 binaries + 6 SBOMs + checksums.txt). The
-// asset names are pinned in .goreleaser.yaml's `name_template` and
-// in install_message_test.js.
+// for one full build. Required tarballs come directly from the
+// installer contract; the SBOM names mirror .goreleaser.yaml.
 const fullAssets = [
   ...REQUIRED_NPM_ASSETS,
   'nodered-mcp_0.6.1_linux_amd64.sbom.json',
