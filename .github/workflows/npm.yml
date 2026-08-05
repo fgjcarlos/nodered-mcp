@@ -76,8 +76,10 @@ jobs:
           fi
 
       # Verify the GitHub Release for this tag actually carries the
-      # assets the npm wrapper depends on. release.yml is the
-      # producer; this step is the consumer's gate. A "succeeded"
+      # exact assets the npm wrapper depends on. release.yml is the
+      # producer; this step is the consumer's gate. It derives that
+      # asset contract from bin/install-impl.js, so installer support
+      # and publication eligibility cannot drift. A "succeeded"
       # workflow_run that left the Release empty (goreleaser config
       # drift, SBOM step errored out, draft toggle flipped on, etc.)
       # fails here, before npm is touched.
