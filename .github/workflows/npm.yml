@@ -185,7 +185,19 @@ jobs:
               echo "${scope}@${version} already published; skipping"
               continue
             fi
-            npm publish --access public --provenance --tag next "$tarball"
+            # Platform packages do not have a Trusted Publisher
+            # configured yet (the npmjs Settings UI only lets you
+            # add one after the package exists, and the first
+            # publish creates the scoped package). Publish without
+            # --provenance so the registry accepts the create; the
+            # main package below still publishes with --provenance
+            # via OIDC (Trusted Publisher is configured for
+            # @fgjcarlos/nodered-mcp). Add Trusted Publisher per
+            # platform package once each exists on npmjs, then
+            # restore --provenance here. ponytail: keep simple,
+            # upgrade after each platform package has at least one
+            # public version.
+            npm publish --access public --tag next "$tarball"
             echo "published ${scope}@${version}"
           done
 
@@ -205,18 +217,17 @@ jobs:
             verified=""
             for attempt in 1 2 3 4 5; do
               integrity=$(npm view "${scope}@${version}" dist.integrity 2>/dev/null || true)
-              attestation=$(npm view "${scope}@${version}" dist.attestations.url 2>/dev/null || true)
-              if [ -n "$integrity" ] && [ -n "$attestation" ]; then
+              if [ -n "$integrity" ]; then
                 verified=yes
                 break
               fi
               sleep $((attempt * 3))
             done
             if [ -z "$verified" ]; then
-              echo "platform package lacks registry integrity or provenance: ${scope}@${version}"
+              echo "platform package lacks registry integrity: ${scope}@${version}"
               exit 1
             fi
-            echo "verified integrity and provenance for ${scope}@${version}"
+            echo "verified integrity for ${scope}@${version}"
           done
 
       - name: publish main package
