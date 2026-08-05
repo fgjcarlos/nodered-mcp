@@ -107,3 +107,19 @@ jobs:
           fi
           echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
           npm publish --access public
+
+      # Mark the broken 0.6.2 release as deprecated. The npm registry
+      # keeps the tarball visible (npm versions are immutable) so users
+      # with version pins can still install, but the install command
+      # surfaces a one-line warning pointing at 0.6.3. Idempotent: npm
+      # deprecate returns success when the marker is already in place.
+      # Gate on 0.6.3 specifically so future patches don't accidentally
+      # deprecate themselves if the workflow template ever shifts.
+      - name: deprecate 0.6.2
+        if: env.TAG == 'v0.6.3'
+        env:
+          NPM_SECRET: ${{ secrets.NPM_SECRET }}
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
+          npm deprecate "@fgjcarlos/nodered-mcp@0.6.2" \
+            "postinstall cannot promote a binary from the actual GoReleaser archive layout. Upgrade to 0.6.3 or later: https://github.com/fgjcarlos/nodered-mcp/issues/256"

@@ -6,6 +6,39 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-08-05
+
+### Fixed
+
+- fix(npm): restore installs from real GoReleaser archives in
+  v0.6.3 (#256). Goreleaser v2 defaults `archives.wrap_in_directory`
+  to `false`, so the same `name_template` that historically produced
+  `nodered-mcp_<os>_<arch>/nodered-mcp[.exe]` now produces a flat
+  archive with the binary at the archive root. The 0.6.2 postinstall
+  searched inside the wrapped subdir and 404-promoted nothing on
+  every supported platform. 0.6.3 detects both layouts, so a future
+  `wrap_in_directory` flip fails safely instead of silently breaking
+  npm installs.
+
+- fix(npm): replace the fixed 30s binary download timeout with a
+  120s default (#256). The previous ceiling was tight enough that
+  otherwise-valid installs on slow, mobile, proxied or VPN
+  connections died mid-download. Timeouts and retry count are now
+  overridable per-run via `NODERED_MCP_DOWNLOAD_TIMEOUT_MS`,
+  `NODERED_MCP_CHECKSUMS_TIMEOUT_MS` and
+  `NODERED_MCP_DOWNLOAD_RETRIES`; non-positive-integer values fall
+  back to the documented defaults so a typo cannot silently disable
+  the ceiling. Retries are bounded with exponential backoff and
+  cover transport only — checksum mismatch still fails closed and is
+  never retried as a transient.
+
+### Deprecated
+
+- @fgjcarlos/nodered-mcp@0.6.2 is now marked deprecated on the npm
+  registry. The tarball remains installable for users with version
+  pins, but `npm install` surfaces a one-line warning pointing at
+  0.6.3.
+
 ## [0.6.2] - 2026-08-05
 
 ### Removed
