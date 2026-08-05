@@ -26,36 +26,23 @@ function fail(msg) {
 
 const installSrc = fs.readFileSync(path.join(__dirname, 'install-impl.js'), 'utf8');
 
-// install.sh / install.ps1 are retired in #193. The asset map
-// itself must not pull these files in as runtime assets. Comments
-// or fallback hints that mention install.ps1 as a user-facing
-// alternative are fine (and the install-impl.js Windows fallback
-// does this), because the user's shell is not in scope of the
-// postinstall contract.
-const bannedRuntimeAssets = [
-  /['"`]\s*install\.sh\s*['"`]/,
-  /['"`]\s*install\.ps1\s*['"`]/,
-  /\bassetFor\([^)]*install\.(?:sh|ps1)/,
-];
-for (const re of bannedRuntimeAssets) {
-  if (re.test(installSrc)) {
-    fail(`install-impl.js references retired install.sh/install.ps1 as a runtime asset (retired in #193).`);
-  }
+// install.sh / install.ps1 are retired in #193. Neither the runtime
+// asset map nor an unsupported-platform message may point users back
+// to either retired installation path.
+const bannedInstallerReference = /install\.(?:sh|ps1)/;
+if (bannedInstallerReference.test(installSrc)) {
+  fail('install-impl.js references a retired install.sh/install.ps1 path.');
 }
 
-// Goreleaser publishes six .tar.gz assets (#192) but the npm wrapper
-// only auto-installs the four for which it has an entry in
-// `install-impl.js`'s ASSET_MAP. Windows falls through to
-// `scripts/install.ps1` (#192 retired the npm wrapper for Windows),
-// so the Windows assets are goreleaser-published but not npm-installed.
-// The list below pins the four ASSET_MAP entries; the goreleaser config
-// is checked separately below so a future regression in either layer
-// (asset map vs goreleaser) fails this test.
+// Goreleaser publishes six .tar.gz assets and the npm wrapper installs
+// every one of them. The list below pins the complete asset contract.
 const expected = [
   'nodered-mcp_linux_amd64.tar.gz',
   'nodered-mcp_linux_arm64.tar.gz',
   'nodered-mcp_darwin_amd64.tar.gz',
   'nodered-mcp_darwin_arm64.tar.gz',
+  'nodered-mcp_windows_amd64.tar.gz',
+  'nodered-mcp_windows_arm64.tar.gz',
 ];
 for (const asset of expected) {
   if (!installSrc.includes(asset)) {
