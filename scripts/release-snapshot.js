@@ -15,12 +15,8 @@
 // This script is the producer-side gate. It runs `goreleaser release
 // --snapshot --clean --skip=publish`, then walks `dist/` and asserts
 // the per-platform artifact contract for every required npm tarball.
-// On success, it optionally starts a local HTTP server hosting the
-// dist/ directory so the npm-install integration test can consume
-// the same artifacts (release-snapshot.js --serve <port>).
-//
 // CLI:
-//   node scripts/release-snapshot.js [--skip-build] [--serve <port>]
+//   node scripts/release-snapshot.js [--skip-build] [--dist-dir <path>]
 //
 // Exit codes:
 //   0 — all archives pass inspection; (optionally) serving on <port>
@@ -30,8 +26,6 @@
 const { execFileSync } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
-const fsp = require('node:fs/promises');
-const http = require('node:http');
 const path = require('node:path');
 const { ASSET_MAP } = require('../bin/install-impl');
 
@@ -258,15 +252,14 @@ async function runGoreleaserSnapshot() {
 }
 
 function parseArgs(argv) {
-  const out = { skipBuild: false, serve: null, distDir: DIST };
+  const out = { skipBuild: false, distDir: DIST };
   for (let i = 2; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--skip-build') out.skipBuild = true;
-    else if (a === '--serve') { out.serve = Number(argv[++i]); }
     else if (a === '--dist-dir') { out.distDir = argv[++i]; }
     else if (a === '--help' || a === '-h') {
       process.stdout.write(
-        'usage: release-snapshot.js [--skip-build] [--serve <port>] [--dist-dir <path>]\n',
+        'usage: release-snapshot.js [--skip-build] [--dist-dir <path>]\n',
       );
       process.exit(0);
     } else {
@@ -275,33 +268,6 @@ function parseArgs(argv) {
     }
   }
   return out;
-}
-
-// Local HTTP server that serves dist/ on a random port. The npm
-// install integration test points its postinstall download URL at
-// this server (via a small env-var override on install-impl.js) so
-// the same goreleaser-produced bytes are consumed end-to-end. Only
-// requested via --serve <port>.
-async function serveDist(distDir, port) {
-  const server = http.createServer((req, res) => {
-    const url = req.url.split('?')[0];
-    const filePath = path.join(distDir, url.replace(/^\/+/, ''));
-    if (!filePath.startsWith(distDir)) {
-      res.writeHead(403); res.end('forbidden'); return;
-    }
-    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
-      res.writeHead(404); res.end('not found'); return;
-    }
-    res.writeHead(200, { 'content-type': 'application/octet-stream' });
-    fs.createReadStream(filePath).pipe(res);
-  });
-  await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));
-  const addr = server.address();
-  process.stdout.write(
-    `release-snapshot: serving ${distDir} on http://127.0.0.1:${addr.port}\n`,
-  );
-  // Keep the server alive until killed by the parent.
-  await new Promise(() => {});
 }
 
 async function main() {
@@ -329,7 +295,6 @@ async function main() {
     process.exit(1);
   }
   process.stdout.write(`release-snapshot: ok (${result.reports.length} archives)\n`);
-  if (args.serve !== null) await serveDist(args.distDir, args.serve);
 }
 
 if (require.main === module) {
