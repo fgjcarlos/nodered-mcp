@@ -1,0 +1,47 @@
+name: diag-npm-publish-real
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diag-npm-publish-real.yml'
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          ref: v0.7.0
+          fetch-depth: 0
+
+      - name: build win32-x64 tarball SAME WAY as the workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git checkout v0.7.0 -- npm/ scripts/build-platform-packages.js
+          mkdir -p dist
+          gh release download "v0.7.0" \
+            --repo "${{ github.repository }}" \
+            --pattern '*.tar.gz' \
+            --pattern 'checksums.txt' \
+            --dir dist
+          cd dist
+          sha256sum --ignore-missing --check checksums.txt
+          cd ..
+          node scripts/build-platform-packages.js --version 0.7.0 --dist dist --out npm-packages
+          ls -la npm-packages/
+
+      - name: attempt real publish of the REAL workflow tarball
+        env:
+          NPM_SECRET: ${{ secrets.NPM_SECRET }}
+        run: |
+          set -euo pipefail
+          printf "%s\n" "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
+          TARBALL=$(ls npm-packages/nodered-mcp-*x64*.tgz | head -1)
+          echo "--- publishing real tarball: $TARBALL ---"
+          npm publish --access public --tag next "$TARBALL" 2>&1 | tail -20 || true
+          echo "--- now unpublish to clean registry ---"
+          PKGNAME=$(basename "$TARBALL" .tgz)
+          npm unpublish "@fgjcarlos/${PKGNAME}@0.7.0" --force 2>&1 | tail -5 || true
