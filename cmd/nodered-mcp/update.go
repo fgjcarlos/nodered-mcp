@@ -76,13 +76,18 @@ var (
 // the confirmation prompt.
 func runUpdate(args []string) error {
 	fs := flag.NewFlagSet("update", flag.ContinueOnError)
-	check := fs.Bool("check", false, "exit 0 if a newer version exists, 1 otherwise; silent")
+	check := fs.Bool("check", false, "exit non-zero if a newer version exists; print state to stderr (use --json for machine-readable)")
+	jsonOut := fs.Bool("json", false, "with --check: emit a single JSON object on stdout instead of human-readable text")
 	yes := fs.Bool("yes", false, "skip the confirmation prompt")
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return nil
 		}
 		return err
+	}
+
+	if *check {
+		return runCheck(*jsonOut)
 	}
 
 	current := resolveVersion()
@@ -108,15 +113,6 @@ func runUpdate(args []string) error {
 		return fmt.Errorf("querying npm registry: %w", err)
 	}
 
-	if *check {
-		// Silent on stderr; print only the latest version on stdout when newer.
-		if versionIsNewer(latest, current) {
-			fmt.Println(latest)
-			return nil
-		}
-		os.Exit(1)
-	}
-
 	fmt.Printf("Current version: %s\n", current)
 	fmt.Printf("Latest version:  %s\n", latest)
 	if !versionIsNewer(latest, current) {
@@ -137,6 +133,159 @@ func runUpdate(args []string) error {
 	}
 	fmt.Printf("Updated to %s.\n", latest)
 	return nil
+}
+
+// Exit codes for `nodered-mcp update --check`. The values are spaced
+// far enough apart that scripts can branch on them and CI never
+// collapses them into "the binary crashed" (1). The numbers are
+// part of the public contract (#228); do not renumber without
+// updating the docs and the focused tests in update_test.go.
+const (
+	checkExitCurrent         = 0
+	checkExitUpdateAvailable = 10
+	checkExitUnsupported     = 20
+	checkExitError           = 30
+)
+
+// checkState names the outcome of `update --check`. The strings
+// appear in the JSON output and are stable; scripts can branch on
+// the integer exit code OR the string. Both are documented.
+type checkState string
+
+const (
+	stateCurrent         checkState = "current"
+	stateUpdateAvailable checkState = "update-available"
+	stateUnsupported     checkState = "unsupported"
+	stateError           checkState = "error"
+)
+
+// checkResult is the structured payload emitted by --check --json.
+// It is the canonical wire format that automation reads; the
+// human-readable text path mirrors the same fields but in prose.
+type checkResult struct {
+	State          checkState `json:"state"`
+	Channel        string     `json:"channel"`
+	CurrentVersion string     `json:"current_version"`
+	LatestVersion  string     `json:"latest_version,omitempty"`
+	Message        string     `json:"message,omitempty"`
+}
+
+// runCheck is the entry point for `nodered-mcp update --check`. It
+// classifies the running binary's channel, asks the appropriate
+// upstream (only NPM today — docker and binary are unsupported),
+// and emits the outcome as a structured checkResult plus a
+// deterministic exit code. The shape is the contract documented
+// in #228.
+//
+//	jsonOut=false → human-readable text on stderr, exit code per state.
+//	jsonOut=true  → single JSON object on stdout (single line, stable
+//	                schema), same exit code. Nothing else is written
+//	                to stdout in --json mode so scripts can pipe it.
+func runCheck(jsonOut bool) error {
+	res := checkCheck(jsonOut)
+	if jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		if err := enc.Encode(res); err != nil {
+			return err
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "update check: %s\n", renderCheckHuman(res))
+	}
+	switch res.State {
+	case stateCurrent:
+		return exitWith(checkExitCurrent)
+	case stateUpdateAvailable:
+		return exitWith(checkExitUpdateAvailable)
+	case stateUnsupported:
+		return exitWith(checkExitUnsupported)
+	default: // stateError
+		return exitWith(checkExitError)
+	}
+}
+
+// renderCheckHuman renders a checkResult as a one-line human-
+// readable summary for stderr. Pure function so tests can assert
+// on it directly without swapping any global seams.
+func renderCheckHuman(r checkResult) string {
+	switch r.State {
+	case stateCurrent:
+		if r.LatestVersion != "" {
+			return fmt.Sprintf("current (channel=%s, version=%s, latest=%s)", r.Channel, r.CurrentVersion, r.LatestVersion)
+		}
+		return fmt.Sprintf("current (channel=%s, version=%s)", r.Channel, r.CurrentVersion)
+	case stateUpdateAvailable:
+		return fmt.Sprintf("update-available (channel=%s, current=%s, latest=%s)", r.Channel, r.CurrentVersion, r.LatestVersion)
+	case stateUnsupported:
+		return fmt.Sprintf("unsupported (channel=%s, current=%s): %s", r.Channel, r.CurrentVersion, r.Message)
+	default: // stateError
+		return fmt.Sprintf("error (channel=%s, current=%s): %s", r.Channel, r.CurrentVersion, r.Message)
+	}
+}
+
+// exitWith terminates the process with the given code. Pulled out
+// as a package-level seam so tests can swap it for a recorder;
+// production wires os.Exit. Tests verify the chosen exit code
+// without the test process actually dying.
+var exitWith = func(code int) error {
+	os.Exit(code)
+	return nil
+}
+
+// checkCheck runs the actual classification. Pulled out of
+// runCheck so the seam exitWith is the only thing tests need to
+// swap — the rest of the function is pure and inspectable.
+func checkCheck(jsonOut bool) checkResult {
+	current := resolveVersion()
+	channel := detectChannel()
+
+	switch channel {
+	case channelDocker:
+		return checkResult{
+			State:          stateUnsupported,
+			Channel:        "docker",
+			CurrentVersion: current,
+			Message:        "auto-update is not supported inside a running container; pull the image on the host instead",
+		}
+	case channelBinary:
+		return checkResult{
+			State:          stateUnsupported,
+			Channel:        "binary",
+			CurrentVersion: current,
+			Message:        "auto-update is not supported for stand-alone binary installs; re-run the original go install command",
+		}
+	}
+
+	latest, err := npmLatestFetcher()
+	if err != nil {
+		// Error path: the check did NOT succeed. Surface the
+		// failure to the user with the state=error contract
+		// and exit code 30. Critically, do NOT print
+		// "You are on the latest version." here — the
+		// acceptance criterion is "Output does not claim
+		// success when the check cannot be completed".
+		return checkResult{
+			State:          stateError,
+			Channel:        "npm",
+			CurrentVersion: current,
+			Message:        "could not reach the npm registry: " + err.Error(),
+		}
+	}
+
+	if versionIsNewer(latest, current) {
+		return checkResult{
+			State:          stateUpdateAvailable,
+			Channel:        "npm",
+			CurrentVersion: current,
+			LatestVersion:  latest,
+			Message:        "a newer version is available",
+		}
+	}
+	return checkResult{
+		State:          stateCurrent,
+		Channel:        "npm",
+		CurrentVersion: current,
+		LatestVersion:  latest,
+	}
 }
 
 // detectChannel decides how the binary was installed. Order matters: a

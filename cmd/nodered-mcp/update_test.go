@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -450,4 +451,280 @@ func captureStderr(t *testing.T, fn func()) string {
 	fn()
 	_ = w.Close()
 	return <-done
+}
+
+// withExitCapture swaps exitWith for a recorder so tests can assert
+// on the chosen exit code without killing the test process. Returns
+// the slice that will be appended to (caller's t.Cleanup restores
+// the original exitWith after reading the captured codes).
+func withExitCapture(t *testing.T) *[]int {
+	t.Helper()
+	var captured []int
+	orig := exitWith
+	exitWith = func(code int) error {
+		captured = append(captured, code)
+		return nil
+	}
+	t.Cleanup(func() { exitWith = orig })
+	return &captured
+}
+
+// withVersion pins the package-level `version` variable for the
+// duration of the test so checkCheck's "current == latest" path is
+// deterministic. The value the tests inject is the canonical
+// "running binary version" checkCheck compares against `latest`.
+func withVersion(t *testing.T, v string) {
+	t.Helper()
+	origVersion := version
+	version = v
+	t.Cleanup(func() { version = origVersion })
+}
+
+// TestCheck_NPM_Current: the "we are on the latest" path. Exit 0
+// is the headline behaviour: scripts branch on "did the version
+// check pass?" with success meaning "either current or update-
+// available", and current is the no-action case.
+func TestCheck_NPM_Current(t *testing.T) {
+	withVersion(t, "0.5.8")
+	origDetect := detectChannel
+	detectChannel = func() updateChannel { return channelNPM }
+	t.Cleanup(func() { detectChannel = origDetect })
+	origFetch := npmLatestFetcher
+	npmLatestFetcher = func() (string, error) { return "0.5.8", nil }
+	t.Cleanup(func() { npmLatestFetcher = origFetch })
+
+	captured := withExitCapture(t)
+
+	captureStderr(t, func() {
+		if err := runCheck(false); err != nil {
+			t.Fatalf("runCheck: %v", err)
+		}
+	})
+	if len(*captured) != 1 || (*captured)[0] != checkExitCurrent {
+		t.Errorf("exit code = %v, want [%d]", *captured, checkExitCurrent)
+	}
+}
+
+// TestCheck_NPM_UpdateAvailable: the "newer version exists" path.
+// Exit 10 is the script-branchable signal: CI scripts can use the
+// exit code directly without parsing text.
+func TestCheck_NPM_UpdateAvailable(t *testing.T) {
+	withVersion(t, "0.5.8")
+	origDetect := detectChannel
+	detectChannel = func() updateChannel { return channelNPM }
+	t.Cleanup(func() { detectChannel = origDetect })
+	origFetch := npmLatestFetcher
+	npmLatestFetcher = func() (string, error) { return "9.9.9", nil }
+	t.Cleanup(func() { npmLatestFetcher = origFetch })
+
+	captured := withExitCapture(t)
+
+	captureStderr(t, func() {
+		if err := runCheck(false); err != nil {
+			t.Fatalf("runCheck: %v", err)
+		}
+	})
+	if len(*captured) != 1 || (*captured)[0] != checkExitUpdateAvailable {
+		t.Errorf("exit code = %v, want [%d]", *captured, checkExitUpdateAvailable)
+	}
+}
+
+// TestCheck_Docker_Unsupported: the docker channel cannot auto-
+// update. Exit 20, NOT exit 0. The acceptance criterion "Output
+// does not claim success when the check cannot be completed"
+// applies here too: an exit 0 would tell scripts "you're good"
+// when the user actually has to pull the image on the host.
+func TestCheck_Docker_Unsupported(t *testing.T) {
+	withVersion(t, "0.5.8")
+	origDetect := detectChannel
+	detectChannel = func() updateChannel { return channelDocker }
+	t.Cleanup(func() { detectChannel = origDetect })
+
+	captured := withExitCapture(t)
+
+	out := captureStderr(t, func() {
+		if err := runCheck(false); err != nil {
+			t.Fatalf("runCheck: %v", err)
+		}
+	})
+	if len(*captured) != 1 || (*captured)[0] != checkExitUnsupported {
+		t.Errorf("exit code = %v, want [%d]", *captured, checkExitUnsupported)
+	}
+	if !strings.Contains(out, "unsupported") {
+		t.Errorf("expected 'unsupported' label in output; got:\n%s", out)
+	}
+	if !strings.Contains(out, "docker") {
+		t.Errorf("expected 'docker' channel in output; got:\n%s", out)
+	}
+}
+
+// TestCheck_Binary_Unsupported: same contract as docker, different
+// exit code path. Exit 20 again because the contract is by state,
+// not by channel: any channel that cannot auto-update is exit 20.
+func TestCheck_Binary_Unsupported(t *testing.T) {
+	withVersion(t, "0.5.8")
+	origDetect := detectChannel
+	detectChannel = func() updateChannel { return channelBinary }
+	t.Cleanup(func() { detectChannel = origDetect })
+
+	captured := withExitCapture(t)
+
+	out := captureStderr(t, func() {
+		if err := runCheck(false); err != nil {
+			t.Fatalf("runCheck: %v", err)
+		}
+	})
+	if len(*captured) != 1 || (*captured)[0] != checkExitUnsupported {
+		t.Errorf("exit code = %v, want [%d]", *captured, checkExitUnsupported)
+	}
+	if !strings.Contains(out, "go install") {
+		t.Errorf("expected 'go install' hint in unsupported output; got:\n%s", out)
+	}
+}
+
+// TestCheck_NPM_RegistryError: the registry is unreachable. Exit
+// 30, state "error", and the output MUST NOT claim success. This
+// is the acceptance criterion: "Output does not claim success when
+// the check cannot be completed".
+func TestCheck_NPM_RegistryError(t *testing.T) {
+	withVersion(t, "0.5.8")
+	origDetect := detectChannel
+	detectChannel = func() updateChannel { return channelNPM }
+	t.Cleanup(func() { detectChannel = origDetect })
+	origFetch := npmLatestFetcher
+	npmLatestFetcher = func() (string, error) { return "", errors.New("connection refused") }
+	t.Cleanup(func() { npmLatestFetcher = origFetch })
+
+	captured := withExitCapture(t)
+
+	out := captureStderr(t, func() {
+		if err := runCheck(false); err != nil {
+			t.Fatalf("runCheck: %v", err)
+		}
+	})
+	if len(*captured) != 1 || (*captured)[0] != checkExitError {
+		t.Errorf("exit code = %v, want [%d]", *captured, checkExitError)
+	}
+	// The error path must not claim success. We banned phrases
+	// that would imply the check completed cleanly; the field
+	// name "current=..." in the output is fine (it is the binary
+	// version) because it appears after the "error" label, not
+	// as a leading state.
+	for _, banned := range []string{"You are on the latest version", "update-available", "update check: current"} {
+		if strings.Contains(out, banned) {
+			t.Errorf("error path must not claim success via %q; got:\n%s", banned, out)
+		}
+	}
+	if !strings.Contains(out, "connection refused") {
+		t.Errorf("error path must surface the registry error message; got:\n%s", out)
+	}
+	if !strings.Contains(out, "error (") {
+		t.Errorf("error path must label the state explicitly; got:\n%s", out)
+	}
+}
+
+// TestCheck_JSON_Shape: with --json the wire format is a single
+// JSON object on stdout with the documented schema. No text on
+// stderr, no extra newlines, the schema is stable.
+func TestCheck_JSON_Shape(t *testing.T) {
+	withVersion(t, "0.5.8")
+	origDetect := detectChannel
+	detectChannel = func() updateChannel { return channelNPM }
+	t.Cleanup(func() { detectChannel = origDetect })
+	origFetch := npmLatestFetcher
+	npmLatestFetcher = func() (string, error) { return "9.9.9", nil }
+	t.Cleanup(func() { npmLatestFetcher = origFetch })
+
+	captured := withExitCapture(t)
+
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	origStdout := os.Stdout
+	os.Stdout = stdoutW
+	t.Cleanup(func() { os.Stdout = origStdout })
+
+	done := make(chan string, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, stdoutR)
+		done <- buf.String()
+	}()
+
+	captureStderr(t, func() {
+		if err := runCheck(true); err != nil {
+			t.Fatalf("runCheck: %v", err)
+		}
+	})
+
+	_ = stdoutW.Close()
+	out := <-done
+
+	if len(*captured) != 1 || (*captured)[0] != checkExitUpdateAvailable {
+		t.Errorf("exit code = %v, want [%d]", *captured, checkExitUpdateAvailable)
+	}
+
+	// Parse the JSON, then assert on the schema. We do NOT use
+	// string comparison because field order in the encoded JSON
+	// is non-significant for downstream parsers.
+	var got checkResult
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &got); err != nil {
+		t.Fatalf("JSON parse: %v; raw=%q", err, out)
+	}
+	if got.State != stateUpdateAvailable {
+		t.Errorf("state = %q, want %q", got.State, stateUpdateAvailable)
+	}
+	if got.Channel != "npm" {
+		t.Errorf("channel = %q, want npm", got.Channel)
+	}
+	if got.CurrentVersion == "" {
+		t.Errorf("current_version empty; want the running binary version")
+	}
+	if got.LatestVersion != "9.9.9" {
+		t.Errorf("latest_version = %q, want 9.9.9", got.LatestVersion)
+	}
+}
+
+// TestRenderCheckHuman: pin the human-readable output format so
+// downstream docs can copy it without re-deriving the wording.
+func TestRenderCheckHuman(t *testing.T) {
+	cases := []struct {
+		name string
+		r    checkResult
+		want string
+	}{
+		{
+			"current with latest",
+			checkResult{State: stateCurrent, Channel: "npm", CurrentVersion: "0.5.8", LatestVersion: "0.5.8"},
+			"current (channel=npm, version=0.5.8, latest=0.5.8)",
+		},
+		{
+			"current without latest",
+			checkResult{State: stateCurrent, Channel: "npm", CurrentVersion: "0.5.8"},
+			"current (channel=npm, version=0.5.8)",
+		},
+		{
+			"update-available",
+			checkResult{State: stateUpdateAvailable, Channel: "npm", CurrentVersion: "0.5.8", LatestVersion: "9.9.9"},
+			"update-available (channel=npm, current=0.5.8, latest=9.9.9)",
+		},
+		{
+			"unsupported",
+			checkResult{State: stateUnsupported, Channel: "docker", CurrentVersion: "0.5.8", Message: "pull the image on the host"},
+			"unsupported (channel=docker, current=0.5.8): pull the image on the host",
+		},
+		{
+			"error",
+			checkResult{State: stateError, Channel: "npm", CurrentVersion: "0.5.8", Message: "registry down"},
+			"error (channel=npm, current=0.5.8): registry down",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := renderCheckHuman(tc.r); got != tc.want {
+				t.Errorf("renderCheckHuman = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }
