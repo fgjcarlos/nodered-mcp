@@ -137,16 +137,15 @@ async function inspectArchive({ assetName, archivePath }) {
   // both layouts because the installer's stageExtract accepts both
   // (#256). Reject if the binary is missing from BOTH layouts.
   const expectedRooted = binary;
-  const expectedWrapped = entries.some(
-    (e) => e.endsWith(`/${binary}`),
-  )
-    ? entries.find((e) => e.endsWith(`/${binary}`))
-    : null;
-  const rootedPresent = entries.includes(expectedRooted);
-  const wrappedPresent = !!expectedWrapped;
-  if (!rootedPresent && !wrappedPresent) {
+  const expectedWrapped =
+    `${assetName.replace(/\.tar\.gz$/, '')}/${binary}`;
+  const binaryEntries = entries.filter((entry) => {
+    const normalized = entry.replace(/^\.\//, '');
+    return normalized === expectedRooted || normalized === expectedWrapped;
+  });
+  if (binaryEntries.length !== 1) {
     errors.push(
-      `${assetName}: expected binary ${expectedRooted} (or wrapped variant) not found in archive; entries=${JSON.stringify(entries)}`,
+      `${assetName}: expected exactly one binary at ${expectedRooted} or ${expectedWrapped}; found ${binaryEntries.length}; entries=${JSON.stringify(entries)}`,
     );
   } else {
     // Walk the archive in-process to confirm the binary is non-empty.
@@ -232,7 +231,9 @@ async function inspectAll({ distDir }) {
         errors.push(`${CHECKSUM_FILE}: no entry for ${asset}`);
         continue;
       }
-      const actual = sha256(path.join(distDir, asset));
+      const assetPath = path.join(distDir, asset);
+      if (!fs.existsSync(assetPath)) continue;
+      const actual = sha256(assetPath);
       if (actual !== expected) {
         errors.push(
           `${CHECKSUM_FILE}: digest mismatch for ${asset} (expected ${expected}, got ${actual})`,
