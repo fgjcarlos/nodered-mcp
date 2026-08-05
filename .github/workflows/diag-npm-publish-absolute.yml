@@ -1,0 +1,38 @@
+name: diag-npm-publish-absolute
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diag-npm-publish-absolute.yml'
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          ref: v0.7.0
+          fetch-depth: 0
+
+      - name: build plain tarball
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git checkout v0.7.0 -- npm/ scripts/build-platform-packages.js
+          mkdir -p dist
+          gh release download "v0.7.0" --repo "${{ github.repository }}" --pattern '*.tar.gz' --pattern 'checksums.txt' --dir dist
+          cd dist && sha256sum --ignore-missing --check checksums.txt && cd ..
+          node scripts/build-platform-packages.js --version 0.7.0 --dist dist --out npm-packages
+          cd npm-packages && pwd && ls -la && echo "---HOME IS: $HOME" && echo "---npm prefix:" && npm config get prefix
+          echo "---"
+          TARBALL=$(pwd)/nodered-mcp-darwin-x64-0.7.0.tgz
+          echo "--- TARBALL absolute: $TARBALL"
+          echo "--- file type: $(file $TARBALL)"
+          echo "--- npmrc:"
+          printf "%s\n" "//registry.npmjs.org/:_authToken=${{ secrets.NPM_SECRET }}" > ~/.npmrc
+          cat ~/.npmrc
+          echo "--- npm publish:"
+          npm publish --access public --tag next "$TARBALL" 2>&1 | tail -25 || true
+          echo "--- unpublish:"
+          npm unpublish "@fgjcarlos/nodered-mcp-darwin-x64@0.7.0" --force 2>&1 | tail -5 || true
