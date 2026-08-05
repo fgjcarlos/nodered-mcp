@@ -1,10 +1,10 @@
-name: diag-npm-publish-abs
+name: diag-npm-publish-nosetup
 
 on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/diag-npm-publish-abs.yml'
+      - '.github/workflows/diag-npm-publish-nosetup.yml'
 
 jobs:
   diag:
@@ -15,10 +15,7 @@ jobs:
           ref: v0.7.0
           fetch-depth: 0
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
-        with:
-          node-version: 20
-          registry-url: https://registry.npmjs.org
+      # NO setup-node.
 
       - name: build tarball
         env:
@@ -29,25 +26,23 @@ jobs:
           gh release download "v0.7.0" --repo "${{ github.repository }}" --pattern '*.tar.gz' --pattern 'checksums.txt' --dir dist
           cd dist && sha256sum --ignore-missing --check checksums.txt && cd ..
           node scripts/build-platform-packages.js --version 0.7.0 --dist dist --out npm-packages
-          PWD_REAL=$(realpath npm-packages)
-          echo "PWD_REAL=$PWD_REAL" >> $GITHUB_ENV
-          echo "--- contents:"
-          ls -la npm-packages/
+          npm --version
+          echo "--- env vars:"
+          env | grep -i NPM | head -5
 
-      - name: try with ABSOLUTE path
+      - name: try with absolute path - NO setup-node
         env:
           NPM_SECRET: ${{ secrets.NPM_SECRET }}
         run: |
           printf "%s\n" "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
-          cd ${{ env.PWD_REAL }}
-          # only do win32-x64, win32-arm64, linux-x64; darwin-x64 is already published
-          for pkg in nodered-mcp-win32-x64 nodered-mcp-win32-arm64 nodered-mcp-linux-x64; do
+          PWD=$(realpath npm-packages)
+          for pkg in nodered-mcp-win32-x64 nodered-mcp-win32-arm64 nodered-mcp-linux-x64 nodered-mcp-linux-arm64 nodered-mcp-darwin-arm64; do
             tarball="${pkg}-0.7.0.tgz"
-            if [ ! -f "$tarball" ]; then echo "missing $tarball"; continue; fi
-            if npm view "@fgjcarlos/${pkg}@0.7.0" version >/dev/null 2>&1; then
+            scope="@fgjcarlos/${pkg}"
+            if npm view "${scope}@0.7.0" version >/dev/null 2>&1; then
               echo "already published, skip"
               continue
             fi
-            echo "--- publishing ABSOLUTE $(pwd)/$tarball ---"
-            npm publish --access public --tag next "$(pwd)/$tarball" 2>&1 | tail -8 || true
+            echo "--- publishing $PWD/$tarball ---"
+            npm publish --access public --tag next "$PWD/$tarball" 2>&1 | tail -8 || true
           done
