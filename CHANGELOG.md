@@ -19,7 +19,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   GitHub Release. `bin/release-snapshot_test.js` exercises the
   inspection helpers with synthetic tarballs so the contract is
   covered on every CI runner, including Windows and matrix entries
-  without goreleaser.
+  without goreleaser. The inspected snapshot is also passed unchanged
+  to Windows and Ubuntu jobs, which pack the npm package, install it
+  through the production postinstall, compare the installed binary's
+  digest with the GoReleaser archive, launch the CLI, and verify retry,
+  redirect, checksum-failure, and cleanup behavior before publication.
 
 ## [0.6.3] - 2026-08-05
 
