@@ -177,7 +177,13 @@ async function buildOne({ target, distDir, outDir, version, licenseSrc }) {
     if (!Array.isArray(packed) || !packed[0] || !packed[0].filename) {
       throw new Error(`npm pack returned an unexpected result: ${stdout}`);
     }
-    const tarballPath = path.join(outDir, packed[0].filename);
+    // npm prefixes scoped package tarballs with the scope owner
+    // (`fgjcarlos-...`). Normalize the transport filename to the
+    // stable contract consumed by npm.yml. The archive contents and
+    // registry package identity remain untouched.
+    const packedPath = path.join(outDir, packed[0].filename);
+    const tarballPath = path.join(outDir, `nodered-mcp-${target.key}-${version}.tgz`);
+    await fsp.rename(packedPath, tarballPath);
     return { key: target.key, name: manifest.name, version, tarball: tarballPath };
   } finally {
     try { fs.rmSync(staging, { recursive: true, force: true }); } catch (_) {}
