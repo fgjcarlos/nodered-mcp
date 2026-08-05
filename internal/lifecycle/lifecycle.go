@@ -40,12 +40,16 @@ type StepResult struct {
 
 // Receipt is the persisted outcome of a single Plan run. It is what
 // `doctor` reads back to decide whether a step is still in its claimed
-// state and what the previous run looked like.
+// state and what the previous run looked like. The Manifest is
+// populated by the Runner for every step that verified successfully;
+// failed steps do NOT contribute to the manifest, so a partial run
+// leaves the safe (no-manifest) state for remove/rollback.
 type Receipt struct {
 	PlanID    PlanID       `json:"plan_id"`
 	StartedAt time.Time    `json:"started_at"`
 	EndedAt   time.Time    `json:"ended_at"`
 	Steps     []StepResult `json:"steps"`
+	Manifest  Manifest     `json:"manifest,omitempty"`
 }
 
 // Result is the in-memory outcome of Run. It is also what gets persisted
@@ -59,6 +63,13 @@ type Result struct {
 // with the same inputs must converge to the same observable state. Verify
 // is a read-only check that the post-Apply state matches what the Step
 // claims to produce.
+//
+// Owns declares the paths this Step is responsible for. The Runner
+// appends them to the Receipt.Manifest when (and only when) the Step
+// verifies successfully, so failed Apply or Verify means the path is
+// NOT recorded as owned — the safe state for remove/rollback. Steps
+// that touch paths they do not declare (e.g. an Apply that writes to
+// /tmp/scratch) must leave Owns empty.
 type Step struct {
 	ID          string
 	Description string
@@ -69,6 +80,10 @@ type Step struct {
 	// Returns nil when the step is in its claimed state, an error with
 	// a human-readable message when it is not.
 	Verify func(ctx context.Context) error
+	// Owns lists the paths this Step creates and that remove/rollback
+	// are authorized to delete. Validated at Run time; an invalid
+	// entry fails the Step before Apply runs.
+	Owns []OwnedPath
 }
 
 // Plan is a named, ordered list of Steps. Order matters: Apply and
@@ -136,6 +151,20 @@ func Run(ctx context.Context, p Plan) (*Result, error) {
 	for i := range p.Steps {
 		s := p.Steps[i]
 
+		// Validate Owns up front. A malformed manifest entry
+		// (relative path, unknown kind, empty owner, "..") is a
+		// programmer error — refuse the whole run, do not silently
+		// skip. This is the right place: a Step that does not
+		// validate cannot be safely removed, so it cannot be safely
+		// applied either.
+		for _, op := range s.Owns {
+			if err := validateOwnedPath(op); err != nil {
+				res.Receipt.Steps = append(res.Receipt.Steps, StepResult{ID: s.ID, Status: "failed", Err: err.Error()})
+				res.Receipt.EndedAt = time.Now().UTC()
+				return res, &ErrApply{StepID: s.ID, Err: err}
+			}
+		}
+
 		if s.Apply != nil {
 			if err := s.Apply(ctx); err != nil {
 				res.Receipt.Steps = append(res.Receipt.Steps, StepResult{ID: s.ID, Status: "failed", Err: err.Error()})
@@ -153,7 +182,9 @@ func Run(ctx context.Context, p Plan) (*Result, error) {
 			// No verify declared. Trust the Apply (or the
 			// "no Apply → state holds by construction" path above).
 			// Step stays as "applied" — verified is a stronger
-			// claim we cannot make without a check.
+			// claim we cannot make without a check. Do NOT
+			// add Owns to the manifest: the contract is that
+			// "verified" means "remove/rollback may unlink this".
 			continue
 		}
 		if err := s.Verify(ctx); err != nil {
@@ -162,6 +193,12 @@ func Run(ctx context.Context, p Plan) (*Result, error) {
 			return res, &ErrVerify{StepID: s.ID, Err: err}
 		}
 		res.Receipt.Steps[len(res.Receipt.Steps)-1].Status = "verified"
+		// Step verified — it owns these paths now, until the
+		// receipt is removed or rolled back. Append to the
+		// manifest. Order is preserved (the Steps slice order)
+		// so remove/rollback unlink in the inverse dependency
+		// order when the Plan author lists child paths first.
+		res.Receipt.Manifest = append(res.Receipt.Manifest, s.Owns...)
 	}
 
 	res.Receipt.EndedAt = time.Now().UTC()

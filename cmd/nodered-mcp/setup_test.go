@@ -97,6 +97,10 @@ func TestSetup_IsIdempotent(t *testing.T) {
 // the *ErrApply path. The Verify-only path is what runDoctor
 // surfaces, so we cover it here against a minimal plan rather than
 // embedding it in the setup surface.
+//
+// The test also exercises the typed *ErrVerify Error() method
+// directly so the coverage ratchet doesn't pin a 0% on the
+// string-formatting path.
 func TestSetup_VerifyFailure_AppliesBeforeVerify(t *testing.T) {
 	withReceiptsRoot(t)
 	withConfigDir(t)
@@ -122,12 +126,118 @@ func TestSetup_VerifyFailure_AppliesBeforeVerify(t *testing.T) {
 	if ev.StepID != "drift" {
 		t.Errorf("ev.StepID = %q, want drift", ev.StepID)
 	}
+	// Exercise Error() so the 0% line in the cover profile is
+	// not pinned by this test. The format is "verify failed on
+	// step %q: %v".
+	if !strings.Contains(err.Error(), "verify failed on step") {
+		t.Errorf("Error() = %q, want it to mention the step", err.Error())
+	}
 	last := res.Receipt.Steps[len(res.Receipt.Steps)-1]
 	if last.Status != "failed" {
 		t.Errorf("last step status = %q, want failed", last.Status)
 	}
 	if last.Err == "" {
 		t.Errorf("last.Err = empty, want the wrapped error message")
+	}
+}
+
+// TestTypedError_ErrorStrings: lock the contract that *ErrVerify
+// and *ErrApply render the step id and the wrapped error in their
+// Error() method. The coverage profile does not credit the
+// call site when err.Error() is reached via the err returned
+// from a helper (errors.As dereferences but does not call Error()),
+// so this test forces the call.
+func TestTypedError_ErrorStrings(t *testing.T) {
+	v := &lifecycle.ErrVerify{StepID: "vstep", Err: errors.New("inner")}
+	if got := v.Error(); !strings.Contains(got, `verify failed on step "vstep"`) {
+		t.Errorf(`ErrVerify.Error() = %q, want it to contain the step id`, got)
+	}
+	if got := v.Unwrap().Error(); got != "inner" {
+		t.Errorf("Unwrap() = %q, want inner", got)
+	}
+	a := &lifecycle.ErrApply{StepID: "astep", Err: errors.New("inner")}
+	if got := a.Error(); !strings.Contains(got, `apply failed on step "astep"`) {
+		t.Errorf(`ErrApply.Error() = %q, want it to contain the step id`, got)
+	}
+	if got := a.Unwrap().Error(); got != "inner" {
+		t.Errorf("Unwrap() = %q, want inner", got)
+	}
+}
+
+// TestSetup_ApplyFailure_Coverage: same trick — exercise *ErrApply
+// Error() so the coverage ratchet doesn't pin a 0% line.
+func TestSetup_ApplyFailure_Coverage(t *testing.T) {
+	withReceiptsRoot(t)
+	withConfigDir(t)
+	boom := errors.New("apply boom")
+	plan := lifecycle.Plan{
+		ID: "apply-fail",
+		Steps: []lifecycle.Step{
+			{ID: "a",
+				Apply: func(ctx context.Context) error { return boom },
+			},
+		},
+	}
+	_, err := runPlanAndSave(t, plan)
+	if err == nil {
+		t.Fatal("Run err = nil, want *ErrApply")
+	}
+	var ea *lifecycle.ErrApply
+	if !errors.As(err, &ea) {
+		t.Fatalf("err type = %T, want *lifecycle.ErrApply", err)
+	}
+	if !strings.Contains(err.Error(), "apply failed on step") {
+		t.Errorf("Error() = %q, want it to mention the step", err.Error())
+	}
+}
+
+// TestRenderReceipt_AppliedAndFailed: cover the two less-common
+// status branches (applied-without-verify, failed) so the coverage
+// ratchet doesn't pin a low percentage on the render helper.
+func TestRenderReceipt_AppliedAndFailed(t *testing.T) {
+	var buf bytes.Buffer
+	res := &lifecycle.Result{
+		PlanID: "render",
+		Receipt: lifecycle.Receipt{
+			StartedAt: time.Now(),
+			EndedAt:   time.Now(),
+			Steps: []lifecycle.StepResult{
+				{ID: "a", Status: "applied"},
+				{ID: "b", Status: "failed", Err: "boom"},
+			},
+		},
+	}
+	renderReceipt(&buf, res)
+	out := buf.String()
+	if !strings.Contains(out, "apply a") {
+		t.Errorf("output missing 'apply a' line:\n%s", out)
+	}
+	if !strings.Contains(out, "FAIL  b: boom") {
+		t.Errorf("output missing 'FAIL  b: boom' line:\n%s", out)
+	}
+}
+
+// TestRenderReceipt_NilAndUnknown: edge cases the render helper
+// must handle without panicking.
+func TestRenderReceipt_NilAndUnknown(t *testing.T) {
+	var buf bytes.Buffer
+	renderReceipt(&buf, nil) // nil result → silent
+	if buf.Len() != 0 {
+		t.Errorf("nil result produced output: %q", buf.String())
+	}
+	res := &lifecycle.Result{
+		PlanID: "x",
+		Receipt: lifecycle.Receipt{
+			StartedAt: time.Now(),
+			EndedAt:   time.Now(),
+			Steps: []lifecycle.StepResult{
+				{ID: "weird", Status: "weird"},
+			},
+		},
+	}
+	renderReceipt(&buf, res)
+	if !strings.Contains(buf.String(), "weird  weird") {
+		t.Errorf("unknown status not handled:\n%s", buf.String())
 	}
 }
 
@@ -227,6 +337,23 @@ func TestDefaultConfigDir_Override(t *testing.T) {
 	t.Setenv("NODERED_MCP_HOME", "/tmp/forced-config-dir")
 	if got := defaultConfigDir(); got != "/tmp/forced-config-dir" {
 		t.Errorf("defaultConfigDir = %q, want /tmp/forced-config-dir", got)
+	}
+}
+
+// TestDefaultConfigDir_FallsBackToHome: when NODERED_MCP_HOME is
+// empty, the function falls back to the OS home dir. The exact
+// value of "home" is platform-specific (HOME on Unix, USERPROFILE
+// on Windows) so the assertion is "non-empty and ends in
+// .nodered-mcp", not a hard-coded path. Covers the 33% line
+// that the override test does not.
+func TestDefaultConfigDir_FallsBackToHome(t *testing.T) {
+	t.Setenv("NODERED_MCP_HOME", "")
+	got := defaultConfigDir()
+	if got == "" {
+		t.Errorf("defaultConfigDir() = empty")
+	}
+	if !strings.HasSuffix(got, ".nodered-mcp") {
+		t.Errorf("defaultConfigDir() = %q, want suffix .nodered-mcp", got)
 	}
 }
 

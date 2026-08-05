@@ -116,6 +116,33 @@ func (s *Store) LastResult(planID PlanID) (*Result, error) {
 	return &Result{PlanID: planID, Receipt: *rec}, nil
 }
 
+// RemoveReceipt deletes the persisted receipt for planID. It is the
+// store-side counterpart to the package-level RemoveReceipt helper;
+// the helper validates the plan ID and walks the on-disk root
+// whereas Store knows the root. Best-effort callers should treat
+// os.IsNotExist as success (idempotent re-runs of remove/rollback).
+func (s *Store) RemoveReceipt(planID PlanID) error {
+	if err := validatePlanID(string(planID)); err != nil {
+		return err
+	}
+	path := filepath.Join(s.root, string(planID)+".json")
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("lifecycle: remove receipt: %w", err)
+	}
+	return nil
+}
+
+// RemoveReceipt is the package-level helper used by the remove and
+// rollback CLI commands. It opens the default Store and deletes the
+// receipt for planID.
+func RemoveReceipt(planID PlanID) error {
+	store, err := NewStore()
+	if err != nil {
+		return err
+	}
+	return store.RemoveReceipt(planID)
+}
+
 // defaultReceiptRoot returns the canonical receipts directory. Uses
 // $XDG_STATE_HOME when set (per the XDG Base Directory spec), otherwise
 // ~/.local/state, otherwise ~/.nodered-mcp/receipts as a last resort.

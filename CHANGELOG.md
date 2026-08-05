@@ -8,6 +8,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- feat(cli): `remove` and `rollback` subcommands backed by a
+  receipt-owned manifest. The lifecycle `Receipt` now carries a
+  `manifest` listing every path each verified Step declared as
+  owned; `remove` and `rollback` walk that manifest and refuse
+  to touch anything outside it. Foreign files in the config dir
+  survive `remove` byte-for-byte; the config dir itself is
+  pruned only when it ends up empty. A receipt that predates
+  the manifest (last run failed or upgraded from < #230) makes
+  `remove`/`rollback` no-ops with an actionable hint rather
+  than silently fabricating state. `ErrDirNotEmpty` and
+  `ErrForeignPath` are the typed errors remove surfaces so
+  callers (and tests) can branch on the outcome.
 - feat(cli): `setup` and `doctor` subcommands backed by a transactional
   Plan → Apply → Verify lifecycle foundation. `setup` is idempotent
   (re-runs are no-ops unless the managed state has drifted); `doctor`

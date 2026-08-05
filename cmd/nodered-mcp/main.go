@@ -11,6 +11,8 @@
 //	nodered-mcp init [--all]      interactively generate a client config snippet
 //	nodered-mcp setup [--force]  idempotent transactional setup (writes receipt)
 //	nodered-mcp doctor [--plan]  re-verify the last setup receipt (read-only)
+//	nodered-mcp remove [--plan]  unlink receipt-owned paths (requires --yes)
+//	nodered-mcp rollback [--plan] reverse the last successful run (requires --yes)
 //	nodered-mcp update [--check]  detect the install channel and upgrade in place
 //	nodered-mcp version           print the version and exit
 package main
@@ -102,12 +104,16 @@ func run(args []string) error {
 		return runSetup(args)
 	case "doctor":
 		return runDoctor(args)
+	case "remove":
+		return runRemove(args)
+	case "rollback":
+		return runRollback(args)
 	case "update":
 		return runUpdate(args)
 	case "serve":
 		return serve(args)
 	default:
-		return fmt.Errorf("unknown command %q (use serve|init|setup|doctor|update|version)", cmd)
+		return fmt.Errorf("unknown command %q (use serve|init|setup|doctor|remove|rollback|update|version)", cmd)
 	}
 }
 

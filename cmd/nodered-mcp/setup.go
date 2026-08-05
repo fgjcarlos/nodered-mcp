@@ -17,6 +17,14 @@ import (
 // receipt file name under $XDG_STATE_HOME/nodered-mcp/receipts/.
 const setupPlanID = lifecycle.PlanID("setup")
 
+// setupOwner namespaces the paths the setup plan owns. The field
+// exists to keep two plans on the same machine from removing each
+// other's state if their manifests ever collide — today every plan
+// uses this constant, but a future "client-adapter" plan that also
+// writes to the config dir must pick a different owner to be
+// safely remove-able.
+const setupOwner = "nodered-mcp"
+
 // runSetup is the entry point for `nodered-mcp setup`. It builds the
 // setup Plan, runs it through the lifecycle Runner, and persists the
 // Result as a Receipt. Flags:
@@ -106,6 +114,16 @@ func buildSetupPlan(configDir string) (lifecycle.Plan, error) {
 			{
 				ID:          "ensure-config-dir",
 				Description: "create " + configDir,
+				// ensure-config-dir does NOT declare the config
+				// dir in its Owns: the directory is the user's,
+				// the only thing this plan owns inside it is
+				// .env.example. Declaring the dir as KindDir
+				// would let remove recursively delete foreign
+				// files the user added by hand — the safety
+				// contract is "byte-for-byte preservation".
+				// The dir will be removed by remove only if it
+				// ends up empty after the file entries are
+				// unlinked; foreign content keeps it alive.
 				Apply: func(ctx context.Context) error {
 					return os.MkdirAll(configDir, 0o700)
 				},
@@ -123,6 +141,12 @@ func buildSetupPlan(configDir string) (lifecycle.Plan, error) {
 			{
 				ID:          "write-env-example",
 				Description: "write stub .env.example at " + envExample,
+				// Owns: only the stub file. Foreign files
+				// alongside it in configDir are not in the
+				// manifest and survive remove.
+				Owns: []lifecycle.OwnedPath{
+					{Path: envExample, Kind: lifecycle.KindFile, Owner: setupOwner},
+				},
 				Apply: func(ctx context.Context) error {
 					// Idempotent: only write if absent or content
 					// drifted. Re-running setup never overwrites a

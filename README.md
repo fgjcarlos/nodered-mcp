@@ -79,6 +79,14 @@ nodered-mcp doctor
 # Force a re-apply when the receipt says everything is fine but you want
 # the latest managed `.env.example` shape.
 nodered-mcp setup --force
+
+# Tear down what `setup` created. Foreign files in the config dir
+# (anything not in the receipt manifest) survive byte-for-byte.
+# Always prompts unless --yes is passed.
+nodered-mcp remove --dry-run   # preview what would be unlinked
+nodered-mcp remove --yes       # actually unlink
+nodered-mcp rollback --yes     # same as `remove` today; reserved for
+                               # future plans with non-atomic steps
 ```
 
 Need help? See [`docs/troubleshooting.md`](./docs/troubleshooting.md).
