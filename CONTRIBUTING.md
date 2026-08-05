@@ -110,8 +110,8 @@ reply in Spanish. Do not demand they switch to English.
 The release pipeline is fully tag-driven. The maintainer does the
 following by hand once per release:
 
-1. Bump `package.json` (`version`) and `bin/install.js` (`VERSION`).
-   Commit: `chore(npm): bump wrapper to X.Y.Z`.
+1. Bump `package.json` (`version`). Commit: `chore(npm): bump
+   wrapper to X.Y.Z`.
 2. Push the commit to `main`.
 3. `git tag -a vX.Y.Z` and `git push origin vX.Y.Z`.
 
@@ -126,17 +126,15 @@ success and runs only after the GitHub Release has been verified.
   npm.yml.
 - `npm.yml` — gated on `release.yml`. After release.yml reports
   success, npm.yml checks out the tag, confirms `package.json`
-  version and `bin/install.js` VERSION agree with the tag, runs
-  `scripts/release-gate.js` to verify the GitHub Release carries
-  `checksums.txt`, at least one tarball, and at least one SBOM (with
-  a structurally valid `checksums.txt`), and only then publishes
-  `@fgjcarlos/nodered-mcp` to npmjs. Any failure inside the gate
-  exits non-zero before `npm publish` is touched, so a half-built
-  release cannot ship a working npm wrapper. The wrapper's
-  postinstall URL embeds the `bin/install.js` VERSION constant — a
-  stale value there would otherwise make `npm install -g` silently
-  download the previous tag's tarball, which is why that gate lives
-  alongside the asset check.
+  version agrees with the tag, runs `scripts/release-gate.js` to
+  verify the GitHub Release carries `checksums.txt`, at least one
+  tarball, and at least one SBOM (with a structurally valid
+  `checksums.txt`), and only then publishes `@fgjcarlos/nodered-mcp`
+  to npmjs. Any failure inside the gate exits non-zero before
+  `npm publish` is touched, so a half-built release cannot ship a
+  working npm wrapper. The wrapper's postinstall reads `version`
+  straight from `package.json` (#227 / #242), so the gate is the
+  single source of truth.
 
 A new release is justified when there is a user-visible change: a new
 tool, a new subcommand, a new install channel, a fixed bug. Pure docs

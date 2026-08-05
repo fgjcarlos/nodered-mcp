@@ -7,10 +7,11 @@ before:
     # Keep this list to plain, shell-free commands: goreleaser splits
     # each hook with shlex and execs it directly, so `&&`, pipes and
     # nested quoting do not work here (#218 tried a sed one-liner and
-    # every release died with "invalid command line string"). The
-    # bin/install.js VERSION constant is bumped by hand and guarded by
-    # npm.yml, which checks out its own copy of the source — a sed in
-    # this hook could never have satisfied that gate anyway.
+    # every release died with "invalid command line string"). We only
+    # need `go mod tidy` here — the npm wrapper's authoritative
+    # install code path (bin/install-impl.js) reads its version from
+    # package.json at runtime, so no source rewrite is needed for the
+    # npm wrapper to track the release tag (#242).
     - go mod tidy
 
 builds:

@@ -51,9 +51,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           # The triggering release.yml run executed against the tag;
-          # checkout the same ref so the version gates below read the
-          # post-bump package.json and bin/install.js. workflow_run
-          # events otherwise run on the default branch.
+          # checkout the same ref so the version gate below reads the
+          # post-bump package.json. workflow_run events otherwise run
+          # on the default branch.
           ref: ${{ env.TAG }}
           fetch-depth: 0
           fetch-tags: true
@@ -72,28 +72,6 @@ jobs:
           expected="${EXPECTED#v}"
           if [ "$actual" != "$expected" ]; then
             echo "package.json version ($actual) does not match tag $EXPECTED (expected $expected)"
-            exit 1
-          fi
-
-      # Same gate as above, but for the bin/install.js VERSION constant —
-      # the wrapper's postinstall builds its tarball URL from this
-      # literal. A stale constant here is the bug from #146: the gate on
-      # package.json would pass, the npm publish would succeed, and a
-      # fresh `npm install -g` would silently download the previous
-      # tag's binary. The grep targets the line we keep by convention;
-      # a `const VERSION = ...` declaration is the contract.
-      - name: verify bin/install.js VERSION matches the tag
-        env:
-          EXPECTED: ${{ env.TAG }}
-        run: |
-          actual=$(grep -E "^const VERSION = '[^']+';" bin/install.js | head -1 | sed -E "s/^const VERSION = '([^']+)';.*/\\1/")
-          expected="${EXPECTED#v}"
-          if [ -z "$actual" ]; then
-            echo "could not parse VERSION from bin/install.js"
-            exit 1
-          fi
-          if [ "$actual" != "$expected" ]; then
-            echo "bin/install.js VERSION ($actual) does not match tag $EXPECTED (expected $expected)"
             exit 1
           fi
 
