@@ -9,7 +9,77 @@ permissions:
   contents: write
 
 jobs:
+  # Issue #258: real-artifact inspection. Run goreleaser in
+  # --snapshot mode against the tag's source tree, then assert
+  # every generated archive matches the installer's expectations
+  # (flat layout, correct binary naming per platform, non-empty
+  # binaries, checksums.txt internally consistent). Fails before
+  # the publish job runs, so a half-built release cannot publish
+  # a working GitHub Release. The same snapshot script also runs
+  # on every PR via ci.yml's release-snapshot job.
+  release-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: install syft for snapshot SBOMs
+        env:
+          SYFT_VERSION: v1.27.0
+        run: |
+          set -euo pipefail
+          curl -sSL https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh | sh -s -- -b /usr/local/bin ${SYFT_VERSION}
+          syft version
+
+      - name: build GoReleaser snapshot
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a  # v6
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean --skip=publish
+
+      - name: inspect release snapshot
+        run: node scripts/release-snapshot.js --skip-build
+
+      - name: upload inspected snapshot
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: release-snapshot-dist
+          path: |
+            dist/*.tar.gz
+            dist/checksums.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  release-artifact-smoke:
+    needs: release-snapshot
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: 18
+
+      - name: download inspected snapshot
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: release-snapshot-dist
+          path: dist
+
+      - name: install packed npm package and launch native CLI
+        run: node scripts/release-artifact-smoke.js --dist-dir dist
+
   goreleaser:
+    needs: release-artifact-smoke
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4

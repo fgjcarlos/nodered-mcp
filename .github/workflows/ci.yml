@@ -179,3 +179,75 @@ jobs:
             GOOS=${target%/*} GOARCH=${target#*/} go build -o /dev/null ./cmd/nodered-mcp
             echo "ok $target"
           done
+
+  # Issue #258: real-artifact contract gate. Runs goreleaser in
+  # --snapshot mode against the PR's source tree, then inspects every
+  # generated archive against the installer's expectations. Catches
+  # .goreleaser.yaml drifts before they ship as a broken release. The
+  # in-memory bin/release-snapshot_test.js also runs in the npm-wrapper
+  # matrix above for the Windows / non-goreleaser path.
+  release-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: install syft for snapshot SBOMs
+        env:
+          SYFT_VERSION: v1.27.0
+        run: |
+          set -euo pipefail
+          curl -sSL https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh | sh -s -- -b /usr/local/bin ${SYFT_VERSION}
+          syft version
+
+      # Use the same pinned action and v2 selector as release.yml.
+      # The previous direct v2.4.8 download could not parse the
+      # repository's current `archives.formats` configuration.
+      - name: build GoReleaser snapshot
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a  # v6
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean --skip=publish
+
+      - name: inspect release snapshot
+        run: node scripts/release-snapshot.js --skip-build
+
+      - name: upload inspected snapshot
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: release-snapshot-dist
+          path: |
+            dist/*.tar.gz
+            dist/checksums.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  # Consume the exact snapshot bytes through npm's production
+  # postinstall, then launch the installed native CLI on both hosts.
+  release-artifact-smoke:
+    needs: release-snapshot
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: 18
+
+      - name: download inspected snapshot
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: release-snapshot-dist
+          path: dist
+
+      - name: install packed npm package and launch native CLI
+        run: node scripts/release-artifact-smoke.js --dist-dir dist

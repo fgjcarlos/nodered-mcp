@@ -6,6 +6,25 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- test(release): validate real GoReleaser and npm artifacts before
+  publication (#258). `scripts/release-snapshot.js` runs goreleaser
+  in `--snapshot` mode and inspects every generated archive against
+  the installer's expectations: flat-or-wrapped layout support, the
+  right `.exe` suffix on Windows, non-empty binaries, and an
+  internally consistent `checksums.txt`. Wired into `ci.yml` as a
+  required job on every PR and into `release.yml` as a prerequisite
+  to the publish job, so a half-built release cannot ship a working
+  GitHub Release. `bin/release-snapshot_test.js` exercises the
+  inspection helpers with synthetic tarballs so the contract is
+  covered on every CI runner, including Windows and matrix entries
+  without goreleaser. The inspected snapshot is also passed unchanged
+  to Windows and Ubuntu jobs, which pack the npm package, install it
+  through the production postinstall, compare the installed binary's
+  digest with the GoReleaser archive, launch the CLI, and verify retry,
+  redirect, checksum-failure, and cleanup behavior before publication.
+
 ## [0.6.3] - 2026-08-05
 
 ### Fixed

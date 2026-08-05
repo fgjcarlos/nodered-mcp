@@ -32,6 +32,7 @@
 // binDir is left untouched. The prior install (if any) keeps working.
 
 const https = require('node:https');
+const http = require('node:http');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
@@ -76,6 +77,35 @@ const DOWNLOAD_RETRIES = readPositiveIntEnv(
 
 const PACKAGE_VERSION = require('../package.json').version;
 
+// Test-only release origin override used by the real-artifact CI gate.
+// It is deliberately restricted to loopback and CI so normal installs
+// can only download from the canonical GitHub Release.
+function releaseBaseUrl(version, env = process.env) {
+  const canonical =
+    `https://github.com/${REPO}/releases/download/v${version}`;
+  const override = env.NODERED_MCP_TEST_RELEASE_BASE_URL;
+  if (!override) return canonical;
+  if (env.CI !== 'true') {
+    throw new Error(
+      'NODERED_MCP_TEST_RELEASE_BASE_URL is restricted to CI',
+    );
+  }
+  let parsed;
+  try {
+    parsed = new URL(override);
+  } catch (_) {
+    throw new Error('NODERED_MCP_TEST_RELEASE_BASE_URL must be a valid URL');
+  }
+  const loopback = new Set(['127.0.0.1', 'localhost', '::1']);
+  if (!['http:', 'https:'].includes(parsed.protocol) ||
+      !loopback.has(parsed.hostname)) {
+    throw new Error(
+      'NODERED_MCP_TEST_RELEASE_BASE_URL must use HTTP(S) loopback',
+    );
+  }
+  return parsed.toString().replace(/\/$/, '');
+}
+
 // Goreleaser publishes a .tar.gz for every os/arch combo we support.
 // The unknown-combo branch is a defense-in-depth assert: a future
 // goreleaser build without a matching key here fails fast during
@@ -109,7 +139,7 @@ function unsupportedPlatformMessage(platform, arch) {
 // HTTPS GET that resolves with the full response body as a Buffer, or
 // rejects on a wall-clock timeout, non-2xx status, or transport error.
 // Follows exactly one redirect (GitHub releases redirect 302 to S3).
-function downloadWithTimeout(url, timeoutMs) {
+function downloadWithTimeout(url, timeoutMs, redirectsRemaining = 1) {
   return new Promise((resolve, reject) => {
     let settled = false;
     let activeRes = null;
@@ -121,7 +151,19 @@ function downloadWithTimeout(url, timeoutMs) {
       reject(new Error(`download timed out after ${timeoutMs}ms: ${url}`));
     }, timeoutMs);
 
-    const req = https.get(
+    const transport = url.startsWith('https://')
+      ? https
+      : url.startsWith('http://')
+        ? http
+        : null;
+    if (!transport) {
+      settled = true;
+      clearTimeout(timer);
+      reject(new Error(`unsupported download protocol: ${url}`));
+      return;
+    }
+
+    const req = transport.get(
       url,
       { headers: { 'User-Agent': 'nodered-mcp-install' } },
       (res) => {
@@ -132,13 +174,28 @@ function downloadWithTimeout(url, timeoutMs) {
           const next = res.headers.location;
           clearTimeout(timer);
           res.resume();
-          if (!next || !/^https?:\/\//i.test(next)) {
+          if (!next) {
             settled = true;
             return reject(
-              new Error(`redirect from ${url} is not an absolute URL: ${next}`),
+              new Error(`redirect from ${url} has no Location header`),
             );
           }
-          downloadWithTimeout(next, timeoutMs).then(resolve, reject);
+          if (redirectsRemaining <= 0) {
+            settled = true;
+            return reject(new Error(`too many redirects while downloading ${url}`));
+          }
+          let nextUrl;
+          try {
+            nextUrl = new URL(next, url).toString();
+          } catch (_) {
+            settled = true;
+            return reject(new Error(`invalid redirect from ${url}: ${next}`));
+          }
+          downloadWithTimeout(
+            nextUrl,
+            timeoutMs,
+            redirectsRemaining - 1,
+          ).then(resolve, reject);
           return;
         }
 
@@ -417,8 +474,8 @@ async function _run(deps, ctx) {
       `@fgjcarlos/nodered-mcp: downloading ${assetName} for ${platform}-${arch} ...\n`,
     );
 
-    const checksumsUrl =
-      `https://github.com/${REPO}/releases/download/v${version}/checksums.txt`;
+    const baseUrl = ctx.releaseBaseUrl || releaseBaseUrl(version);
+    const checksumsUrl = `${baseUrl}/checksums.txt`;
     const checksumsTxt = await deps.downloadWithRetry(
       checksumsUrl,
       CHECKSUMS_TIMEOUT_MS,
@@ -431,8 +488,7 @@ async function _run(deps, ctx) {
       );
     }
 
-    const assetUrl =
-      `https://github.com/${REPO}/releases/download/v${version}/${assetName}`;
+    const assetUrl = `${baseUrl}/${assetName}`;
     // Retry transport only. Checksum mismatch is verified below
     // against the bytes-on-disk result of this call and is never
     // treated as a retryable condition (see downloadWithRetry).
@@ -515,6 +571,7 @@ module.exports = {
   ASSET_MAP,
   PACKAGE_VERSION,
   REPO,
+  releaseBaseUrl,
   DOWNLOAD_TIMEOUT_MS,
   CHECKSUMS_TIMEOUT_MS,
   DOWNLOAD_RETRIES,
