@@ -1,11 +1,21 @@
 {
   "name": "@fgjcarlos/nodered-mcp-linux-arm64",
   "version": "0.0.0",
-  "description": "Native nodered-mcp executable for Linux ARM64 — installed via the main npm package's optionalDependencies.",
+  "description": "Prebuilt native nodered-mcp binary for Linux ARM64 (Raspberry Pi, AWS Graviton, etc.). Internal platform package — install the main @fgjcarlos/nodered-mcp package instead; this one is resolved automatically through its optionalDependencies.",
   "license": "MIT",
   "repository": "github:fgjcarlos/nodered-mcp",
   "homepage": "https://github.com/fgjcarlos/nodered-mcp#readme",
   "bugs": "https://github.com/fgjcarlos/nodered-mcp/issues",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "node-red",
+    "nodered",
+    "llm",
+    "nodered-mcp",
+    "linux",
+    "arm64"
+  ],
   "os": ["linux"],
   "cpu": ["arm64"],
   "files": [

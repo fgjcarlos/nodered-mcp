@@ -25,6 +25,26 @@ La versión en inglés de este documento está en
 
 Tres canales soportados. Elige el que mejor te encaje:
 
+### Plataformas soportadas (canal npm)
+
+El paquete npm publica binarios nativos precompilados para todas
+las plataformas de escritorio comunes vía `optionalDependencies`.
+npm resuelve el correcto para tu máquina en el momento de
+instalación — no tienes que elegir nada:
+
+| OS      | Arquitecturas                            | Paquete npm                                       |
+| ------- | ---------------------------------------- | ------------------------------------------------- |
+| Linux   | x64, ARM64 (Raspberry Pi, AWS Graviton)  | `@fgjcarlos/nodered-mcp-linux-{x64,arm64}`        |
+| macOS   | x64 (Intel), ARM64 (Apple Silicon M1/M2/M3/M4) | `@fgjcarlos/nodered-mcp-darwin-{x64,arm64}` |
+| Windows | x64, ARM64 (Snapdragon X / Surface Pro X) | `@fgjcarlos/nodered-mcp-win32-{x64,arm64}`       |
+
+Los seis paquetes `@fgjcarlos/nodered-mcp-<plat>-<arch>` son
+paquetes internos de plataforma — instalas el principal
+`@fgjcarlos/nodered-mcp` y npm descarga el que corresponda. Cada
+uno declara un filtro `os`/`cpu` para que npm solo baje el binario
+que coincide con tu máquina. Para arquitecturas no soportadas
+(p.ej. Linux PowerPC, FreeBSD), usa `go install` o Docker.
+
 ```bash
 # npm — Linux, macOS y Windows en amd64/arm64. Recomendado.
 npm install -g @fgjcarlos/nodered-mcp
