@@ -16,14 +16,14 @@ name: npm
 # only sees a tag once release.yml has reported `completed` with
 # `success`. The two jobs run in parallel: publish-platforms uses
 # NPM_SECRET (a bypass-2FA automation token) to publish the six
-# scoped platform packages, and publish-main uses OIDC via the
-# GitHub Actions Trusted Publisher configured for
-# @fgjcarlos/nodered-mcp in the npmjs package settings. The main
-# package cannot be published with NPM_SECRET because the registry
-# rejects any automation token once Trusted Publisher is configured
-# for the package, and the OIDC path requires actions/setup-node
-# with registry-url, which collides with the platform packages
-# step — hence the job split.
+# scoped platform packages, and publish-main uses NPM_SECRET as well
+# to publish the meta package. The meta package sits in the npmjs
+# dead-lock documented at #278: a Trusted Publisher entry existed for
+# it, so npmjs was rejecting every publish attempt with E403 (token)
+# or E404 (OIDC, via npm/cli#8678). The token path is the only one
+# that works while no Trusted Publisher is configured; the OIDC path
+# requires deleting and re-creating the Trusted Publisher entry on
+# npmjs Settings, which is currently disabled until 0.7.0 publishes.
 #
 # Order semantics: a partial release (platforms only, or main only)
 # is recoverable on rerun. The CLI smoke test below runs only after
@@ -253,15 +253,26 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      # actions/setup-node with registry-url is the supported way
-      # to attach the OIDC id-token to npm publish on the workflows
-      # in the npmjs Trusted Publisher settings. Trusted Publisher
-      # is configured for @fgjcarlos/nodered-mcp in the npmjs
-      # package settings (workflow npm.yml, no environment).
+      # Use NPM_SECRET (bypass-2FA automation token) instead of the
+      # OIDC Trusted Publisher path. As of 2026-08-06 (#278), once a
+      # Trusted Publisher is configured for a package on npmjs, OIDC
+      # publish of a new version on that pre-existing package returns
+      # E404 (npm/cli#8678 — npmjs does not retro-attach the trust-
+      # link to packages whose earlier versions were token-published).
+      # Setting `registry-url` here triggers that same E404 path. The
+      # token path also fails with E403 when a Trusted Publisher is
+      # active. The unblock sequence is:
+      #   1. Delete the Trusted Publisher entry on npmjs Settings.
+      #   2. Push the v0.7.0 tag — this workflow publishes with the
+      #      token and bypasses both errors.
+      #   3. Re-create the Trusted Publisher entry on npmjs. The next
+      #      release can re-enable the OIDC flow by adding
+      #      `registry-url: https://registry.npmjs.org` and dropping
+      #      the `~/.npmrc` write below.
+      # ponytail: keep the token path reversible, document upgrade.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version: 20
-          registry-url: https://registry.npmjs.org
 
       - name: verify package.json version matches the tag
         env:
@@ -276,33 +287,38 @@ jobs:
 
 
       - name: publish main package
-        # OIDC auth via Trusted Publisher. The .npmrc file does not
-        # mention NPM_SECRET — actions/setup-node v7 with
-        # registry-url attaches the OIDC id-token to npm publish.
-        # If a previous step leaked a NPM_SECRET into ~/.npmrc, it
-        # would override OIDC and the registry would reject with
-        # E403 Two-factor authentication required.
+        # NPM_SECRET is a bypass-2FA automation token. The current
+        # branch uses it because the meta package sits in the npmjs
+        # dead-lock documented at #278 (Trusted Publisher blocks
+        # tokens AND OIDC). After Trusted Publisher is re-created
+        # post-0.7.0, this step should switch back to the OIDC path:
+        # drop the `~/.npmrc` write, re-add `registry-url` to
+        # setup-node above, drop `--provenance` (it attaches but
+        # npmjs accepts missing attestation for non-first publishes).
+        env:
+          NPM_SECRET: ${{ secrets.NPM_SECRET }}
         run: |
           version=$(jq -r .version package.json)
           if npm view "@fgjcarlos/nodered-mcp@${version}" version >/dev/null 2>&1; then
             echo "@fgjcarlos/nodered-mcp@${version} is already published; nothing to do."
             exit 0
           fi
-          rm -f ~/.npmrc
-          # Pass "." so npm packs the current directory (the main
-          # package) on the fly. Earlier iterations used a separate
-          # `npm pack` step that wrote into npm-packages/ and then
-          # failed to open the result (ENOENT) due to a race between
-          # pack and read on the runner filesystem.
-          npm publish --access public --provenance --tag next .
+          echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
+          npm publish --access public --tag next .
 
-      - name: verify main package integrity and provenance
+      - name: verify main package integrity
+        # No `attestation.url` check — without --provenance there is
+        # no attestation, and that is fine for this transient release
+        # (#278). Re-add attestation check once OIDC + --provenance
+        # are restored post-0.7.0.
+        env:
+          NPM_SECRET: ${{ secrets.NPM_SECRET }}
         run: |
           version=$(jq -r .version package.json)
+          echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
           integrity=$(npm view "@fgjcarlos/nodered-mcp@${version}" dist.integrity)
-          attestation=$(npm view "@fgjcarlos/nodered-mcp@${version}" dist.attestations.url)
-          if [ -z "$integrity" ] || [ -z "$attestation" ]; then
-            echo "main package lacks registry integrity or provenance"
+          if [ -z "$integrity" ]; then
+            echo "main package lacks registry integrity"
             exit 1
           fi
 
@@ -322,10 +338,16 @@ jobs:
           echo "canary install passed: $reported"
 
       - name: promote main package to latest
-        # actions/setup-node with registry-url is set in this job,
-        # so npm dist-tag uses OIDC as well.
+        # Same auth path as publish main package (see #278): the
+        # meta package has no Trusted Publisher until re-created on
+        # npmjs post-0.7.0, so we use NPM_SECRET here. After Trusted
+        # Publisher is restored, switch this back to OIDC by removing
+        # the env block and the ~/.npmrc write.
+        env:
+          NPM_SECRET: ${{ secrets.NPM_SECRET }}
         run: |
           version=$(jq -r .version package.json)
+          echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
           npm dist-tag add "@fgjcarlos/nodered-mcp@${version}" latest
           latest=$(npm view @fgjcarlos/nodered-mcp dist-tags.latest)
           if [ "$latest" != "$version" ]; then
