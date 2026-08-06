@@ -1,0 +1,106 @@
+name: diag-npm-publish-main-retry
+
+# Diag retry for the publish-main E403 on @fgcarlos/nodered-mcp.
+# Mirrors the publish-main steps in .github/workflows/npm.yml verbatim
+# so that any difference from the official path is impossible. Triggered
+# via workflow_dispatch to avoid the workflow_run / push coupling that
+# prevents `gh run rerun` from working.
+#
+# Reads the same checkout ref, validates package.json version == tag
+# (any tag) and runs the exact two publish steps. Identical env block,
+# identical commands. If this works, the same content will work from
+# the official `npm.yml` once the user releases the publish-main job
+# via a re-tag of v0.7.1 or a future release.
+#
+# Delete this file from the branch once the official publish-main
+# succeeds.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish from (e.g. v0.7.1)'
+        required: true
+        default: 'v0.7.1'
+
+permissions:
+  contents: read
+
+jobs:
+  publish-main:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: 20
+
+      - name: verify package.json version matches the tag
+        env:
+          EXPECTED: ${{ env.TAG }}
+        run: |
+            actual=$(jq -r .version package.json)
+            expected="${EXPECTED#v}"
+            if [ "$actual" != "$expected" ]; then
+              echo "package.json version ($actual) does not match tag $EXPECTED (expected $expected)"
+              exit 1
+            fi
+
+      - name: publish main package
+        env:
+          NPM_SECRET: ${{ secrets.NPM_SECRET }}
+        run: |
+          version=$(jq -r .version package.json)
+          if npm view "@fgjcarlos/nodered-mcp@${version}" version >/dev/null 2>&1; then
+            echo "@fgjcarlos/nodered-mcp@${version} is already published; nothing to do."
+            exit 0
+          fi
+          echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
+          npm publish --access public --tag next .
+
+      - name: verify main package integrity
+        env:
+          NPM_SECRET: ${{ secrets.NPM_SECRET }}
+        run: |
+          version=$(jq -r .version package.json)
+          echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
+          integrity=$(npm view "@fgjcarlos/nodered-mcp@${version}" dist.integrity)
+          if [ -z "$integrity" ]; then
+            echo "main package lacks registry integrity"
+            exit 1
+          fi
+
+      - name: install and launch canary from npm registry
+        run: |
+          set -euo pipefail
+          version=$(jq -r .version package.json)
+          prefix=$(mktemp -d)
+          trap 'rm -rf "$prefix"' EXIT
+          npm install --global --prefix "$prefix" --ignore-scripts --no-audit --no-fund \
+            "@fgjcarlos/nodered-mcp@${version}"
+          reported=$($prefix/bin/nodered-mcp version)
+          if [[ "$reported" != *"$version"* ]]; then
+            echo "canary executable reported '$reported', expected $version"
+            exit 1
+          fi
+          echo "canary install passed: $reported"
+
+      - name: promote main package to latest
+        env:
+          NPM_SECRET: ${{ secrets.NPM_SECRET }}
+        run: |
+          version=$(jq -r .version package.json)
+          echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
+          npm dist-tag add "@fgjcarlos/nodered-mcp@${version}" latest
+          latest=$(npm view @fgjcarlos/nodered-mcp dist-tags.latest)
+          if [ "$latest" != "$version" ]; then
+            echo "latest tag is $latest, expected $version"
+            exit 1
+          fi
