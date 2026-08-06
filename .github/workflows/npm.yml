@@ -348,8 +348,8 @@ jobs:
         run: |
           version=$(jq -r .version package.json)
           echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
-          npm dist-tag add "@fgcarlos/nodered-mcp@${version}" latest
-          latest=$(npm view @fgcarlos/nodered-mcp dist-tags.latest)
+          npm dist-tag add "@fgjcarlos/nodered-mcp@${version}" latest
+          latest=$(npm view @fgjcarlos/nodered-mcp dist-tags.latest)
           if [ "$latest" != "$version" ]; then
             echo "latest tag is $latest, expected $version"
             exit 1
