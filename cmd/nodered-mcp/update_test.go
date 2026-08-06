@@ -130,6 +130,26 @@ func TestPackageJSONNeighbour_ParentDir(t *testing.T) {
 	}
 }
 
+func TestPackageJSONNeighbour_PlatformPackage(t *testing.T) {
+	// After #257 the binary ships inside one of six scoped platform
+	// packages (@fgjcarlos/nodered-mcp-<plat>-<arch>). The nearest
+	// package.json is the platform manifest, not the meta one, so
+	// packageNameMatches must accept any of the six sibling names.
+	dir := t.TempDir()
+	pkg := filepath.Join(dir, "package.json")
+	if err := os.WriteFile(pkg, []byte(`{"name":"@fgjcarlos/nodered-mcp-linux-x64"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origExecutable := osExecutable
+	osExecutable = func() (string, error) { return filepath.Join(dir, "bin", "nodered-mcp"), nil }
+	defer func() { osExecutable = origExecutable }()
+
+	if !packageJSONNeighbour() {
+		t.Error("expected npm channel: platform-package neighbour found")
+	}
+}
+
 func TestPackageJSONNeighbour_WrongName(t *testing.T) {
 	dir := t.TempDir()
 	pkg := filepath.Join(dir, "package.json")

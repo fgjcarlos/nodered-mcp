@@ -341,7 +341,14 @@ func packageNameMatches(path string) bool {
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return false
 	}
-	return doc.Name == "@fgjcarlos/nodered-mcp"
+	// Accept the meta package itself and any of its scoped platform
+	// packages (@fgjcarlos/nodered-mcp-<plat>-<arch>). With #257 the
+	// binary ships inside one of the six platform packages, so the
+	// neighbouring package.json is the platform manifest, not the
+	// root one — matching only the meta name silently misroutes
+	// `update` to the binary channel.
+	const metaPrefix = "@fgjcarlos/nodered-mcp"
+	return doc.Name == metaPrefix || strings.HasPrefix(doc.Name, metaPrefix+"-")
 }
 
 // fetchLatestNPMVersion hits the public registry. No auth, no rate-limit
