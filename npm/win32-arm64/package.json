@@ -1,11 +1,22 @@
 {
   "name": "@fgjcarlos/nodered-mcp-win32-arm64",
   "version": "0.0.0",
-  "description": "Native nodered-mcp executable for Windows ARM64 — installed via the main npm package's optionalDependencies.",
+  "description": "Prebuilt native nodered-mcp binary for Windows ARM64 (Snapdragon X / Surface Pro X). Internal platform package — install the main @fgjcarlos/nodered-mcp package instead; this one is resolved automatically through its optionalDependencies.",
   "license": "MIT",
   "repository": "github:fgjcarlos/nodered-mcp",
   "homepage": "https://github.com/fgjcarlos/nodered-mcp#readme",
   "bugs": "https://github.com/fgjcarlos/nodered-mcp/issues",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "node-red",
+    "nodered",
+    "llm",
+    "nodered-mcp",
+    "windows",
+    "win32",
+    "arm64"
+  ],
   "os": ["win32"],
   "cpu": ["arm64"],
   "files": [

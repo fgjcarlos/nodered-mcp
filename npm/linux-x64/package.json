@@ -1,11 +1,21 @@
 {
   "name": "@fgjcarlos/nodered-mcp-linux-x64",
   "version": "0.0.0",
-  "description": "Native nodered-mcp executable for Linux x64 — installed via the main npm package's optionalDependencies.",
+  "description": "Prebuilt native nodered-mcp binary for Linux x64. Internal platform package — install the main @fgjcarlos/nodered-mcp package instead; this one is resolved automatically through its optionalDependencies.",
   "license": "MIT",
   "repository": "github:fgjcarlos/nodered-mcp",
   "homepage": "https://github.com/fgjcarlos/nodered-mcp#readme",
   "bugs": "https://github.com/fgjcarlos/nodered-mcp/issues",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "node-red",
+    "nodered",
+    "llm",
+    "nodered-mcp",
+    "linux",
+    "x64"
+  ],
   "os": ["linux"],
   "cpu": ["x64"],
   "files": [

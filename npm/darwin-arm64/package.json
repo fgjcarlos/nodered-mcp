@@ -1,11 +1,23 @@
 {
   "name": "@fgjcarlos/nodered-mcp-darwin-arm64",
   "version": "0.0.0",
-  "description": "Native nodered-mcp executable for macOS ARM64 — installed via the main npm package's optionalDependencies.",
+  "description": "Prebuilt native nodered-mcp binary for macOS ARM64 (Apple Silicon — M1/M2/M3/M4). Internal platform package — install the main @fgjcarlos/nodered-mcp package instead; this one is resolved automatically through its optionalDependencies.",
   "license": "MIT",
   "repository": "github:fgjcarlos/nodered-mcp",
   "homepage": "https://github.com/fgjcarlos/nodered-mcp#readme",
   "bugs": "https://github.com/fgjcarlos/nodered-mcp/issues",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "node-red",
+    "nodered",
+    "llm",
+    "nodered-mcp",
+    "macos",
+    "darwin",
+    "arm64",
+    "apple-silicon"
+  ],
   "os": ["darwin"],
   "cpu": ["arm64"],
   "files": [
