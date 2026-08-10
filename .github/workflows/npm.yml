@@ -56,7 +56,7 @@ jobs:
     env:
       TAG: ${{ github.event.workflow_run.head_branch }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           # The triggering release.yml run executed against the tag;
           # checkout the same ref so the version gate below reads the
@@ -247,7 +247,7 @@ jobs:
     env:
       TAG: ${{ github.event.workflow_run.head_branch }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           ref: ${{ env.TAG }}
           fetch-depth: 0
