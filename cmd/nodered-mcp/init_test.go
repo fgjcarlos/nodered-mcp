@@ -9,6 +9,39 @@ import (
 	"testing"
 )
 
+func TestDetectClients_ClaudeDesktopWithoutConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	var claudeDir string
+	switch runtime.GOOS {
+	case "windows":
+		t.Setenv("APPDATA", dir)
+		claudeDir = filepath.Join(dir, "Claude")
+	case "darwin":
+		t.Setenv("HOME", dir)
+		claudeDir = filepath.Join(dir, "Library", "Application Support", "Claude")
+	case "plan9":
+		t.Setenv("home", dir)
+		claudeDir = filepath.Join(dir, "lib", "Claude")
+	default:
+		t.Setenv("HOME", dir)
+		t.Setenv("XDG_CONFIG_HOME", dir)
+		claudeDir = filepath.Join(dir, "Claude")
+	}
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(claudeDir, "claude_desktop_config.json")); !os.IsNotExist(err) {
+		t.Fatalf("config file must not exist, got err %v", err)
+	}
+
+	for _, client := range detectClientsImpl(false) {
+		if client.key == "claude-desktop" {
+			return
+		}
+	}
+	t.Fatal("Claude Desktop was not detected from its config directory")
+}
+
 func TestMergeServerIntoFile_PreservesOtherKeys(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "claude_desktop_config.json")
