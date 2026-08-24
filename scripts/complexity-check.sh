@@ -43,8 +43,8 @@ if [[ ! -f "$baseline_file" ]]; then
 fi
 
 # Locate gocyclo: prefer the user's Go bin ($GOPATH/bin) so a developer
-# who has run `go install github.com/fzipp/gocyclo/cmd/gocyclo@latest`
-# gets the same binary CI uses. Fall back to PATH lookup so the script
+# who has run `go install github.com/fzipp/gocyclo/cmd/gocyclo@v0.6.0`
+# gets the same pinned binary CI uses. Fall back to PATH lookup so the script
 # keeps working if the tool is on PATH another way.
 gocyclo_bin=""
 if [[ -n "${GOPATH:-}" && -x "${GOPATH}/bin/gocyclo" ]]; then
@@ -53,7 +53,7 @@ elif command -v gocyclo >/dev/null 2>&1; then
   gocyclo_bin="$(command -v gocyclo)"
 else
   echo "complexity-check: gocyclo not found on PATH or in \$GOPATH/bin" >&2
-  echo "complexity-check: install with: go install github.com/fzipp/gocyclo/cmd/gocyclo@latest" >&2
+  echo "complexity-check: install with: go install github.com/fzipp/gocyclo/cmd/gocyclo@v0.6.0" >&2
   exit 2
 fi
 

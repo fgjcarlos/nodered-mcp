@@ -1,5 +1,6 @@
-# Binaries
+# Binaries and release output
 /nodered-mcp
+/dist/
 *.exe
 *.exe~
 *.dll

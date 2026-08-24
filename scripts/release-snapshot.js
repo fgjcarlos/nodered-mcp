@@ -65,6 +65,38 @@ function parseChecksumLine(line) {
   return m ? { digest: m[1], filename: m[2] } : null;
 }
 
+// Validate the VCS metadata emitted by `go version -m`. Release output lives
+// under ignored dist/, so a clean checkout must keep Go's native stamp and
+// report the exact revision as unmodified.
+function validateBuildInfo(output) {
+  const errors = [];
+  if (!/(?:^|\s)vcs\.revision=[a-f0-9]{40}(?:\s|$)/m.test(output)) {
+    errors.push('missing full vcs.revision');
+  }
+  const modified = /(?:^|\s)vcs\.modified=(true|false)(?:\s|$)/m.exec(output);
+  if (!modified) {
+    errors.push('missing vcs.modified');
+  } else if (modified[1] !== 'false') {
+    errors.push('vcs.modified must be false');
+  }
+  if (/(?:^|\s)mod\s+\S+\s+\S*\+dirty(?:\s|$)/m.test(output)) {
+    errors.push('module version must not contain +dirty');
+  }
+  return errors;
+}
+
+function inspectBuildInfo(binaryPath) {
+  try {
+    const output = execFileSync('go', ['version', '-m', binaryPath], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return validateBuildInfo(output);
+  } catch (err) {
+    return [`cannot read Go build metadata: ${err.message}`];
+  }
+}
+
 async function readChecksumsTxt(distDir) {
   const cp = path.join(distDir, CHECKSUM_FILE);
   if (!fs.existsSync(cp)) return null;
@@ -79,7 +111,7 @@ function expectedBinaryName(key) {
   return binaryNameFor(platform);
 }
 
-async function inspectArchive({ assetName, archivePath }) {
+async function inspectArchive({ assetName, archivePath, requireVCS = false }) {
   const errors = [];
   const st = fs.statSync(archivePath);
   if (!st.isFile() || st.size === 0) {
@@ -124,6 +156,10 @@ async function inspectArchive({ assetName, archivePath }) {
         const bst = fs.statSync(binPath);
         if (!bst.isFile() || bst.size === 0) {
           errors.push(`${assetName}: ${binary} is empty or not a regular file (size=${bst.size})`);
+        } else if (requireVCS) {
+          for (const error of inspectBuildInfo(binPath)) {
+            errors.push(`${assetName}: ${error}`);
+          }
         }
       }
     } finally {
@@ -147,7 +183,7 @@ async function inspectArchive({ assetName, archivePath }) {
   return { ok: errors.length === 0, errors, entries };
 }
 
-async function inspectAll({ distDir }) {
+async function inspectAll({ distDir, requireVCS = false }) {
   const errors = [];
   const reports = [];
   if (!fs.existsSync(distDir)) {
@@ -161,7 +197,7 @@ async function inspectAll({ distDir }) {
       reports.push({ assetName: asset, ok: false, errors: [`file not found`] });
       continue;
     }
-    const report = await inspectArchive({ assetName: asset, archivePath });
+    const report = await inspectArchive({ assetName: asset, archivePath, requireVCS });
     reports.push({ assetName: asset, ...report });
     if (!report.ok) errors.push(...report.errors);
   }
@@ -246,7 +282,7 @@ async function main() {
       process.exit(1);
     }
   }
-  const result = await inspectAll({ distDir: args.distDir });
+  const result = await inspectAll({ distDir: args.distDir, requireVCS: true });
   for (const r of result.reports) {
     const status = r.ok ? 'ok' : 'fail';
     process.stdout.write(`release-snapshot: ${status} ${r.assetName}\n`);
@@ -274,6 +310,7 @@ module.exports = {
   inspectArchive,
   inspectAll,
   parseChecksumLine,
+  validateBuildInfo,
   expectedBinaryName,
   keyFromAsset,
   REQUIRED_ASSETS,

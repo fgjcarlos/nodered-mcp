@@ -6,7 +6,7 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   # Issue #258: real-artifact inspection. Run goreleaser in
@@ -28,18 +28,13 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: install syft for snapshot SBOMs
-        env:
-          SYFT_VERSION: v1.27.0
-        run: |
-          set -euo pipefail
-          curl -sSL https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh | sh -s -- -b /usr/local/bin ${SYFT_VERSION}
-          syft version
+      - name: install checksum-verified syft for snapshot SBOMs
+        run: bash scripts/install-syft.sh
 
       - name: build GoReleaser snapshot
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
         with:
-          version: "~> v2"
+          version: v2.18.0
           args: release --snapshot --clean --skip=publish
 
       - name: inspect release snapshot
@@ -80,6 +75,8 @@ jobs:
 
   goreleaser:
     needs: release-artifact-smoke
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -88,25 +85,14 @@ jobs:
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
-          go-version: stable
+          go-version-file: go.mod
 
-      # Install syft for the CycloneDX SBOM step the goreleaser
-      # config requires. Anchored to a SHA per the OpenSSF Scorecard
-      # supply-chain work; bump on every syft release.
-      # ponytail: download-and-install is 5 lines and skips a
-      # dedicated action; upgrade to a vendored binary in the repo
-      # if supply-chain provenance becomes a hard requirement.
-      - name: Install syft for SBOM
-        env:
-          SYFT_VERSION: v1.27.0
-        run: |
-          set -euo pipefail
-          curl -sSL https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh | sh -s -- -b /usr/local/bin ${SYFT_VERSION}
-          syft version
+      - name: install checksum-verified syft for SBOMs
+        run: bash scripts/install-syft.sh
 
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
         with:
-          version: "~> v2"
+          version: v2.18.0
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
