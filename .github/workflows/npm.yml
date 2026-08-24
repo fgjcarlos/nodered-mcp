@@ -12,12 +12,15 @@ name: npm
 # (goreleaser produced everything the wrapper expects) plus the
 # exact-version pin between the seven packages.
 #
-# The trigger below makes the order deterministic: this workflow
-# only sees a tag once release.yml has reported `completed` with
-# `success`. The two jobs run in parallel: publish-platforms uses
-# NPM_SECRET (a bypass-2FA automation token) to publish the six
-# scoped platform packages, and publish-main uses NPM_SECRET as well
-# to publish the meta package. The meta package sits in the npmjs
+# The trigger below makes the producer/consumer order deterministic:
+# this workflow only sees a tag once release.yml has reported
+# `completed` with `success`. Two jobs publish exact versions under
+# `next` in parallel: publish-platforms handles the six scoped native
+# packages and publish-main handles the meta package. A final job waits
+# for both publishers, verifies all seven packages, runs the registry
+# canary, then promotes the platform packages and the main package last.
+# Both publishers use NPM_SECRET (a bypass-2FA automation token). The
+# meta package sits in the npmjs
 # dead-lock documented at #278: a Trusted Publisher entry existed for
 # it, so npmjs was rejecting every publish attempt with E403 (token)
 # or E404 (OIDC, via npm/cli#8678). The token path is the only one
@@ -25,9 +28,10 @@ name: npm
 # requires deleting and re-creating the Trusted Publisher entry on
 # npmjs Settings, which is currently disabled until 0.7.0 publishes.
 #
-# Order semantics: a partial release (platforms only, or main only)
-# is recoverable on rerun. The CLI smoke test below runs only after
-# both jobs succeed.
+# Order semantics: a partial exact-version publish is recoverable on
+# rerun because registry checks make immutable publishes idempotent.
+# No `latest` tag moves until both jobs succeed and the complete
+# seven-package release passes verification.
 on:
   workflow_run:
     workflows: ["release"]
@@ -222,23 +226,6 @@ jobs:
             echo "verified integrity for ${scope}@${version}"
           done
 
-      - name: promote platform packages to latest
-        env:
-          NPM_SECRET: ${{ secrets.NPM_SECRET }}
-          VERSION: ${{ github.event.workflow_run.head_branch }}
-        run: |
-          echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
-          version="${VERSION#v}"
-          for pkg in \
-            nodered-mcp-win32-x64 \
-            nodered-mcp-win32-arm64 \
-            nodered-mcp-linux-x64 \
-            nodered-mcp-linux-arm64 \
-            nodered-mcp-darwin-x64 \
-            nodered-mcp-darwin-arm64; do
-            npm dist-tag add "@fgjcarlos/${pkg}@${version}" latest
-          done
-
   publish-main:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
@@ -322,6 +309,78 @@ jobs:
             exit 1
           fi
 
+      - name: deprecate broken 0.6.2 npm release
+        env:
+          NPM_SECRET: ${{ secrets.NPM_SECRET }}
+        run: |
+          if npm view "@fgjcarlos/nodered-mcp@0.6.2" version >/dev/null 2>&1; then
+            echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
+            npm deprecate "@fgjcarlos/nodered-mcp@0.6.2" \
+              "Broken Windows installer; upgrade to @fgjcarlos/nodered-mcp@latest"
+          fi
+
+  verify-and-promote:
+    needs: [publish-platforms, publish-main]
+    if: >-
+      always() &&
+      needs.publish-platforms.result == 'success' &&
+      needs.publish-main.result == 'success'
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.workflow_run.head_branch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+
+      # Keep the final verifier on the token path used by both publishers.
+      # Do not add registry-url while the npmjs Trusted Publisher dead-lock
+      # documented in #278 remains unresolved.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: 20
+
+      - name: verify package.json version matches the tag
+        env:
+          EXPECTED: ${{ env.TAG }}
+        run: |
+          actual=$(jq -r .version package.json)
+          expected="${EXPECTED#v}"
+          if [ "$actual" != "$expected" ]; then
+            echo "package.json version ($actual) does not match tag $EXPECTED (expected $expected)"
+            exit 1
+          fi
+
+      - name: verify all seven packages are live
+        env:
+          VERSION: ${{ env.TAG }}
+        run: |
+          set -euo pipefail
+          version="${VERSION#v}"
+          for scope in \
+            @fgjcarlos/nodered-mcp-win32-x64 \
+            @fgjcarlos/nodered-mcp-win32-arm64 \
+            @fgjcarlos/nodered-mcp-linux-x64 \
+            @fgjcarlos/nodered-mcp-linux-arm64 \
+            @fgjcarlos/nodered-mcp-darwin-x64 \
+            @fgjcarlos/nodered-mcp-darwin-arm64 \
+            @fgjcarlos/nodered-mcp; do
+            verified=""
+            for attempt in 1 2 3 4 5; do
+              integrity=$(npm view "${scope}@${version}" dist.integrity 2>/dev/null || true)
+              if [ -n "$integrity" ]; then
+                verified=yes
+                break
+              fi
+              sleep $((attempt * 3))
+            done
+            if [ -z "$verified" ]; then
+              echo "package lacks registry integrity: ${scope}@${version}"
+              exit 1
+            fi
+            echo "verified integrity for ${scope}@${version}"
+          done
+
       - name: install and launch canary from npm registry
         run: |
           set -euo pipefail
@@ -337,30 +396,54 @@ jobs:
           fi
           echo "canary install passed: $reported"
 
-      - name: promote main package to latest
-        # Same auth path as publish main package (see #278): the
-        # meta package has no Trusted Publisher until re-created on
-        # npmjs post-0.7.0, so we use NPM_SECRET here. After Trusted
-        # Publisher is restored, switch this back to OIDC by removing
-        # the env block and the ~/.npmrc write.
+      - name: promote platform packages to latest
         env:
           NPM_SECRET: ${{ secrets.NPM_SECRET }}
+          VERSION: ${{ env.TAG }}
         run: |
-          version=$(jq -r .version package.json)
+          set -euo pipefail
           echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
-          npm dist-tag add "@fgjcarlos/nodered-mcp@${version}" latest
-          latest=$(npm view @fgjcarlos/nodered-mcp dist-tags.latest)
-          if [ "$latest" != "$version" ]; then
-            echo "latest tag is $latest, expected $version"
-            exit 1
-          fi
+          version="${VERSION#v}"
+          for pkg in \
+            nodered-mcp-win32-x64 \
+            nodered-mcp-win32-arm64 \
+            nodered-mcp-linux-x64 \
+            nodered-mcp-linux-arm64 \
+            nodered-mcp-darwin-x64 \
+            nodered-mcp-darwin-arm64; do
+            npm dist-tag add "@fgjcarlos/${pkg}@${version}" latest
+          done
 
-      - name: deprecate broken 0.6.2 npm release
+      - name: promote main package to latest
+        # Main moves last so the public wrapper never points at an
+        # incompletely verified set of native package versions.
         env:
           NPM_SECRET: ${{ secrets.NPM_SECRET }}
+          VERSION: ${{ env.TAG }}
         run: |
-          if npm view "@fgjcarlos/nodered-mcp@0.6.2" version >/dev/null 2>&1; then
-            echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
-            npm deprecate "@fgjcarlos/nodered-mcp@0.6.2" \
-              "Broken Windows installer; upgrade to @fgjcarlos/nodered-mcp@latest"
-          fi
+          set -euo pipefail
+          echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
+          version="${VERSION#v}"
+          npm dist-tag add "@fgjcarlos/nodered-mcp@${version}" latest
+
+      - name: verify all latest tags resolve to the release
+        env:
+          VERSION: ${{ env.TAG }}
+        run: |
+          set -euo pipefail
+          version="${VERSION#v}"
+          for scope in \
+            @fgjcarlos/nodered-mcp-win32-x64 \
+            @fgjcarlos/nodered-mcp-win32-arm64 \
+            @fgjcarlos/nodered-mcp-linux-x64 \
+            @fgjcarlos/nodered-mcp-linux-arm64 \
+            @fgjcarlos/nodered-mcp-darwin-x64 \
+            @fgjcarlos/nodered-mcp-darwin-arm64 \
+            @fgjcarlos/nodered-mcp; do
+            latest=$(npm view "$scope" dist-tags.latest)
+            if [ "$latest" != "$version" ]; then
+              echo "${scope} latest tag is $latest, expected $version"
+              exit 1
+            fi
+            echo "verified latest for ${scope}@${version}"
+          done
