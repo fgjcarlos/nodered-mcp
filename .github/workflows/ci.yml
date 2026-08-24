@@ -18,13 +18,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      # `cache: false` because golang/govulncheck-action@v1 runs its own
-      # setup-go internally and the two caches collide on Go 1.25+ with
-      # `tar: Cannot open: File exists` errors (issue #66 follow-up).
+      # A single setup-go step owns the toolchain used by every check below,
+      # including govulncheck. This prevents the security gate from scanning
+      # a different standard library than the one used for release builds.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
-          cache: false
 
       - name: gofmt
         run: |
@@ -62,13 +61,12 @@ jobs:
           git diff --exit-code -- go.mod go.sum
 
       # govulncheck is a fast security gate against the reachable subset of
-      # the Go vulnerability database. The audit exposed 12 reachable stdlib
-      # advisories on Go 1.25.5 (issue #66); bumping the toolchain cleared
-      # them all. This step keeps that floor from regressing.
+      # the Go vulnerability database. Run a pinned scanner with setup-go's
+      # project toolchain so the standard library analyzed is the one shipped.
       - name: govulncheck
-        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f  # v1
-        with:
-          go-version-file: go.mod
+        env:
+          GOTOOLCHAIN: local
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
 
       # Coverage ratchet (issue #69): aggregate statement coverage across
       # every production package and fail if it drops below the pinned
