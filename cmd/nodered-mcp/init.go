@@ -25,7 +25,7 @@ func knownClients() []mcpClient {
 	home, _ := os.UserHomeDir()
 	cfg, _ := os.UserConfigDir()
 	return []mcpClient{
-		{"claude-desktop", "Claude Desktop", filepath.Join(cfg, "Claude", "claude_desktop_config.json"),
+		{"claude-desktop", "Claude Desktop", filepath.Join(cfg, "Claude"),
 			"paste into " + filepath.Join(cfg, "Claude", "claude_desktop_config.json")},
 		{"claude-code", "Claude Code", filepath.Join(home, ".claude.json"),
 			"run the command below"},
