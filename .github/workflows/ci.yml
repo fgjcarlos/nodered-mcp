@@ -82,7 +82,7 @@ jobs:
       # install it at the top of the step because the runner's
       # pre-installed go bin does not include it.
       - name: install gocyclo
-        run: go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
+        run: go install github.com/fzipp/gocyclo/cmd/gocyclo@v0.6.0
       - name: complexity check
         run: bash scripts/complexity-check.sh
 
@@ -196,21 +196,14 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: install syft for snapshot SBOMs
-        env:
-          SYFT_VERSION: v1.27.0
-        run: |
-          set -euo pipefail
-          curl -sSL https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh | sh -s -- -b /usr/local/bin ${SYFT_VERSION}
-          syft version
+      - name: install checksum-verified syft for snapshot SBOMs
+        run: bash scripts/install-syft.sh
 
-      # Use the same pinned action and v2 selector as release.yml.
-      # The previous direct v2.4.8 download could not parse the
-      # repository's current `archives.formats` configuration.
+      # Use the same pinned action and exact GoReleaser version as release.yml.
       - name: build GoReleaser snapshot
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
         with:
-          version: "~> v2"
+          version: v2.18.0
           args: release --snapshot --clean --skip=publish
 
       - name: inspect release snapshot

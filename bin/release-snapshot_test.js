@@ -13,6 +13,8 @@
 // Specifically covered:
 //   - parseChecksumLine accepts goreleaser's "<hex>  <name>" format
 //     and rejects malformed input
+//   - validateBuildInfo requires a full clean VCS revision and rejects
+//     dirty release module metadata
 //   - expectedBinaryName maps the right .exe suffix per platform
 //   - keyFromAsset round-trips with ASSET_MAP
 //   - inspectArchive flags a missing/empty binary with the correct
@@ -38,6 +40,7 @@ const {
   inspectArchive,
   inspectAll,
   parseChecksumLine,
+  validateBuildInfo,
   expectedBinaryName,
   keyFromAsset,
   REQUIRED_ASSETS,
@@ -129,6 +132,31 @@ function testParseChecksumLine() {
   assertEq(parseChecksumLine(''), null, 'parseChecksumLine empty');
   assertEq(parseChecksumLine('garbage'), null, 'parseChecksumLine garbage');
   assertEq(parseChecksumLine('short  name'), null, 'parseChecksumLine short hex');
+}
+
+function testValidateBuildInfo() {
+  const revision = 'a'.repeat(40);
+  const clean = [
+    '/tmp/nodered-mcp: go1.26.7',
+    'mod\tgithub.com/fgjcarlos/nodered-mcp\tv0.7.2',
+    `build\tvcs.revision=${revision}`,
+    'build\tvcs.modified=false',
+  ].join('\n');
+  assertEq(validateBuildInfo(clean).length, 0, 'validateBuildInfo clean release');
+
+  const dirty = clean
+    .replace('v0.7.2', 'v0.7.2+dirty')
+    .replace('vcs.modified=false', 'vcs.modified=true');
+  const dirtyErrors = validateBuildInfo(dirty).join(' ');
+  assertContains(dirtyErrors, 'vcs.modified must be false', 'validateBuildInfo dirty tree');
+  assertContains(dirtyErrors, '+dirty', 'validateBuildInfo dirty module');
+
+  const missingRevision = 'build\tvcs.modified=false\n';
+  assertContains(
+    validateBuildInfo(missingRevision).join(' '),
+    'missing full vcs.revision',
+    'validateBuildInfo missing revision',
+  );
 }
 
 function testExpectedBinaryName() {
@@ -417,6 +445,7 @@ async function runTest(name, fn) {
 
 async function main() {
   testParseChecksumLine();
+  testValidateBuildInfo();
   testExpectedBinaryName();
   testKeyFromAsset();
   testRequiredAssetsDerivedFromInstaller();
