@@ -1,6 +1,6 @@
 {
   "name": "@fgjcarlos/nodered-mcp",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "MCP server for Node-RED — installable via npm",
   "license": "MIT",
   "repository": "github:fgjcarlos/nodered-mcp",
@@ -29,11 +29,11 @@
   },
   "//": "optionalDependencies pinned to the same exact version as the main package. npm's own os/cpu filter on each platform package selects exactly one at install time, replacing the legacy postinstall downloader (#257).",
   "optionalDependencies": {
-    "@fgjcarlos/nodered-mcp-win32-x64": "0.7.1",
-    "@fgjcarlos/nodered-mcp-win32-arm64": "0.7.1",
-    "@fgjcarlos/nodered-mcp-linux-x64": "0.7.1",
-    "@fgjcarlos/nodered-mcp-linux-arm64": "0.7.1",
-    "@fgjcarlos/nodered-mcp-darwin-x64": "0.7.1",
-    "@fgjcarlos/nodered-mcp-darwin-arm64": "0.7.1"
+    "@fgjcarlos/nodered-mcp-win32-x64": "0.7.2",
+    "@fgjcarlos/nodered-mcp-win32-arm64": "0.7.2",
+    "@fgjcarlos/nodered-mcp-linux-x64": "0.7.2",
+    "@fgjcarlos/nodered-mcp-linux-arm64": "0.7.2",
+    "@fgjcarlos/nodered-mcp-darwin-x64": "0.7.2",
+    "@fgjcarlos/nodered-mcp-darwin-arm64": "0.7.2"
   }
 }
