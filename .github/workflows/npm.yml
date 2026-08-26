@@ -198,9 +198,15 @@ jobs:
           done
 
       - name: verify all platform packages are live
+        # npm registry reads are eventually consistent. A successful
+        # `npm publish` may be followed by `npm view` returning E404
+        # or an empty value for several seconds. The retry helper
+        # encapsulates the bounded backoff so the same pattern can be
+        # shared with publish-main and verify-and-promote. See #298.
         env:
           VERSION: ${{ github.event.workflow_run.head_branch }}
         run: |
+          set -euo pipefail
           version="${VERSION#v}"
           for pkg in \
             nodered-mcp-win32-x64 \
@@ -210,19 +216,7 @@ jobs:
             nodered-mcp-darwin-x64 \
             nodered-mcp-darwin-arm64; do
             scope="@fgjcarlos/${pkg}"
-            verified=""
-            for attempt in 1 2 3 4 5; do
-              integrity=$(npm view "${scope}@${version}" dist.integrity 2>/dev/null || true)
-              if [ -n "$integrity" ]; then
-                verified=yes
-                break
-              fi
-              sleep $((attempt * 3))
-            done
-            if [ -z "$verified" ]; then
-              echo "platform package lacks registry integrity: ${scope}@${version}"
-              exit 1
-            fi
+            integrity=$(scripts/wait-for-registry.sh -- npm view "${scope}@${version}" dist.integrity)
             echo "verified integrity for ${scope}@${version}"
           done
 
@@ -298,16 +292,18 @@ jobs:
         # no attestation, and that is fine for this transient release
         # (#278). Re-add attestation check once OIDC + --provenance
         # are restored post-0.7.0.
+        #
+        # Registry reads after a successful `npm publish` can be
+        # stale for several seconds. The retry helper bounds the
+        # backoff so this step no longer fails the workflow when the
+        # read happens before npmjs has propagated. See #298.
         env:
           NPM_SECRET: ${{ secrets.NPM_SECRET }}
         run: |
           version=$(jq -r .version package.json)
           echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
-          integrity=$(npm view "@fgjcarlos/nodered-mcp@${version}" dist.integrity)
-          if [ -z "$integrity" ]; then
-            echo "main package lacks registry integrity"
-            exit 1
-          fi
+          integrity=$(scripts/wait-for-registry.sh -- npm view "@fgjcarlos/nodered-mcp@${version}" dist.integrity)
+          echo "verified integrity for @fgjcarlos/nodered-mcp@${version}"
 
       - name: deprecate broken 0.6.2 npm release
         env:
@@ -352,6 +348,10 @@ jobs:
           fi
 
       - name: verify all seven packages are live
+        # Registry reads after the parallel publisher jobs are
+        # eventually consistent. The retry helper bounds the backoff
+        # so a successful publish that hasn't fully propagated yet
+        # does not fail the verifier. See #298.
         env:
           VERSION: ${{ env.TAG }}
         run: |
@@ -365,19 +365,7 @@ jobs:
             @fgjcarlos/nodered-mcp-darwin-x64 \
             @fgjcarlos/nodered-mcp-darwin-arm64 \
             @fgjcarlos/nodered-mcp; do
-            verified=""
-            for attempt in 1 2 3 4 5; do
-              integrity=$(npm view "${scope}@${version}" dist.integrity 2>/dev/null || true)
-              if [ -n "$integrity" ]; then
-                verified=yes
-                break
-              fi
-              sleep $((attempt * 3))
-            done
-            if [ -z "$verified" ]; then
-              echo "package lacks registry integrity: ${scope}@${version}"
-              exit 1
-            fi
+            integrity=$(scripts/wait-for-registry.sh -- npm view "${scope}@${version}" dist.integrity)
             echo "verified integrity for ${scope}@${version}"
           done
 
@@ -427,6 +415,12 @@ jobs:
           npm dist-tag add "@fgjcarlos/nodered-mcp@${version}" latest
 
       - name: verify all latest tags resolve to the release
+        # `npm dist-tag add` is also subject to read-after-write
+        # propagation delay. The v0.7.2 release (#298) failed here
+        # on the first run because the read returned the previous
+        # `latest` value before the promotion had propagated; the
+        # helper bounds the retry so the recovery rerun is the
+        # exception, not the rule.
         env:
           VERSION: ${{ env.TAG }}
         run: |
@@ -440,7 +434,7 @@ jobs:
             @fgjcarlos/nodered-mcp-darwin-x64 \
             @fgjcarlos/nodered-mcp-darwin-arm64 \
             @fgjcarlos/nodered-mcp; do
-            latest=$(npm view "$scope" dist-tags.latest)
+            latest=$(scripts/wait-for-registry.sh -- npm view "$scope" dist-tags.latest)
             if [ "$latest" != "$version" ]; then
               echo "${scope} latest tag is $latest, expected $version"
               exit 1
