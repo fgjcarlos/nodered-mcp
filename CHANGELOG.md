@@ -6,6 +6,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- fix(npm): retry registry reads after `npm publish` and `npm
+  dist-tag add` to tolerate npmjs propagation delay (#298). The
+  v0.7.2 release required two manual reruns because the verifier
+  steps treated E404 and stale `latest` reads as fatal failures.
+  The retry helper (`scripts/wait-for-registry.sh`) now backs
+  every post-write `npm view` in `.github/workflows/npm.yml`
+  (five attempts, linear backoff, ~45 s budget) and the workflow
+  contract test (`bin/npm_workflow_order_test.js`) enforces that
+  each verifier step routes through it.
+
 ## [0.7.0] - 2026-08-05
 
 ### Added
