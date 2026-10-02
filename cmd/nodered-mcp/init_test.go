@@ -83,6 +83,39 @@ func TestMergeServerIntoFile_PreservesOtherKeys(t *testing.T) {
 	}
 }
 
+func TestMergeServerIntoFile_RejectsNonObjectServerCollection(t *testing.T) {
+	for name, value := range map[string]string{
+		"array":   `[]`,
+		"string":  `"invalid"`,
+		"number":  `42`,
+		"boolean": `true`,
+		"null":    `null`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			original := `{"mcpServers":` + value + `,"other":true}`
+			if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			err := mergeServerIntoFile(path, "mcpServers", "/bin/x", map[string]string{})
+			if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "mcpServers") {
+				t.Fatalf("expected actionable refusal naming path and key, got %v", err)
+			}
+			data, readErr := os.ReadFile(path)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if string(data) != original {
+				t.Fatalf("config changed on refusal: %q", data)
+			}
+			if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
+				t.Fatalf("backup should not be created on refusal, stat error: %v", err)
+			}
+		})
+	}
+}
+
 func TestMergeServerIntoFile_RefusesInvalidJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "broken.json")
