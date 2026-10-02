@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -101,33 +102,38 @@ func runInit(args []string) error {
 }
 
 // executablePath returns the path to write into the generated MCP config.
-//
-// On Linux, os.Executable resolves symlinks and returns the real target path.
-// If a package manager installs the binary as a symlink
-// (e.g. /usr/local/bin/nodered-mcp → /usr/local/lib/.../nodered-mcp), the
-// config would embed the versioned target path. After an upgrade the target is
-// replaced while the symlink stays — the old config then points at a missing
-// file (silent "spawn ENOENT").
-//
-// We therefore check whether the executable path is itself a symlink and
-// prefer the stable symlink path. If os.Readlink fails (the path is not a
-// symlink, or is inaccessible), we fall back to the resolved path as-is.
+// Keep the invoked symlink path when available; os.Executable resolves it on
+// Linux and would otherwise store a version-specific package-manager target.
+// If the invocation name cannot be resolved, use the stable command name, which
+// requires nodered-mcp to be on the client's PATH.
 func executablePath() string {
 	bin, err := os.Executable()
 	if err != nil || bin == "" {
-		return "nodered-mcp" // last resort: must be on PATH
+		bin = "nodered-mcp"
 	}
-	// Prefer the symlink path so the config survives package-manager upgrades
-	// that replace the target binary without changing the symlink name.
-	if dir := filepath.Dir(bin); dir != "." {
-		if link, lerr := os.Readlink(bin); lerr == nil {
-			if !filepath.IsAbs(link) {
-				link = filepath.Join(dir, link)
-			}
-			return link
+	return executablePathFor(os.Args[0], bin)
+}
+
+func executablePathFor(invoked, fallback string) string {
+	if invoked == "" {
+		return fallback
+	}
+	path := invoked
+	if filepath.Base(path) == path {
+		var err error
+		path, err = exec.LookPath(path)
+		if err != nil {
+			return "nodered-mcp"
 		}
 	}
-	return bin
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return fallback
+	}
+	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return path
+	}
+	return fallback
 }
 
 // writeClientConfig merges the 'nodered' server into the client's config file
