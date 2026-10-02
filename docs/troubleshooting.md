@@ -3,7 +3,8 @@
 **Tools do not appear.** Confirm the binary is on the `PATH`, or use
 an absolute path in `command`. On Windows, escape the backslashes:
 `C:\\path\\nodered-mcp.exe`. Running `nodered-mcp init` resolves the
-path for you.
+path for you. If it must fall back to the command name, make sure
+`nodered-mcp` is available on the MCP client's `PATH`.
 
 **401 or 403 from Node-RED.** The token is missing or lacks the
 required scope. With `adminAuth` enabled, generate a token with

@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -168,41 +166,9 @@ func TestWritableTarget_UnknownReturnsFalse(t *testing.T) {
 
 // --- executablePath -----------------------------------------------------
 
-func TestExecutablePath_FallsBackWhenExecutableMissing(t *testing.T) {
-	// os.Executable always succeeds inside `go test`, but we can
-	// still pin the contract: when the symlink read fails, the
-	// function returns the resolved path verbatim. Indirectly
-	// exercised by the symlink path below.
-	bin := executablePath()
-	if bin == "" {
+func TestExecutablePath_ReturnsNonEmptyPath(t *testing.T) {
+	if bin := executablePath(); bin == "" {
 		t.Error("executablePath must never return an empty string")
-	}
-}
-
-func TestExecutablePath_PrefersSymlinkTarget(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("os.Readlink / symlink semantics differ on Windows")
-	}
-	// Build a real symlink in t.TempDir() that points at a dummy
-	// target, and verify executablePath would prefer the symlink
-	// path. We can't change what os.Executable returns, so instead
-	// we exercise the helper logic by symlinking and reading back
-	// what we get.
-	dir := t.TempDir()
-	target := filepath.Join(dir, "real-bin")
-	if err := os.WriteFile(target, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	link := filepath.Join(dir, "link-bin")
-	if err := os.Symlink(target, link); err != nil {
-		t.Fatal(err)
-	}
-	resolved, err := os.Readlink(link)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resolved != target {
-		t.Errorf("expected symlink to resolve to %q, got %q", target, resolved)
 	}
 }
 
