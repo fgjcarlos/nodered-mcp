@@ -229,16 +229,30 @@ func TestAsk_NonEmptyInputOverridesDefault(t *testing.T) {
 	}
 }
 
-// TestRunInit_NoClientsDetected covers the early-return at the top
-// of runInit when detectClients returns an empty slice (the
-// "nothing installed" path). Requires the detectClients seam.
 func TestRunInit_NoClientsDetected(t *testing.T) {
 	orig := detectClients
 	detectClients = func(_ bool) []mcpClient { return nil }
 	t.Cleanup(func() { detectClients = orig })
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	err = runInit(nil)
+	_ = w.Close()
+	os.Stderr = oldStderr
+	defer r.Close()
 
-	if err := runInit(nil); err != nil {
-		t.Errorf("runInit should return nil when no clients are detected; got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "no supported MCP client detected") {
+		t.Fatalf("runInit should return an actionable error when no clients are detected, got %v", err)
+	}
+	var output bytes.Buffer
+	if _, err := io.Copy(&output, r); err != nil {
+		t.Fatal(err)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("no-client path asked setup questions before returning: %q", output.String())
 	}
 }
 

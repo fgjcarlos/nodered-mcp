@@ -119,9 +119,9 @@ For the HTTP transport variant, use `type: "remote"` with `url` and
 Restart OpenCode after editing. All 44 tools should appear under
 the `nodered` server.
 
-## Pi (pi-mono)
+## Pi
 
-Pi ships MCP support through a third-party adapter
+Pi (pi-mono) ships MCP support through a third-party adapter
 (`pi-mcp-adapter` / `pi-mcp-extension`), not in the core. Install
 both, then write the config:
 
