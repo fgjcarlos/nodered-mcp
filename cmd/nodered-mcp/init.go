@@ -187,9 +187,16 @@ func mergeServerIntoFile(path, rootKey, bin string, env map[string]string) error
 	if err != nil {
 		return err
 	}
-	servers, _ := root[rootKey].(map[string]any)
-	if servers == nil {
+	var servers map[string]any
+	value, exists := root[rootKey]
+	if !exists {
 		servers = map[string]any{}
+	} else {
+		var ok bool
+		servers, ok = value.(map[string]any)
+		if !ok {
+			return fmt.Errorf("existing config at %s has non-object %q; refusing to overwrite it", path, rootKey)
+		}
 	}
 	servers["nodered"] = map[string]any{"command": bin, "env": envWithoutToken(env)}
 	root[rootKey] = servers
