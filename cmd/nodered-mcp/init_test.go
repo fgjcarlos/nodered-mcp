@@ -9,37 +9,25 @@ import (
 	"testing"
 )
 
-func TestDetectClients_ClaudeDesktopWithoutConfigFile(t *testing.T) {
-	dir := t.TempDir()
-	var claudeDir string
-	switch runtime.GOOS {
-	case "windows":
-		t.Setenv("APPDATA", dir)
-		claudeDir = filepath.Join(dir, "Claude")
-	case "darwin":
-		t.Setenv("HOME", dir)
-		claudeDir = filepath.Join(dir, "Library", "Application Support", "Claude")
-	case "plan9":
-		t.Setenv("home", dir)
-		claudeDir = filepath.Join(dir, "lib", "Claude")
-	default:
-		t.Setenv("HOME", dir)
-		t.Setenv("XDG_CONFIG_HOME", dir)
-		claudeDir = filepath.Join(dir, "Claude")
-	}
-	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+func TestDetectClients_CursorStaleDirectoryIsNotInstalled(t *testing.T) {
+	home := t.TempDir()
+	cursorDir := filepath.Join(home, ".cursor")
+	if err := os.MkdirAll(cursorDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(claudeDir, "claude_desktop_config.json")); !os.IsNotExist(err) {
-		t.Fatalf("config file must not exist, got err %v", err)
+	client := mcpClient{probes: []string{filepath.Join(cursorDir, "mcp.json")}}
+	if clientInstalled(client) {
+		t.Fatal("stale Cursor directory alone must not count as installed")
 	}
-
-	for _, client := range detectClientsImpl(false) {
-		if client.key == "claude-desktop" {
-			return
+	for _, cursor := range clientCatalog(runtime.GOOS, home, t.TempDir(), t.TempDir(), t.TempDir()) {
+		if cursor.key == "cursor" {
+			for _, probe := range cursor.probes {
+				if probe == cursorDir {
+					t.Fatal("catalog must not use the stale Cursor config directory as an install probe")
+				}
+			}
 		}
 	}
-	t.Fatal("Claude Desktop was not detected from its config directory")
 }
 
 func TestMergeServerIntoFile_PreservesOtherKeys(t *testing.T) {
@@ -203,6 +191,44 @@ func TestRenderConfig_ClaudeDesktop(t *testing.T) {
 	}
 	if _, present := srv.Env["NODERED_BACKUP_DIR"]; present {
 		t.Error("default backup dir should be omitted from env")
+	}
+}
+
+func TestRenderConfig_OpenCodeAndPiFormats(t *testing.T) {
+	for _, tc := range []struct {
+		key, root string
+	}{
+		{"opencode", "mcp"},
+		{"pi", "mcpServers"},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			out := renderConfig(tc.key, "/bin/nodered-mcp", "http://localhost:1880", "", "backups")
+			var doc map[string]any
+			if err := json.Unmarshal([]byte(out), &doc); err != nil {
+				t.Fatalf("invalid JSON: %v", err)
+			}
+			servers, ok := doc[tc.root].(map[string]any)
+			if !ok {
+				t.Fatalf("missing %q root in %s", tc.root, out)
+			}
+			server, ok := servers["nodered"].(map[string]any)
+			if !ok {
+				t.Fatalf("missing nodered config in %s", out)
+			}
+			if tc.key == "opencode" {
+				if server["type"] != "local" || server["enabled"] != true {
+					t.Fatalf("incorrect OpenCode config: %s", out)
+				}
+				if command, ok := server["command"].([]any); !ok || len(command) != 1 || command[0] != "/bin/nodered-mcp" {
+					t.Fatalf("incorrect OpenCode command: %s", out)
+				}
+				if _, ok := server["environment"].(map[string]any); !ok {
+					t.Fatalf("OpenCode environment missing: %s", out)
+				}
+			} else if server["lifecycle"] != "keep-alive" {
+				t.Fatalf("Pi lifecycle setting missing: %s", out)
+			}
+		})
 	}
 }
 

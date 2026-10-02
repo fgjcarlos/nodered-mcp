@@ -8,58 +8,118 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
-// mcpClient is one MCP client we can generate config for.
 type mcpClient struct {
-	key  string
-	name string
-	// probe is the path whose existence means the client is installed.
-	probe string
-	// note tells the user where the snippet goes.
-	note string
+	key, name string
+	commands  []string // CLI executables that establish installation evidence.
+	probes    []string // Explicit config files or platform application markers.
+	note      string
+	format    string // Non-standard renderer; empty uses the rootKey JSON shape.
+	writePath string // Empty when safe automatic merging is unsupported.
+	rootKey   string
+	example   string
 }
 
-// knownClients lists the clients init can target, with per-OS config paths.
 func knownClients() []mcpClient {
 	home, _ := os.UserHomeDir()
 	cfg, _ := os.UserConfigDir()
+	return clientCatalog(runtime.GOOS, home, cfg, os.Getenv("APPDATA"), os.Getenv("LOCALAPPDATA"))
+}
+
+func clientCatalog(goos, home, cfg, appData, localAppData string) []mcpClient {
+	claudeDesktopConfig := filepath.Join(cfg, "Claude", "claude_desktop_config.json")
+	if goos == "windows" && appData != "" {
+		claudeDesktopConfig = filepath.Join(appData, "Claude", "claude_desktop_config.json")
+	}
+	claudeDesktop := []string{claudeDesktopConfig}
+	cursor := []string{filepath.Join(home, ".cursor", "mcp.json")}
+	var vscode []string
+	if goos == "windows" {
+		claudeDesktop = append(claudeDesktop, filepath.Join(localAppData, "Programs", "Claude", "Claude.exe"))
+		cursor = append(cursor, filepath.Join(localAppData, "Programs", "Cursor", "Cursor.exe"))
+		vscode = []string{
+			filepath.Join(appData, "Code", "User", "mcp.json"),
+			filepath.Join(localAppData, "Programs", "Microsoft VS Code", "Code.exe"),
+		}
+	} else if goos == "darwin" {
+		claudeDesktop = append(claudeDesktop, "/Applications/Claude.app", filepath.Join(home, "Applications", "Claude.app"))
+		cursor = append(cursor, "/Applications/Cursor.app", filepath.Join(home, "Applications", "Cursor.app"))
+		vscode = append(vscode, "/Applications/Visual Studio Code.app", filepath.Join(home, "Applications", "Visual Studio Code.app"))
+	} else {
+		vscode = append(vscode,
+			filepath.Join(cfg, "Code", "User", "mcp.json"),
+			"/usr/share/applications/code.desktop",
+			filepath.Join(home, ".local", "share", "applications", "code.desktop"),
+		)
+		claudeDesktop = append(claudeDesktop, "/usr/share/applications/claude-desktop.desktop", filepath.Join(home, ".local", "share", "applications", "claude-desktop.desktop"))
+		cursor = append(cursor, "/usr/share/applications/cursor.desktop", filepath.Join(home, ".local", "share", "applications", "cursor.desktop"))
+	}
+
 	return []mcpClient{
-		{"claude-desktop", "Claude Desktop", filepath.Join(cfg, "Claude"),
-			"paste into " + filepath.Join(cfg, "Claude", "claude_desktop_config.json")},
-		{"claude-code", "Claude Code", filepath.Join(home, ".claude.json"),
-			"run the command below"},
-		{"cursor", "Cursor", filepath.Join(home, ".cursor"),
-			"paste into .cursor/mcp.json (workspace) or ~/.cursor/mcp.json (global)"},
-		{"vscode", "VS Code", filepath.Join(cfg, "Code", "User"),
-			"paste into .vscode/mcp.json"},
-		{"gemini", "Gemini CLI", filepath.Join(home, ".gemini"),
-			"paste into " + filepath.Join(home, ".gemini", "settings.json")},
+		{
+			key: "claude-desktop", name: "Claude Desktop", probes: claudeDesktop,
+			note:      "paste into " + claudeDesktopConfig,
+			writePath: claudeDesktopConfig, rootKey: "mcpServers",
+			example: "examples/claude_desktop_config.json",
+		},
+		{key: "claude-code", name: "Claude Code", commands: []string{"claude"}, note: "run the command below", format: "claude-code"},
+		{
+			key: "cursor", name: "Cursor", commands: []string{"cursor"}, probes: cursor,
+			note:      "paste into .cursor/mcp.json (workspace) or ~/.cursor/mcp.json (global)",
+			writePath: filepath.Join(home, ".cursor", "mcp.json"),
+			rootKey:   "mcpServers", example: "examples/cursor_mcp.json",
+		},
+		{
+			key: "vscode", name: "VS Code", commands: []string{"code"}, probes: vscode,
+			note: "paste into .vscode/mcp.json", rootKey: "servers",
+			example: "examples/vscode_mcp.json",
+		},
+		{
+			key: "gemini", name: "Gemini CLI", commands: []string{"gemini"},
+			note:      "paste into " + filepath.Join(home, ".gemini", "settings.json"),
+			writePath: filepath.Join(home, ".gemini", "settings.json"),
+			rootKey:   "mcpServers", example: "examples/gemini_settings.json",
+		},
+		{
+			key: "opencode", name: "OpenCode", commands: []string{"opencode"},
+			note:   "paste into " + filepath.Join(cfg, "opencode", "opencode.json"),
+			format: "opencode", rootKey: "mcp", example: "examples/opencode_config.json",
+		},
+		{
+			key: "pi", name: "Pi", commands: []string{"pi"},
+			note:   "paste into " + filepath.Join(home, ".pi", "agent", "mcp.json"),
+			format: "pi", rootKey: "mcpServers", example: "examples/pi_mcp_config.json",
+		},
 	}
 }
 
-// detectClients returns the list of known clients whose `probe` path
-// exists in the user's filesystem, or every known client if all is
-// true (the --all flag).
-//
-// detectClients is a package-level var so tests can swap the
-// implementation. The production function is detectClientsImpl; the
-// test file already references the var name.
 var detectClients = detectClientsImpl
 
 func detectClientsImpl(all bool) []mcpClient {
 	var out []mcpClient
 	for _, c := range knownClients() {
-		if all {
-			out = append(out, c)
-			continue
-		}
-		if _, err := os.Stat(c.probe); err == nil {
+		if all || clientInstalled(c) {
 			out = append(out, c)
 		}
 	}
 	return out
+}
+
+func clientInstalled(c mcpClient) bool {
+	for _, command := range c.commands {
+		if _, err := exec.LookPath(command); err == nil {
+			return true
+		}
+	}
+	for _, path := range c.probes {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func runInit(args []string) error {
@@ -73,18 +133,16 @@ func runInit(args []string) error {
 		return err
 	}
 
-	bin := executablePath()
+	clients := detectClients(*all)
+	if len(clients) == 0 {
+		return fmt.Errorf("no supported MCP client detected; install one or rerun with --all to generate a config manually")
+	}
 
+	bin := executablePath()
 	in := bufio.NewScanner(os.Stdin)
 	url := ask(in, "Node-RED URL", "http://localhost:1880")
 	token := ask(in, "Node-RED token (optional, Enter to skip)", "")
 	backupDir := ask(in, "Backup directory", "backups")
-
-	clients := detectClients(*all)
-	if len(clients) == 0 {
-		fmt.Fprintln(os.Stderr, "No known MCP client detected. Re-run with --all to pick one manually.")
-		return nil
-	}
 
 	target := chooseClient(in, clients)
 	env := buildEnv(url, token, backupDir)
@@ -168,19 +226,12 @@ func printTokenOmittedNote() {
 	fmt.Fprintln(os.Stderr, "# Set it in the environment, OS keychain, or secret manager before starting the client.")
 }
 
-// writableTarget returns the config file and root key for clients that can be
-// written safely. ok is false for VS Code (workspace-scoped) and Claude Code
-// (managed via `claude mcp add`).
+// writableTarget uses the catalog's safe global write target, if one exists.
 func writableTarget(key string) (path, rootKey string, ok bool) {
-	home, _ := os.UserHomeDir()
-	cfg, _ := os.UserConfigDir()
-	switch key {
-	case "claude-desktop":
-		return filepath.Join(cfg, "Claude", "claude_desktop_config.json"), "mcpServers", true
-	case "cursor":
-		return filepath.Join(home, ".cursor", "mcp.json"), "mcpServers", true
-	case "gemini":
-		return filepath.Join(home, ".gemini", "settings.json"), "mcpServers", true
+	for _, client := range knownClients() {
+		if client.key == key && client.writePath != "" {
+			return client.writePath, client.rootKey, true
+		}
 	}
 	return "", "", false
 }
@@ -393,21 +444,14 @@ func marshalIndentedJSON(value any) ([]byte, error) {
 	return []byte(out.String()), nil
 }
 
-// renderConfig returns the ready-to-paste config for the given client.
 func renderConfig(key, bin, url, token, backupDir string) string {
 	env := envWithoutToken(buildEnv(url, token, backupDir))
+	client := clientByKey(key)
 
-	if key == "claude-code" {
+	if client.format == "claude-code" {
 		var b strings.Builder
-		// -s user is not optional here. `claude mcp add` defaults to
-		// --scope local, which binds the server to the directory the
-		// command happened to run in. Someone who just installed the
-		// binary globally and pasted this from their home directory
-		// would get a server that exists in that one folder and
-		// nowhere else — with no error to explain it. The binary this
-		// command points at is global, so the registration is too.
+		// User scope avoids binding the server to the working directory.
 		b.WriteString("claude mcp add -s user nodered")
-		// Fixed order keeps the command stable and testable.
 		for _, k := range []string{"NODERED_URL", "NODERED_TOKEN", "NODERED_BACKUP_DIR"} {
 			if v, ok := env[k]; ok {
 				fmt.Fprintf(&b, " -e %s", shellQuote(k+"="+v))
@@ -417,15 +461,35 @@ func renderConfig(key, bin, url, token, backupDir string) string {
 		return b.String()
 	}
 
-	rootKey := "mcpServers"
-	if key == "vscode" {
-		rootKey = "servers"
-	}
-	doc := map[string]any{
-		rootKey: map[string]any{
-			"nodered": map[string]any{"command": bin, "env": env},
-		},
+	server := map[string]any{"command": bin, "env": env}
+	var doc map[string]any
+	switch client.format {
+	case "opencode":
+		doc = map[string]any{
+			"$schema": "https://opencode.ai/config.json",
+			"mcp": map[string]any{"nodered": map[string]any{
+				"type": "local", "command": []string{bin}, "enabled": true, "environment": env,
+			}},
+		}
+	default:
+		if client.format == "pi" {
+			server["lifecycle"] = "keep-alive"
+		}
+		rootKey := client.rootKey
+		if rootKey == "" {
+			rootKey = "mcpServers"
+		}
+		doc = map[string]any{rootKey: map[string]any{"nodered": server}}
 	}
 	out, _ := marshalIndentedJSON(doc)
 	return strings.TrimSuffix(string(out), "\n")
+}
+
+func clientByKey(key string) mcpClient {
+	for _, client := range knownClients() {
+		if client.key == key {
+			return client
+		}
+	}
+	return mcpClient{}
 }

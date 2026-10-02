@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -163,42 +165,161 @@ func TestAsk_DefaultsOnReadError(t *testing.T) {
 	}
 }
 
-func TestDetectClients_AllReturnsEverything(t *testing.T) {
+func TestDetectClients_AllReturnsCatalog(t *testing.T) {
 	all := detectClients(true)
-	if len(all) == 0 {
-		t.Fatal("detectClients(--all) returned no clients")
-	}
-	// knownClients returns 5 entries today; pin the shape loosely so
-	// the test fails visibly when a client is added (intentional).
-	if len(all) < 4 {
-		t.Errorf("detectClients(--all) too small: %d", len(all))
+	if len(all) != 7 {
+		t.Fatalf("detectClients(--all) returned %d clients, want 7", len(all))
 	}
 }
 
-func TestDetectClients_DetectedFiltersMissing(t *testing.T) {
-	// Without a probe file, detectClients(false) returns no entries.
-	// We assert at least one client with a probe path that does not
-	// exist on the test runner is filtered out.
-	got := detectClients(false)
-	for _, c := range knownClients() {
-		if !fileExists(c.probe) && containsClient(got, c) {
-			t.Errorf("client %q (probe %q) should not be detected", c.key, c.probe)
+func TestClientInstalledEvidence(t *testing.T) {
+	cases := []struct {
+		name    string
+		prepare func(t *testing.T) mcpClient
+		want    bool
+	}{
+		{
+			name: "no executable or path evidence",
+			prepare: func(t *testing.T) mcpClient {
+				t.Setenv("PATH", t.TempDir())
+				return mcpClient{commands: []string{"missing-test-client"}, probes: []string{filepath.Join(t.TempDir(), "missing")}}
+			},
+			want: false,
+		},
+		{
+			name: "stale Cursor directory without config or app",
+			prepare: func(t *testing.T) mcpClient {
+				home := t.TempDir()
+				dir := filepath.Join(home, ".cursor")
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				return mcpClient{probes: []string{filepath.Join(dir, "mcp.json")}}
+			},
+			want: false,
+		},
+		{
+			name: "CLI executable before first-run config",
+			prepare: func(t *testing.T) mcpClient {
+				if runtime.GOOS == "windows" {
+					t.Skip("executable mode bits differ on Windows")
+				}
+				dir := t.TempDir()
+				if err := os.WriteFile(filepath.Join(dir, "gemini"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("PATH", dir)
+				return mcpClient{commands: []string{"gemini"}}
+			},
+			want: true,
+		},
+		{
+			name: "stale CLI config without executable",
+			prepare: func(t *testing.T) mcpClient {
+				home := t.TempDir()
+				config := filepath.Join(home, ".gemini", "settings.json")
+				if err := os.MkdirAll(filepath.Dir(config), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(config, []byte(`{}`), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("PATH", t.TempDir())
+				for _, client := range clientCatalog(runtime.GOOS, home, filepath.Join(home, "config"), "", "") {
+					if client.key == "gemini" {
+						return client
+					}
+				}
+				t.Fatal("Gemini client missing from catalog")
+				return mcpClient{}
+			},
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := clientInstalled(tc.prepare(t)); got != tc.want {
+				t.Fatalf("clientInstalled() = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestClientCatalogPlatformProbes(t *testing.T) {
+	home, cfg, appData, local := "/users/test", "/config", "/roaming", "/local"
+	cases := []struct {
+		goos, key string
+		want      []string
+	}{
+		{"windows", "claude-desktop", []string{filepath.Join(appData, "Claude", "claude_desktop_config.json"), filepath.Join(local, "Programs", "Claude", "Claude.exe")}},
+		{"windows", "cursor", []string{filepath.Join(home, ".cursor", "mcp.json"), filepath.Join(local, "Programs", "Cursor", "Cursor.exe")}},
+		{"darwin", "cursor", []string{filepath.Join(home, ".cursor", "mcp.json"), "/Applications/Cursor.app", filepath.Join(home, "Applications", "Cursor.app")}},
+		{"linux", "vscode", []string{filepath.Join(cfg, "Code", "User", "mcp.json"), "/usr/share/applications/code.desktop", filepath.Join(home, ".local", "share", "applications", "code.desktop")}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.goos+"/"+tc.key, func(t *testing.T) {
+			var got []string
+			for _, client := range clientCatalog(tc.goos, home, cfg, appData, local) {
+				if client.key == tc.key {
+					got = client.probes
+					break
+				}
+			}
+			for _, want := range tc.want {
+				found := false
+				for _, path := range got {
+					if path == want {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("catalog probes %q missing %q", got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestClientCatalogMatchesDocumentationAndExamples(t *testing.T) {
+	clients := clientCatalog(runtime.GOOS, "/home/test", "/config", "/appdata", "/localappdata")
+	repoRoot := filepath.Join("..", "..")
+	doc, err := os.ReadFile(filepath.Join(repoRoot, "docs", "clients.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedSections := map[string]bool{"HTTP variant": true}
+	expectedExamples := make(map[string]bool)
+	for _, client := range clients {
+		expectedSections[client.name] = true
+		if !strings.Contains(string(doc), "## "+client.name+"\n") {
+			t.Errorf("client %q is missing a docs/clients.md section", client.name)
+		}
+		if client.example != "" {
+			expectedExamples[filepath.Base(client.example)] = true
+			if _, err := os.Stat(filepath.Join(repoRoot, client.example)); err != nil {
+				t.Errorf("client %q example %q is missing: %v", client.key, client.example, err)
+			}
+			if !strings.Contains(string(doc), "../"+client.example) {
+				t.Errorf("client %q example %q is not linked from docs/clients.md", client.key, client.example)
+			}
 		}
 	}
-}
-
-// helpers (small + local; do not deserve a shared file for two callers)
-
-func fileExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
-}
-
-func containsClient(haystack []mcpClient, needle mcpClient) bool {
-	for _, c := range haystack {
-		if c.key == needle.key {
-			return true
+	for _, line := range strings.Split(string(doc), "\n") {
+		if strings.HasPrefix(line, "## ") {
+			section := strings.TrimPrefix(line, "## ")
+			if !expectedSections[section] {
+				t.Errorf("docs/clients.md section %q is not in the client catalog", section)
+			}
 		}
 	}
-	return false
+	files, err := os.ReadDir(filepath.Join(repoRoot, "examples"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		if filepath.Ext(file.Name()) == ".json" && !expectedExamples[file.Name()] {
+			t.Errorf("example %q is not assigned to a client in the catalog", file.Name())
+		}
+	}
 }
