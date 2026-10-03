@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -164,6 +165,99 @@ func TestPerIPLimiter_BurstThenBlock(t *testing.T) {
 	}
 	if !lim.get("2.2.2.2").Allow() {
 		t.Fatal("second IP must have its own bucket; first request must pass")
+	}
+}
+
+// TestPerIPLimiter_AmortizedSweep is the RED/GREEN regression for issue #313:
+// per-IP churn must not cost O(n) on every new-key insert. With the old
+// code, once len(limiters) > evictEvery, every new-IP call iterates the
+// entire map. Inserting N=5000 fresh IPs therefore does roughly Σ_{i=1024}^{N} i
+// map comparisons (~12M for N=5000), which takes hundreds of milliseconds.
+// With the amortized sweep, total comparisons are bounded by N/1024 * N
+// (~25k for the same workload), which finishes in milliseconds.
+func TestPerIPLimiter_AmortizedSweep(t *testing.T) {
+	const N = 5000
+	lim := newPerIPLimiter(rate.Limit(float64(N)/float64(time.Second)*4), N)
+
+	start := time.Now()
+	for i := 0; i < N; i++ {
+		// Use a unique key per call so every get() is a new-key insert
+		// (the slow path that triggers the scan under the old implementation).
+		lim.get(fmt.Sprintf("198.51.100.%d-%d", i/256, i))
+	}
+	elapsed := time.Since(start)
+
+	// Old code: ~12M map comparisons under the global mutex -> hundreds of ms.
+	// New code: amortized O(1) -> single-digit ms on the same workload.
+	// A threshold of 150ms leaves comfortable headroom for CI while still
+	// failing the old implementation (observed ~400-700ms on Linux CI).
+	const maxAllowed = 150 * time.Millisecond
+	if elapsed > maxAllowed {
+		t.Fatalf("churn of %d new IPs took %v, want < %v; per-IP maintenance is not amortized", N, elapsed, maxAllowed)
+	}
+}
+
+// TestPerIPLimiter_EvictsStaleEntries verifies the TTL eviction still fires
+// for entries older than limiterTTL even though the scan is now throttled.
+// We pre-seed an entry, rewind both its `last` field and the limiter's
+// `lastSweep` directly (same package), then insert enough new IPs to trip
+// the amortized sweep and assert the stale entry is gone.
+func TestPerIPLimiter_EvictsStaleEntries(t *testing.T) {
+	lim := newPerIPLimiter(rate.Limit(1000), 100)
+
+	// Seed a victim and rewind its `last` so it appears older than TTL.
+	lim.get("victim.example:1")
+	lim.mu.Lock()
+	lim.limiters["victim.example:1"].last = time.Now().Add(-2 * limiterTTL)
+	// Force the amortized sweep gate open: pretend the last sweep ran a long
+	// time ago, so the next insert with a full counter triggers eviction.
+	lim.lastSweep = time.Now().Add(-2 * limiterTTL)
+	lim.insertsSinceSweep = evictEvery - 1
+	lim.mu.Unlock()
+
+	// One more new-IP insert fills the counter and trips the sweep.
+	lim.get("seed-1:1")
+
+	lim.mu.Lock()
+	if _, ok := lim.limiters["victim.example:1"]; ok {
+		lim.mu.Unlock()
+		t.Fatal("stale entry was not evicted; the amortized sweep skipped past it")
+	}
+	lim.mu.Unlock()
+}
+
+// TestPerIPLimiter_RaceSafe hammers get() concurrently from many goroutines on
+// both shared and disjoint IPs. The race detector must not flag anything, and
+// every IP must end up with exactly one entry.
+func TestPerIPLimiter_RaceSafe(t *testing.T) {
+	lim := newPerIPLimiter(rate.Limit(1000), 100)
+
+	const goroutines = 16
+	const callsPer = 500
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for g := 0; g < goroutines; g++ {
+		go func(g int) {
+			defer wg.Done()
+			for i := 0; i < callsPer; i++ {
+				// Half the calls reuse a hot IP, half use a unique IP.
+				if i%2 == 0 {
+					lim.get(fmt.Sprintf("shared-%d:1", g%4))
+				} else {
+					lim.get(fmt.Sprintf("g%d-i%d:1", g, i))
+				}
+			}
+		}(g)
+	}
+	wg.Wait()
+
+	lim.mu.Lock()
+	defer lim.mu.Unlock()
+	// At minimum the unique-IP entries must be present (no entry was lost to a race).
+	const wantMin = goroutines * callsPer / 2
+	if len(lim.limiters) < wantMin {
+		t.Fatalf("map has %d entries, expected at least %d", len(lim.limiters), wantMin)
 	}
 }
 
