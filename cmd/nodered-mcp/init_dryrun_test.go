@@ -177,11 +177,13 @@ func TestDryRun_TouchesNoFilesystem(t *testing.T) {
 	if _, err := os.Stat(filepath.Dir(ghost)); !os.IsNotExist(err) {
 		t.Errorf("dry-run should not have created parent directories; stat err: %v", err)
 	}
-	// 5. Sanity: the preview is non-empty and is the merge the write
-	//    path would produce. We re-marshal what writeJSONObject would
-	//    emit by re-running mergeServer with the *fresh* file bytes
-	//    (which is what the real --write code does) and checking the
-	//    preview matches the same shape.
+	// 5. Sanity: the preview is the merge the write path produces. We
+	//    re-marshal what writeJSONObject would emit by re-running
+	//    mergeServer against the same bytes the real --write code uses.
+	//    This fixture holds no secret-bearing key, so redaction is a
+	//    no-op and the two must match byte-for-byte. The case where they
+	//    deliberately differ (an existing secret) is covered by
+	//    TestDryRun_PreviewIsNotByteIdenticalToWrite.
 	mergedWriteShape, err := mergeServer(beforeBytes, "", "mcpServers", "/bin/nodered-mcp", map[string]string{"NODERED_URL": "http://localhost:1880"})
 	if err != nil {
 		t.Fatal(err)
@@ -455,4 +457,62 @@ func equalStringSlices(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// TestDryRun_PreviewIsNotByteIdenticalToWrite pins the one deliberate
+// divergence between the preview and the committed file: when the existing
+// config already holds a value under a secret-bearing key, the preview
+// shows REDACTED where --write keeps the real value. The merge itself is
+// identical — same keys, same nodered entry, same unrelated servers.
+//
+// This is the safe direction to differ. Previewing a live token into a
+// terminal or a CI log would defeat the point of redacting it.
+func TestDryRun_PreviewIsNotByteIdenticalToWrite(t *testing.T) {
+	existing := `{"mcpServers":{"other":{"command":"other-mcp","env":{"TOKEN":"shh"},"args":["--token=hunter2"]}}}`
+
+	merged, err := mergeServer([]byte(existing), "", "mcpServers", "/bin/nodered-mcp",
+		map[string]string{"NODERED_URL": "http://localhost:1880"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeBytes, err := marshalIndentedJSON(merged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previewBytes, err := marshalIndentedJSON(redactSecrets(merged))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if bytes.Equal(previewBytes, writeBytes) {
+		t.Fatal("expected the preview to differ from the write when a secret exists")
+	}
+	// The write keeps the real secret; that is the file's business.
+	if !bytes.Contains(writeBytes, []byte("shh")) {
+		t.Error("the write shape should keep the existing value verbatim")
+	}
+	// The preview must not leak the value stored under a secret key...
+	if bytes.Contains(previewBytes, []byte("shh")) {
+		t.Errorf("preview leaked the env secret: %s", previewBytes)
+	}
+	if !bytes.Contains(previewBytes, []byte(`"TOKEN": "REDACTED"`)) {
+		t.Errorf("expected TOKEN to be masked, got: %s", previewBytes)
+	}
+	// ...but a secret inside an args array is a known gap of key-name
+	// redaction, not a silent behaviour change. Assert it stays visible so
+	// the limitation cannot regress unnoticed.
+	if !bytes.Contains(previewBytes, []byte("hunter2")) {
+		t.Errorf("args-array values are outside key-name redaction; expected the "+
+			"documented gap to remain visible here, got: %s", previewBytes)
+	}
+	// Structure is identical either way: the nodered entry and the
+	// unrelated server survive the merge.
+	for _, want := range []string{`"nodered"`, `"other"`, `"NODERED_URL"`} {
+		if !bytes.Contains(previewBytes, []byte(want)) {
+			t.Errorf("preview lost %s", want)
+		}
+		if !bytes.Contains(writeBytes, []byte(want)) {
+			t.Errorf("write shape lost %s", want)
+		}
+	}
 }

@@ -171,10 +171,16 @@ func runInit(args []string) error {
 	return nil
 }
 
-// runInitDryRun previews the exact bytes writeJSONObject would produce for
-// target, without ever calling writeJSONObject. For clients with no safe
-// write target, it prints the manual snippet (as --write does) and returns
-// the same style of error.
+// runInitDryRun previews the merge --write would commit for target,
+// without ever calling writeJSONObject. For clients with no safe write
+// target, it prints the manual snippet (as --write does) and returns the
+// same style of error.
+//
+// The preview is the merged config with secret-bearing values masked, so
+// it is NOT byte-identical to the file --write produces when the existing
+// config already holds a value under a secret-bearing key: the preview
+// shows REDACTED where the file keeps the real value. Structure, key set
+// and the nodered entry are identical.
 func runInitDryRun(target mcpClient, bin string, env map[string]string) error {
 	path, rootKey, ok := writableTarget(target.key)
 	if !ok {
