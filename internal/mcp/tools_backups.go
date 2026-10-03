@@ -111,17 +111,36 @@ func (s *Server) handleRestoreBackup(ctx context.Context, req mcp.CallToolReques
 	}
 	slog.Debug("tool: restore_backup", "backup", name)
 
+	// Issue #310: the restore's HTTP work and the helper-pointer
+	// invalidation must run under the same lock acquisition that
+	// handleSetContext holds across its whole critical section.
+	// A restore that took the lock only around the pointer clear
+	// would let POST /flows race with an in-flight set_context:
+	// the deploy would land while a caller was still using the
+	// pre-restore helper.
+	//
+	// The lock is taken BEFORE the HTTP work and held through the
+	// pointer clear so both routes (this one and
+	// handleSetContext) obey the same ctxHelperMu -> writeMu
+	// ordering inside the nodered.Client. nodered.Client.writeMu
+	// does not need to guard the inject — ctxHelperMu held across
+	// the inject dispatch in handleSetContext is sufficient.
+	//
+	// On a failed restore we do NOT clear the helper: the runtime
+	// is unchanged, so the existing helper still points at valid
+	// runtime state. Clearing it on failure would force a
+	// re-provision (4 NR round-trips) for no benefit.
 	content, err := s.nrClient.ReadBackup(name)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("reading backup: %v", err)), nil
 	}
+	s.ctxHelperMu.Lock()
+	defer s.ctxHelperMu.Unlock()
 	if err := s.nrClient.RestoreFlows(ctx, content); err != nil {
 		slog.Error("restore_backup failed", "error", err, "backup", name)
 		return mcp.NewToolResultError(fmt.Sprintf("restoring: %v", err)), nil
 	}
-	if s.ctxHelper != nil {
-		s.ctxHelper = nil
-	}
+	s.ctxHelper = nil
 	return mcp.NewToolResultText(fmt.Sprintf("Restored flow config from %q (current state was backed up first).", name)), nil
 }
 

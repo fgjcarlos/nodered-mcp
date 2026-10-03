@@ -117,6 +117,14 @@ func (s *Server) handleSetContext(ctx context.Context, req mcp.CallToolRequest) 
 		)), nil
 	}
 
+	// The validation, the helper selection, and the inject must all
+	// run under the same lock acquisition: that is what makes a
+	// restore_backup unable to nil s.ctxHelper out from under us
+	// (issue #310). The lock is held for the whole critical
+	// section, so the helper observed here is the same one the
+	// inject dispatches against.
+	s.ctxHelperMu.Lock()
+	defer s.ctxHelperMu.Unlock()
 	helper, justProvisioned, err := s.ensureSetContextHelper(ctx)
 	if err != nil {
 		slog.Error("set_context: provisioning helper failed", "error", err)
