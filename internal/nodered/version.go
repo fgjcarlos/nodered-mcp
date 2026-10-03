@@ -86,9 +86,16 @@ func ParseVersion(s string) Version {
 // cached value. sync.Once guarantees the probe runs at most once
 // even with concurrent callers (atomic.Load+Store would race:
 // all goroutines see nil and all probe).
+//
+// probed distinguishes "the probe ran, here is the result"
+// (known-supported or known-too-low) from "nobody ever asked the
+// runtime yet". Callers that want a non-probing read use
+// CachedNodeRedVersion; they get the zero Version on the cold
+// side, never a surprise network call mid-request.
 type versionCache struct {
-	once  sync.Once
-	value Version
+	once   sync.Once
+	value  Version
+	probed bool
 }
 
 // NodeRedVersion returns the cached Node-RED version. The first
@@ -105,11 +112,38 @@ type versionCache struct {
 // constructor do not hit a nil httpClient.
 func (c *Client) NodeRedVersion(ctx context.Context) Version {
 	c.nrVersion.once.Do(func() {
+		c.nrVersion.probed = true
 		if c == nil || c.baseURL == "" {
 			return
 		}
 		c.nrVersion.value = detectNodeRedVersion(ctx, c)
 	})
+	return c.nrVersion.value
+}
+
+// CachedNodeRedVersion returns the cached version without ever
+// triggering the probe. A cold cache reports the zero Version
+// (Known == false) — the "we could not tell" case the gate
+// treats as "do not refuse".
+//
+// This is the read the runtime version gate (issue #316) needs:
+// the gate is invoked synchronously from a request handler, and
+// the probe it would otherwise trigger would (a) race the
+// handler's own writes and (b) break test fixtures that record
+// every request against a strict mock.
+//
+// ponytail: relies on the banner goroutine in
+// internal/mcp/server.go to warm the cache at startup. A server
+// whose banner probe was skipped (loopback test fixture) or
+// failed (slow / unreachable /settings) therefore never
+// enforces the gate. The upgrade path is either an explicit
+// "WarmVersionCache" hook the gate awaits, or a shared
+// `var onceProbe sync.Once` the gate selects against so
+// "unknown" only means "the probe is still running".
+func (c *Client) CachedNodeRedVersion() Version {
+	if c == nil || !c.nrVersion.probed {
+		return Version{}
+	}
 	return c.nrVersion.value
 }
 

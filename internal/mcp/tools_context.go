@@ -117,6 +117,18 @@ func (s *Server) handleSetContext(ctx context.Context, req mcp.CallToolRequest) 
 		)), nil
 	}
 
+	// Version gate (issue #316). The whole body of set_context
+	// depends on the __user_inject_props__ override that only
+	// behaves as documented on Node-RED 5.x; a refused call
+	// must provision no flow tab, no inject and no function
+	// node, so the check sits above the lock. Argument and
+	// scope validation stay above the gate so a caller who
+	// forgot a required field still sees a field error rather
+	// than a misleading version error.
+	if refuse, msg := RefuseForVersion("set_context", s.nrClient.CachedNodeRedVersion()); refuse {
+		return mcp.NewToolResultError(msg), nil
+	}
+
 	// The validation, the helper selection, and the inject must all
 	// run under the same lock acquisition: that is what makes a
 	// restore_backup unable to nil s.ctxHelper out from under us
@@ -158,10 +170,18 @@ func (s *Server) handleSetContext(ctx context.Context, req mcp.CallToolRequest) 
 		return mcp.NewToolResultError(fmt.Sprintf("dispatching set_context: %v", err)), nil
 	}
 
+	// If the version was never detected, RefuseForVersion let the
+	// call through (no evidence of incompatibility) but the caller
+	// still needs to know the call was not verified. Append the
+	// notice only in that case; known-supported runs stay quiet.
+	notice := ""
+	if !s.nrClient.CachedNodeRedVersion().Known {
+		notice = UnknownVersionNotice
+	}
 	return mcp.NewToolResultText(fmt.Sprintf(
 		"Set context %s key %q to %s (via helper flow %q, inject %q). "+
-			"Read it back with get_context; the helper is reused, not re-created.",
-		scope, key, prettyJSONValue(value), helper.flowID, helper.injectID,
+			"Read it back with get_context; the helper is reused, not re-created.%s",
+		scope, key, prettyJSONValue(value), helper.flowID, helper.injectID, notice,
 	)), nil
 }
 

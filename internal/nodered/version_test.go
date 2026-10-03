@@ -139,6 +139,72 @@ func TestNodeRedVersion_ProbeFailure(t *testing.T) {
 	}
 }
 
+// TestCachedNodeRedVersion_ColdNoProbe is the contract the
+// version gate relies on: a cold cache must report Known==false
+// AND must not hit /settings. The gate calls this from inside a
+// request handler; a probing accessor would race the handler's
+// own writes and trip the test fixtures' strict mock
+// handlers (issue #316).
+func TestCachedNodeRedVersion_ColdNoProbe(t *testing.T) {
+	var hits int
+	var mu sync.Mutex
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/settings" {
+			mu.Lock()
+			hits++
+			mu.Unlock()
+			t.Errorf("CachedNodeRedVersion must not probe /settings on a cold cache")
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	v := client.CachedNodeRedVersion()
+	if v.Known {
+		t.Errorf("cold cache must report Known=false, got %+v", v)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if hits != 0 {
+		t.Errorf("cold cache should not have hit /settings, got %d hits", hits)
+	}
+}
+
+// TestCachedNodeRedVersion_MatchesAfterProbe: once NodeRedVersion
+// has run, CachedNodeRedVersion returns the same value without
+// a re-probe.
+func TestCachedNodeRedVersion_MatchesAfterProbe(t *testing.T) {
+	var hits int
+	var mu sync.Mutex
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/settings" {
+			mu.Lock()
+			hits++
+			mu.Unlock()
+			_, _ = w.Write([]byte(`{"version":"5.0.1"}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	probed := client.NodeRedVersion(context.Background())
+	if !probed.Known || probed.String() != "5.0.1" {
+		t.Fatalf("probe did not cache 5.0.1, got %+v", probed)
+	}
+	mu.Lock()
+	hitsAfterProbe := hits
+	mu.Unlock()
+
+	cached := client.CachedNodeRedVersion()
+	if cached != probed {
+		t.Errorf("CachedNodeRedVersion must return the cached value, got %+v want %+v", cached, probed)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if hits != hitsAfterProbe {
+		t.Errorf("CachedNodeRedVersion triggered a re-probe (%d -> %d hits)", hitsAfterProbe, hits)
+	}
+}
+
 // TestExtractVersionField proves we only read the top-level
 // "version" key — every other field is opaque to us.
 func TestExtractVersionField(t *testing.T) {
