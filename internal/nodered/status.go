@@ -257,7 +257,9 @@ func (t *StatusTail) session(ctx context.Context) error {
 
 	conn, _, err := websocket.Dial(ctx, t.wsURL, opts)
 	if err != nil {
-		return fmt.Errorf("connecting to %s: %w", t.wsURL, err)
+		// redactedWrap preserves errors.Is/As via Unwrap while
+		// stripping the token from the rendered string. Issue #312.
+		return redactedWrap(err)
 	}
 	defer conn.CloseNow()
 	// Status payloads are tiny ({text,fill,shape} at most), but
@@ -280,7 +282,7 @@ func (t *StatusTail) session(ctx context.Context) error {
 	}
 
 	t.setState(true, nil)
-	slog.Info("status tail connected", "url", t.wsURL)
+	t.logConnected()
 	defer t.setState(false, nil)
 
 	for {
@@ -290,6 +292,13 @@ func (t *StatusTail) session(ctx context.Context) error {
 		}
 		t.consume(data)
 	}
+}
+
+// logConnected emits the "connected" line at slog.Info. Extracted
+// from session() so the redaction contract (issue #312) can be
+// exercised in tests without dialing a real WebSocket.
+func (t *StatusTail) logConnected() {
+	slog.Info("status tail connected", "url", RedactURL(t.wsURL))
 }
 
 // authenticate is the same /comms auth handshake DebugTail uses.

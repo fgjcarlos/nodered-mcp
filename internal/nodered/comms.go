@@ -169,7 +169,9 @@ func (t *DebugTail) session(ctx context.Context) error {
 
 	conn, _, err := websocket.Dial(ctx, t.wsURL, opts)
 	if err != nil {
-		return fmt.Errorf("connecting to %s: %w", t.wsURL, err)
+		// redactedWrap preserves errors.Is/As via Unwrap while
+		// stripping the token from the rendered string. Issue #312.
+		return redactedWrap(err)
 	}
 	defer conn.CloseNow()
 	// Debug payloads can be large; the default read limit is 32 KiB.
@@ -190,7 +192,7 @@ func (t *DebugTail) session(ctx context.Context) error {
 	}
 
 	t.setState(true, nil)
-	slog.Info("debug tail connected", "url", t.wsURL)
+	t.logConnected()
 	defer t.setState(false, nil)
 
 	for {
@@ -200,6 +202,13 @@ func (t *DebugTail) session(ctx context.Context) error {
 		}
 		t.consume(data)
 	}
+}
+
+// logConnected emits the "connected" line at slog.Info. Extracted
+// from session() so the redaction contract (issue #312) can be
+// exercised in tests without dialing a real WebSocket.
+func (t *DebugTail) logConnected() {
+	slog.Info("debug tail connected", "url", RedactURL(t.wsURL))
 }
 
 // authenticate performs the {"auth":token} handshake Node-RED requires when

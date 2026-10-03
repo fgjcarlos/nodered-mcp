@@ -379,6 +379,8 @@ func TestInjectNodeWithBody_PropagatesAPIErrors(t *testing.T) {
 
 // TestRedactURL covers the security helper added by issue #110: connectivity
 // errors must not include query strings or userinfo that may contain tokens.
+// (Renamed from redactURL to RedactURL by issue #312 so other internal
+// packages can call it without duplicating the implementation.)
 func TestRedactURL(t *testing.T) {
 	tests := []struct {
 		input string
@@ -398,9 +400,9 @@ func TestRedactURL(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		got := redactURL(tc.input)
+		got := RedactURL(tc.input)
 		if got != tc.want {
-			t.Errorf("redactURL(%q) = %q, want %q", tc.input, got, tc.want)
+			t.Errorf("RedactURL(%q) = %q, want %q", tc.input, got, tc.want)
 		}
 	}
 }

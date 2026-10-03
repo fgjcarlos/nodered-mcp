@@ -15,6 +15,8 @@ import (
 	"strings"
 
 	"github.com/joho/godotenv"
+
+	"github.com/fgjcarlos/nodered-mcp/internal/nodered"
 )
 
 // Config is the fully-resolved runtime configuration for nodered-mcp.
@@ -259,7 +261,7 @@ func Load() (*Config, error) {
 	}
 
 	slog.Debug("config loaded",
-		"url", cfg.NodeRedURL,
+		"url", nodered.RedactURL(cfg.NodeRedURL),
 		"auth_token", cfg.NodeRedToken != "",
 		"auth_basic", cfg.NodeRedUsername != "",
 		"transport", cfg.MCPTransport,
