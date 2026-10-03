@@ -46,6 +46,15 @@ Only consulted when `MCP_TRANSPORT=http`.
 | `MCP_OAUTH_ISSUER` | *(empty)* | `--oauth-issuer` | Enable OAuth 2.1 / OIDC on the HTTP transport. Mutually exclusive with `MCP_HTTP_TOKEN` |
 | `MCP_OAUTH_AUDIENCE` | *(empty)* | `--oauth-aud` | Audience claim required when an issuer is set |
 
+> **Per source IP means the socket address.** The limiter resolves the
+> client from `RemoteAddr` and reads no request header. Behind a reverse
+> proxy every client therefore shares the proxy's bucket — one noisy
+> client can throttle everyone else. Enforce per-client limits at the
+> proxy, where the real client address is known, and keep the MCP token
+> or OAuth requirement. `X-Forwarded-For` is ignored deliberately:
+> trusting it without an explicit trusted-proxy list is spoofable. See
+> [Rate limiting behind a reverse proxy](../SECURITY.md#rate-limiting-behind-a-reverse-proxy).
+
 ## Safety
 
 | Variable | Default | Flag | Description |

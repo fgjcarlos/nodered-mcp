@@ -110,6 +110,34 @@ MCP_NODE_DENYLIST="exec,system,my-custom-shell-node" nodered-mcp
 The list replaces the default — it does not extend it. Pass every
 type you want blocked, including `exec` and `system`, in one value.
 
+## Rate limiting behind a reverse proxy
+
+The HTTP transport throttles per source IP, resolved from the socket's
+`RemoteAddr` only. No request header is consulted.
+
+**Behind a reverse proxy, every client shares one bucket.** If
+`nodered-mcp` binds to loopback and a reverse proxy fronts it, the
+socket address it sees is the proxy's. All clients then contend for a
+single `MCP_HTTP_RATE_PER_SEC` allowance, so:
+
+- one noisy client can throttle everyone else, and
+- the limiter stops being a per-client control entirely.
+
+This is a deployment limitation, not an authentication bypass —
+`MCP_HTTP_TOKEN` / OAuth still gate every request. The rate limiter is
+defence in depth, not the authentication boundary.
+
+**Enforce per-client limits at the proxy.** That is the layer that
+actually knows the real client. Keep the MCP token or OAuth
+requirement in place; the two controls are complementary.
+
+**Do not trust `X-Forwarded-For` blindly.** Honouring it without a
+trusted-proxy policy is trivially spoofable — any client can send the
+header itself and evade per-IP throttling, or aim it at someone else
+to get them throttled. Supporting forwarded addresses would need an
+explicit list of trusted proxy hops, and spoofing tests alongside it.
+Until that exists, the header is ignored on purpose.
+
 ## Reporting a vulnerability
 
 Open a private security advisory on GitHub (or contact the
