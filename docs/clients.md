@@ -10,6 +10,35 @@ succeeds for clients with a supported config target; for other clients it
 prints manual instructions and exits with an error so automation can detect
 that nothing was applied.
 
+## Previewing a merge
+
+`nodered-mcp init --dry-run` prints the configuration that `--write`
+would merge, without touching the filesystem. It creates no file, no
+parent directory, no `.bak` backup and no temporary file, and it changes
+no permissions. Useful when your config already holds other MCP servers
+and you want to verify the real merged result before applying it — the
+snippet printed by a plain `init` is a freshly generated example, not the
+merge.
+
+The preview matches the file `--write` would produce, with one deliberate
+exception: where the preview shows `REDACTED`, the file keeps the real
+value. Everything else — keys, structure, the `nodered` entry, your other
+servers — is identical.
+
+Secrets are redacted in the preview: the new `nodered` entry never
+carries `NODERED_TOKEN`, and secret-bearing values belonging to other
+servers already in your file are masked too. Redaction matches key names
+(`NODERED_TOKEN`, `TOKEN`, `API_KEY`, `PASSWORD`, `SECRET`) exactly, so a
+secret stored under an unexpected key, inside an `args` array, embedded
+in a URL, or held as a non-string value is **not** masked. Treat the
+preview output as sensitive if your config stores tokens unusually.
+
+The same limitation as `--write` applies: for clients with no safe
+config target (Claude Code, VS Code, OpenCode, Pi) the preview prints
+the manual snippet and exits with an error, so automation can detect
+that nothing was merged. `--dry-run` and `--write` together are
+rejected as contradictory.
+
 ## Claude Desktop
 
 Edit `claude_desktop_config.json` — `%APPDATA%\Claude\` on Windows,

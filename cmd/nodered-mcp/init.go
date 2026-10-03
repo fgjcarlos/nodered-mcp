@@ -126,11 +126,20 @@ func runInit(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	all := fs.Bool("all", false, "show every known client, not just detected ones")
 	write := fs.Bool("write", false, "write config without a token (configure NODERED_TOKEN outside the file)")
+	// --dry-run is a SIBLING of --write, not a mode of it: it previews the
+	// exact merged config in memory and prints it, then stops. Combining
+	// the two is contradictory (preview vs. commit) and is rejected below
+	// so callers can detect the misuse rather than have one flag silently
+	// shadow the other.
+	dryRun := fs.Bool("dry-run", false, "print the exact merged config that --write would commit, without touching the filesystem")
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return nil
 		}
 		return err
+	}
+	if *write && *dryRun {
+		return fmt.Errorf("--write and --dry-run are mutually exclusive: --dry-run prints the merge without applying it, --write applies it")
 	}
 
 	clients := detectClients(*all)
@@ -147,7 +156,10 @@ func runInit(args []string) error {
 	target := chooseClient(in, clients)
 	env := buildEnv(url, token, backupDir)
 
-	if *write {
+	switch {
+	case *dryRun:
+		return runInitDryRun(target, bin, env)
+	case *write:
 		return writeClientConfig(target, bin, env, url, token, backupDir)
 	}
 
@@ -156,6 +168,44 @@ func runInit(args []string) error {
 	if token != "" {
 		printTokenOmittedNote()
 	}
+	return nil
+}
+
+// runInitDryRun previews the merge --write would commit for target,
+// without ever calling writeJSONObject. For clients with no safe write
+// target, it prints the manual snippet (as --write does) and returns the
+// same style of error.
+//
+// The preview is the merged config with secret-bearing values masked, so
+// it is NOT byte-identical to the file --write produces when the existing
+// config already holds a value under a secret-bearing key: the preview
+// shows REDACTED where the file keeps the real value. Structure, key set
+// and the nodered entry are identical.
+func runInitDryRun(target mcpClient, bin string, env map[string]string) error {
+	path, rootKey, ok := writableTarget(target.key)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "\n--- %s: %s ---\n", target.name, target.note)
+		fmt.Println(renderConfig(target.key, bin, "", "", ""))
+		fmt.Fprintf(os.Stderr, "\n(--dry-run isn't supported for %s — the merge preview requires a writable config target)\n", target.name)
+		return fmt.Errorf("--dry-run is not supported for %s: no preview was produced", target.name)
+	}
+	var data []byte
+	if existing, err := os.ReadFile(path); err == nil {
+		data = existing
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	// The file exists, so label errors with its path exactly as --write does.
+	root, err := mergeServer(data, path, rootKey, bin, env)
+	if err != nil {
+		return err
+	}
+	preview, err := marshalIndentedJSON(redactSecrets(root))
+	if err != nil {
+		return err
+	}
+	fmt.Println(strings.TrimSuffix(string(preview), "\n"))
+	fmt.Fprintf(os.Stderr, "\n# dry-run: no file, directory, backup, or temp file was created or modified.\n")
 	return nil
 }
 
@@ -236,13 +286,19 @@ func writableTarget(key string) (path, rootKey string, ok bool) {
 	return "", "", false
 }
 
-// mergeServerIntoFile adds/replaces the 'nodered' entry under rootKey, leaving
-// every other key in the file untouched. Refuses to touch a file that exists
-// but isn't valid JSON, and backs up the previous content to path+".bak".
-func mergeServerIntoFile(path, rootKey, bin string, env map[string]string) error {
-	root, err := readJSONObject(path)
+// mergeServer is the pure half of mergeServerIntoFile: it parses the
+// existing JSON (or starts from empty for a missing/blank file), rejects a
+// non-object rootKey collection, and returns the merged root map. It does
+// not touch the filesystem. --dry-run calls this directly to preview the
+// exact merge that --write would commit; the seam guarantees both paths
+// produce the same bytes.
+//
+// path labels the error messages; pass "" when the bytes did not come from
+// a file on disk (the --dry-run preview of a file that may not exist).
+func mergeServer(data []byte, path, rootKey, bin string, env map[string]string) (map[string]any, error) {
+	root, err := parseJSONObject(data, path)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var servers map[string]any
 	value, exists := root[rootKey]
@@ -252,17 +308,106 @@ func mergeServerIntoFile(path, rootKey, bin string, env map[string]string) error
 		var ok bool
 		servers, ok = value.(map[string]any)
 		if !ok {
-			return fmt.Errorf("existing config at %s has non-object %q; refusing to overwrite it", path, rootKey)
+			if path == "" {
+				return nil, fmt.Errorf("existing config has non-object %q; refusing to overwrite it", rootKey)
+			}
+			return nil, fmt.Errorf("existing config at %s has non-object %q; refusing to overwrite it", path, rootKey)
 		}
 	}
 	servers["nodered"] = map[string]any{"command": bin, "env": envWithoutToken(env)}
 	root[rootKey] = servers
+	return root, nil
+}
+
+// mergeServerIntoFile adds/replaces the 'nodered' entry under rootKey, leaving
+// every other key in the file untouched. Refuses to touch a file that exists
+// but isn't valid JSON, and backs up the previous content to path+".bak".
+func mergeServerIntoFile(path, rootKey, bin string, env map[string]string) error {
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	root, err := mergeServer(data, path, rootKey, bin, env)
+	if err != nil {
+		return err
+	}
 	return writeJSONObject(path, root)
+}
+
+// parseJSONObject is readJSONObject's file-IO-free half: it returns an
+// empty map for missing-or-blank input, an error for non-empty invalid
+// JSON, and a usable map otherwise. Used by mergeServer so --dry-run
+// never has to touch the filesystem.
+//
+// path is only used to label the error; pass "" when there is no file
+// behind the bytes (the --dry-run preview of a file that may not exist).
+func parseJSONObject(data []byte, path string) (map[string]any, error) {
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return map[string]any{}, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		if path == "" {
+			return nil, fmt.Errorf("existing config is not valid JSON — refusing to overwrite it: %w", err)
+		}
+		return nil, fmt.Errorf("existing config at %s is not valid JSON — refusing to overwrite it: %w", path, err)
+	}
+	if m == nil {
+		m = map[string]any{}
+	}
+	return m, nil
+}
+
+// secretKeys is the set of exact env-var key names whose values are
+// considered secret-bearing for the --dry-run preview. ponytail: key-name
+// redaction by exact match, not substring; a secret stored under an
+// unexpected key (e.g. MY_TOKEN_VALUE) would still appear. Upgrade to an
+// explicit per-client opt-in list (config.yaml) when that bites.
+var secretKeys = map[string]struct{}{
+	"NODERED_TOKEN": {},
+	"TOKEN":         {},
+	"API_KEY":       {},
+	"PASSWORD":      {},
+	"SECRET":        {},
+}
+
+// redactSecrets walks the merged config and masks values for known
+// secret-bearing keys. It is a preview-time transformation only; the
+// bytes that --write would commit are produced before this step.
+func redactSecrets(root map[string]any) map[string]any {
+	var walk func(v any) any
+	walk = func(v any) any {
+		switch x := v.(type) {
+		case map[string]any:
+			out := make(map[string]any, len(x))
+			for k, val := range x {
+				if _, isSecret := secretKeys[k]; isSecret {
+					if str, ok := val.(string); ok && str != "" {
+						out[k] = "REDACTED"
+						continue
+					}
+				}
+				out[k] = walk(val)
+			}
+			return out
+		case []any:
+			out := make([]any, len(x))
+			for i, val := range x {
+				out[i] = walk(val)
+			}
+			return out
+		default:
+			return v
+		}
+	}
+	out := walk(root)
+	return out.(map[string]any)
 }
 
 // readJSONObject reads a JSON object, returning an empty map if the file is
 // missing or blank. A non-empty file that fails to parse is an error — we do
-// NOT overwrite a config we can't understand.
+// NOT overwrite a config we can't understand. Thin file-IO wrapper over
+// parseJSONObject so both read paths share one validation.
 func readJSONObject(path string) (map[string]any, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -271,17 +416,7 @@ func readJSONObject(path string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(strings.TrimSpace(string(data))) == 0 {
-		return map[string]any{}, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("existing config at %s is not valid JSON — refusing to overwrite it: %w", path, err)
-	}
-	if m == nil {
-		m = map[string]any{}
-	}
-	return m, nil
+	return parseJSONObject(data, path)
 }
 
 // writeJSONObject writes m as indented JSON, creating parent dirs and backing

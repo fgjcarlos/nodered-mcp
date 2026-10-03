@@ -288,7 +288,9 @@ func TestClientCatalogMatchesDocumentationAndExamples(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expectedSections := map[string]bool{"HTTP variant": true}
+	// Non-client sections are allowed, but the list is explicit so a new
+	// heading cannot slip in unnoticed.
+	expectedSections := map[string]bool{"HTTP variant": true, "Previewing a merge": true}
 	expectedExamples := make(map[string]bool)
 	for _, client := range clients {
 		expectedSections[client.name] = true
