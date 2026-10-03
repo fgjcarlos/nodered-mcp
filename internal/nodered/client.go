@@ -138,7 +138,7 @@ func NewClient(opts Options) (*Client, error) {
 		slog.Warn("NODERED_INSECURE=true: TLS verification disabled for the Node-RED admin API only; outbound calls still verify TLS",
 			"scope", "node-red admin")
 	}
-	slog.Debug("nodered client created", "base_url", opts.BaseURL)
+	slog.Debug("nodered client created", "base_url", RedactURL(opts.BaseURL))
 	bk := opts.BackupKeep
 	if bk == 0 {
 		bk = defaultBackupKeep
@@ -243,13 +243,15 @@ func (c *Client) doURL(ctx context.Context, method, u, errorPath string, body in
 		opt(req)
 	}
 
-	slog.Debug("nodered request", "method", method, "url", u)
+	slog.Debug("nodered request", "method", method, "url", RedactURL(u))
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		// Wrap as a connectivity error with the redacted base URL, not the full
-		// request URL which may contain a query-string token.
-		return fmt.Errorf("cannot reach Node-RED at %s: %w", redactURL(u), err)
+		// Wrap as a connectivity error naming the redacted destination, not
+		// the full request URL. redactedWrap is still required on top of that:
+		// the wrapped *url.Error renders the raw URL in its own .Error(), so a
+		// plain %w would still leak the token. Issue #312.
+		return fmt.Errorf("cannot reach Node-RED at %s: %w", RedactURL(u), redactedWrap(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -324,11 +326,14 @@ func (c *Client) getRaw(ctx context.Context, path string) ([]byte, error) {
 	req.Header.Set("Accept", "application/json, text/plain")
 	c.auth.apply(req)
 
-	slog.Debug("nodered raw request", "method", "GET", "url", joined)
+	slog.Debug("nodered raw request", "method", "GET", "url", RedactURL(joined))
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("calling GET %s: %w", joined, err)
+		// Name the redacted destination, and scrub the wrapped error's own
+		// string: a *url.Error renders the raw URL, so %w alone leaks the
+		// token. Issue #312.
+		return nil, fmt.Errorf("calling GET %s: %w", RedactURL(joined), redactedWrap(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -355,10 +360,12 @@ func (c *Client) BaseURL() string {
 	return c.baseURL
 }
 
-// redactURL strips the query string and userinfo from a URL to avoid leaking
+// RedactURL strips the query string and userinfo from a URL to avoid leaking
 // tokens that may be embedded as query parameters. Returns "[unparseable URL]"
-// when the input cannot be parsed.
-func redactURL(u string) string {
+// when the input cannot be parsed. Exported (issue #312) so other internal
+// packages (config, etc.) can route their log lines through the same helper
+// without duplicating the implementation.
+func RedactURL(u string) string {
 	parsed, err := url.Parse(u)
 	if err != nil {
 		return "[unparseable URL]"
@@ -366,4 +373,82 @@ func redactURL(u string) string {
 	parsed.RawQuery = ""
 	parsed.User = nil
 	return parsed.String()
+}
+
+// redactStringURLs walks s and replaces every URL-shaped substring
+// (http://, https://, ws://, wss:// up to the next whitespace or
+// closing quote / paren) with its redacted form. Used by the
+// redactedErr wrapper so a wrapped network error that mentions the
+// handshake URL under a different scheme (e.g. the websocket dialer
+// reports `Get "http://host/comms?token=..."` even though the
+// caller passed a `ws://` URL) is still sanitized. Issue #312.
+// terminators: whitespace and the quoting/closing characters that end a URL
+// in rendered Go error strings. A URL longer than one line, or one wrapped in
+// a non-standard delimiter, is out of scope.
+// ponytail: byte scanner over rendered error text. If a future library renders
+// URLs in a shape this misses, redact at the source instead of growing the
+// terminator list.
+func redactStringURLs(s string) string {
+	// Scan left-to-right once. We need a single pass to avoid the
+	// infinite loop of "replace a URL with a redacted form, which
+	// still contains the scheme prefix, so re-find and replace
+	// forever". For each hit, replace with RedactURL, then skip
+	// past the inserted redacted string.
+	terminators := " 	\n\r\"'`)]>"
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		matched := false
+		for _, prefix := range []string{"https://", "http://", "wss://", "ws://"} {
+			if !strings.HasPrefix(s[i:], prefix) {
+				continue
+			}
+			end := len(s)
+			for j := i + len(prefix); j < len(s); j++ {
+				if strings.IndexByte(terminators, s[j]) >= 0 {
+					end = j
+					break
+				}
+			}
+			b.WriteString(RedactURL(s[i:end]))
+			i = end
+			matched = true
+			break
+		}
+		if !matched {
+			b.WriteByte(s[i])
+			i++
+		}
+	}
+	return b.String()
+}
+
+// redactedErr wraps an inner error but renders a sanitized message
+// instead of the inner error's own .Error(). Used when the inner
+// error's string is known to embed a token-bearing URL (e.g. the
+// *url.Error from net/http.Client.Do, or the multi-level error
+// from coder/websocket that mentions a re-derived http://
+// handshake URL). errors.Is/As still work via Unwrap; only the
+// rendered string changes. Issue #312.
+//
+// The render is "inner.Error() with every URL-shaped substring
+// replaced by its redacted form" so the inner's structure
+// (e.g. "Get \"URL\": connect: connection refused") is preserved
+// while the token is removed regardless of which URL the inner
+// mentioned.
+type redactedErr struct {
+	inner error
+}
+
+func (e *redactedErr) Error() string {
+	return redactStringURLs(e.inner.Error())
+}
+
+func (e *redactedErr) Unwrap() error { return e.inner }
+
+// redactedWrap returns a wrapped error whose rendered message
+// sanitizes every URL-shaped substring. errors.Is/As continue to
+// work because Unwrap is preserved.
+func redactedWrap(inner error) error {
+	return &redactedErr{inner: inner}
 }
