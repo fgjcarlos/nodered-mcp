@@ -117,7 +117,6 @@ func (s *Server) runtimeProbe(ctx context.Context) RuntimeProbe {
 		slog.Warn("get_runtime_info: /settings probe failed", "error", err)
 	}
 
-	// 3. /logs mounted? Probe and observe the status code.
 	// 3. /logs mounted? Stock NR < 5.x exposed it; stock 5.x
 	// does not. Use the typed Logs() helper and treat the 404 as
 	// "endpoint_not_mounted".
