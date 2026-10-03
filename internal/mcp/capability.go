@@ -63,6 +63,64 @@ func noderedCapabilityMatrix(p RuntimeProbe) map[string]Capability {
 	return matrix
 }
 
+// capabilityGuidance derives a (reason, remedy) pair for a single
+// non-ok capability, using only the fields on the same RuntimeProbe
+// the matrix already used. ok returns ("", ""): absence is the
+// signal. unknown stays explicit — we do not know what would fix
+// it, so the remedy is empty rather than guessed.
+//
+// Pure, no I/O: lives next to the classifiers and is testable the
+// same way.
+//
+// ponytail: guidance is derived only from RuntimeProbe fields, so
+// a capability whose cause is not probed (e.g. a future per-tool
+// feature flag the matrix already reports) gets a generic-but-honest
+// reason rather than a fabricated one. Upgrade path: thread an
+// operator-supplied hint map through RuntimeProbe when a real case
+// appears, then consult it here.
+func capabilityGuidance(tool string, cap Capability, p RuntimeProbe) (reason, remedy string) {
+	switch cap {
+	case CapOK:
+		return "", ""
+	case CapUnavailableUnknown:
+		return "Node-RED version was not detected; capability is unknown until the runtime's version is visible to the MCP", ""
+	case CapVersionTooLow:
+		min, ok := MinVersionForKnown(tool)
+		if !ok {
+			return "Node-RED is below the minimum version required by this tool, and the tool has no registered minimum", "Upgrade Node-RED to a version that supports this tool"
+		}
+		return "Node-RED " + p.NodeRedVersion.String() + " is below the " + min.String() + " minimum required by " + tool,
+			"Upgrade Node-RED to at least " + min.String()
+	case CapSettingDisabled:
+		// parseRuntimeStateEnabled collapses "enabled: false", "no
+		// runtimeState key" and an unreadable /settings body into one
+		// false. Only the first is a gate the operator closed, so state
+		// the observation and not a verdict. ponytail: the probe cannot
+		// currently distinguish the three; a tri-state on RuntimeProbe
+		// would be the upgrade.
+		return "the runtime-state setting did not read as enabled; settings.runtimeState.enabled was false, absent, or /settings was unreadable",
+			"Set settings.runtimeState.enabled to true in settings.js (or via the runtime settings UI) and restart Node-RED"
+	case CapStreamDisabled:
+		// The matrix assigns stream_disabled to these tools
+		// unconditionally — no classifier consults
+		// p.DebugStreamEnabled, so the flag's real state is not
+		// evidence about the cause. Do not assert a cause the probe
+		// never checked; an operator who already set the flag would
+		// otherwise follow a remedy that changes nothing.
+		return "the /comms debug stream is not available to this tool",
+			"Enable it with MCP_DEBUG_STREAM=on (or --debug-stream) and restart the MCP; some Node-RED versions are unstable on this WebSocket"
+	case CapEndpointNotMounted:
+		if !p.RuntimeLogsMounted {
+			return "GET /logs is not mounted on this Node-RED (stock 5.x removed the admin endpoint)",
+				"The tool will fall back to the local log file under ~/.node-red/"
+		}
+		return "the admin endpoint this tool depends on is not mounted on this Node-RED",
+			"Re-enable the endpoint on the Node-RED side, or use a tool that does not require it"
+	default:
+		return "capability " + string(cap) + " is not currently available", ""
+	}
+}
+
 // classifyVersionedTool picks version_too_low when the running
 // Node-RED is below the minimum, and unknown when the probe did
 // not return a parseable version (NR is reachable but the version
