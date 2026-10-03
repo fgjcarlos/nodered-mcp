@@ -247,12 +247,11 @@ func (c *Client) doURL(ctx context.Context, method, u, errorPath string, body in
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		// Wrap as a connectivity error. redactedWrap preserves
-		// the errors.Is/As chain via Unwrap while sanitizing the
-		// rendered string — the wrapped *url.Error from net/http
-		// embeds the raw URL in its own .Error(), so a plain %w
-		// would still leak the token. Issue #312.
-		return redactedWrap(err)
+		// Wrap as a connectivity error naming the redacted destination, not
+		// the full request URL. redactedWrap is still required on top of that:
+		// the wrapped *url.Error renders the raw URL in its own .Error(), so a
+		// plain %w would still leak the token. Issue #312.
+		return fmt.Errorf("cannot reach Node-RED at %s: %w", RedactURL(u), redactedWrap(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -331,8 +330,10 @@ func (c *Client) getRaw(ctx context.Context, path string) ([]byte, error) {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		// Same redacted-wrap as doURL above. Issue #312.
-		return nil, redactedWrap(err)
+		// Name the redacted destination, and scrub the wrapped error's own
+		// string: a *url.Error renders the raw URL, so %w alone leaks the
+		// token. Issue #312.
+		return nil, fmt.Errorf("calling GET %s: %w", RedactURL(joined), redactedWrap(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -381,6 +382,12 @@ func RedactURL(u string) string {
 // handshake URL under a different scheme (e.g. the websocket dialer
 // reports `Get "http://host/comms?token=..."` even though the
 // caller passed a `ws://` URL) is still sanitized. Issue #312.
+// terminators: whitespace and the quoting/closing characters that end a URL
+// in rendered Go error strings. A URL longer than one line, or one wrapped in
+// a non-standard delimiter, is out of scope.
+// ponytail: byte scanner over rendered error text. If a future library renders
+// URLs in a shape this misses, redact at the source instead of growing the
+// terminator list.
 func redactStringURLs(s string) string {
 	// Scan left-to-right once. We need a single pass to avoid the
 	// infinite loop of "replace a URL with a redacted form, which
