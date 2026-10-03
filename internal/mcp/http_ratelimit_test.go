@@ -171,12 +171,15 @@ func TestPerIPLimiter_BurstThenBlock(t *testing.T) {
 // TestPerIPLimiter_AmortizedSweep is the RED/GREEN regression for issue #313:
 // per-IP churn must not cost O(n) on every new-key insert. With the old
 // code, once len(limiters) > evictEvery, every new-IP call iterates the
-// entire map. Inserting N=5000 fresh IPs therefore does roughly Σ_{i=1024}^{N} i
-// map comparisons (~12M for N=5000), which takes hundreds of milliseconds.
-// With the amortized sweep, total comparisons are bounded by N/1024 * N
-// (~25k for the same workload), which finishes in milliseconds.
+// entire map, so inserting N fresh IPs does roughly Σ_{i=1024}^{N} i map
+// comparisons — quadratic in N. With the amortized sweep the map is
+// walked at most once per TTL window, so the cost is linear in N.
 func TestPerIPLimiter_AmortizedSweep(t *testing.T) {
-	const N = 5000
+	// N large enough that the old per-insert scan is quadratically slow
+	// (observed ~2.9s here) while the amortized path stays linear
+	// (observed ~0.04s), so the 1s threshold has wide margin on BOTH
+	// sides and neither outcome depends on how fast the host is.
+	const N = 20000
 	lim := newPerIPLimiter(rate.Limit(float64(N)/float64(time.Second)*4), N)
 
 	start := time.Now()
@@ -187,11 +190,12 @@ func TestPerIPLimiter_AmortizedSweep(t *testing.T) {
 	}
 	elapsed := time.Since(start)
 
-	// Old code: ~12M map comparisons under the global mutex -> hundreds of ms.
-	// New code: amortized O(1) -> single-digit ms on the same workload.
-	// A threshold of 150ms leaves comfortable headroom for CI while still
-	// failing the old implementation (observed ~400-700ms on Linux CI).
-	const maxAllowed = 150 * time.Millisecond
+	// Old code: ~N^2 map comparisons under the global mutex -> seconds.
+	// New code: amortized O(1) -> tens of ms on the same workload.
+	// ponytail: wall-clock assertion. A sweep counter would be immune to
+	// noisy CI, but it would mean instrumenting production code to serve a
+	// test. Widen N and the gap instead; swap if this ever flakes.
+	const maxAllowed = time.Second
 	if elapsed > maxAllowed {
 		t.Fatalf("churn of %d new IPs took %v, want < %v; per-IP maintenance is not amortized", N, elapsed, maxAllowed)
 	}
