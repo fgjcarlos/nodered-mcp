@@ -104,6 +104,25 @@ over rendered error text. It exists because coder/websocket reports an
 targeted string replacement never matches. Flagged to the independent
 verifier as the main place where a simpler correct approach might exist.
 
+### Independent review found one more lost prefix (eb98e03)
+
+The independent verifier caught what I missed on the first correction:
+b009a00 restored destination context in `client.go` but not in the two
+WebSocket dial errors, which had the same regression. The token was
+stripped there, so it was not a leak — but `connecting to <URL>` had been
+dropped, the exact context issue #312 asks to preserve.
+
+The existing regression could not see it: it asserts the token is absent,
+and bare `redactedWrap(err)` already guarantees that. Sabotage confirmed
+this — removing the wrapper from the ws sites leaves the ws test green.
+Restoring the prefix is therefore untested by the suite as written; it was
+verified against a real dial to a dead endpoint, which renders
+`connecting to ws://127.0.0.1:1/comms: failed to WebSocket dial: ...`
+with userinfo and `?token=` stripped. Closing that test gap is the
+candidate follow-up, not part of this fix.
+
+Full suite, race suite, vet, gofmt and whitespace all green on eb98e03.
+
 ## Next step
 Await independent verification, then push the branch and open one PR
 linking #312 (both remain the maintainer's decision).
