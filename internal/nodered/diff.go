@@ -43,7 +43,7 @@ func (d FlowsDiff) Total() int {
 func indexByID(raw RawFlow) (map[string]json.RawMessage, []string) {
 	byID := make(map[string]json.RawMessage)
 	var order []string
-	for _, item := range extractFlowArray(raw) {
+	for _, item := range FlowArray(raw) {
 		var meta nodeMeta
 		if json.Unmarshal(item, &meta) != nil || meta.ID == "" {
 			continue

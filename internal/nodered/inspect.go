@@ -89,7 +89,7 @@ func containers(items []json.RawMessage) (byID map[string]nodeMeta, tabs, subflo
 // It tolerates both the bare-array (API v1) and {"rev":..,"flows":[..]} (v2)
 // shapes, and returns an empty overview for anything it cannot parse.
 func SummarizeFlows(raw RawFlow) FlowsOverview {
-	items := extractFlowArray(raw)
+	items := FlowArray(raw)
 	byID, tabs, subflows := containers(items)
 
 	// Accumulate per container, keyed by ID, then project onto the ordered
@@ -153,7 +153,7 @@ func SearchFlows(raw RawFlow, query, nodeType string, limit int) (matches []Node
 	if limit <= 0 {
 		limit = 20
 	}
-	items := extractFlowArray(raw)
+	items := FlowArray(raw)
 	byID, _, _ := containers(items)
 	needle := strings.ToLower(query)
 

@@ -134,6 +134,29 @@ func (s *Server) handleRestoreBackup(ctx context.Context, req mcp.CallToolReques
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("reading backup: %v", err)), nil
 	}
+
+	// Issue #311: a restore is a full deployment, so it carries the
+	// same MCP_NODE_DENYLIST obligation as every other write tool. A
+	// backup saved before the policy changed can hold a type that is
+	// denied now, and restoring it would reintroduce the exact RCE
+	// path #81 closed. Reject here, before the snapshot and before the
+	// POST, and name the type so the operator can act.
+	//
+	// nodered.FlowArray is the same extractor RestoreFlows deploys
+	// with, so a shape the client accepts cannot slip past this check.
+	// A nil array means the payload is not a flow document at all; the
+	// client rejects those with its own error, so we leave that message
+	// untouched rather than shadowing it.
+	if flows := nodered.FlowArray(content); flows != nil {
+		if denied, t := s.findDeniedNodeInFlowsArray(flows); denied {
+			return mcp.NewToolResultError(fmt.Sprintf(
+				"backup %q contains node type %q, which is in MCP_NODE_DENYLIST; "+
+					"remove it from the denylist, or edit the backup before restoring (see SECURITY.md)",
+				name, t,
+			)), nil
+		}
+	}
+
 	s.ctxHelperMu.Lock()
 	defer s.ctxHelperMu.Unlock()
 	if err := s.nrClient.RestoreFlows(ctx, content); err != nil {
