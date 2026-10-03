@@ -88,3 +88,45 @@ The 21 tools marked `read` are the only ones registered under
 |---|---|
 | `explain_flow` | Describe what a flow does, its triggers, and external dependencies |
 | `generate_flow` | Build a flow from a plain-English description |
+## Reading `get_runtime_info`
+
+The response carries two maps. `capabilityMatrix` is the state of every
+tool against the runtime this MCP is connected to; `capabilityGuidance`
+explains the non-`ok` ones.
+
+```json
+{
+  "mcp": {
+    "capabilityMatrix": {
+      "set_context": "version_too_low",
+      "get_diagnostics": "ok",
+      "get_flows_state": "setting_disabled"
+    },
+    "capabilityGuidance": {
+      "set_context": {
+        "reason": "Node-RED 3.0.0 is below the 5.0.0 minimum required by set_context",
+        "remedy": "Upgrade Node-RED to at least 5.0.0"
+      },
+      "get_flows_state": {
+        "reason": "settings.runtimeState.enabled is false; the runtime-state gate is closed in /settings",
+        "remedy": "Set settings.runtimeState.enabled to true in settings.js (or via the runtime settings UI) and restart Node-RED"
+      }
+    }
+  }
+}
+```
+
+`ok` entries have **no** guidance entry — absence is the signal that the
+tool works, so a client only has to read the map when something is
+degraded.
+
+`unknown` is a real state, not a euphemism: it means the Node-RED version
+could not be detected, so the capability is genuinely undetermined. It
+carries a reason and deliberately **no** remedy, because there is no
+known fix to recommend.
+
+Every reason is derived from a probe the handler already ran. Nothing
+here is inferred, and no mutating endpoint is touched to produce it. The
+version reason names the actual minimum for that specific tool, so
+`set_context` (needs 5.0.0) and `get_diagnostics` (needs 3.1.0) give
+different advice.
