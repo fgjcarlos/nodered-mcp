@@ -92,11 +92,23 @@ func capabilityGuidance(tool string, cap Capability, p RuntimeProbe) (reason, re
 		return "Node-RED " + p.NodeRedVersion.String() + " is below the " + min.String() + " minimum required by " + tool,
 			"Upgrade Node-RED to at least " + min.String()
 	case CapSettingDisabled:
-		return "settings.runtimeState.enabled is false; the runtime-state gate is closed in /settings",
+		// parseRuntimeStateEnabled collapses "enabled: false", "no
+		// runtimeState key" and an unreadable /settings body into one
+		// false. Only the first is a gate the operator closed, so state
+		// the observation and not a verdict. ponytail: the probe cannot
+		// currently distinguish the three; a tri-state on RuntimeProbe
+		// would be the upgrade.
+		return "the runtime-state setting did not read as enabled; settings.runtimeState.enabled was false, absent, or /settings was unreadable",
 			"Set settings.runtimeState.enabled to true in settings.js (or via the runtime settings UI) and restart Node-RED"
 	case CapStreamDisabled:
-		return "the MCP debug stream subscriber is not connected (MCP_DEBUG_STREAM / --debug-stream is off)",
-			"Restart the MCP with MCP_DEBUG_STREAM=on (or pass --debug-stream) to enable the /comms WebSocket tail"
+		// The matrix assigns stream_disabled to these tools
+		// unconditionally — no classifier consults
+		// p.DebugStreamEnabled, so the flag's real state is not
+		// evidence about the cause. Do not assert a cause the probe
+		// never checked; an operator who already set the flag would
+		// otherwise follow a remedy that changes nothing.
+		return "the /comms debug stream is not available to this tool",
+			"Enable it with MCP_DEBUG_STREAM=on (or --debug-stream) and restart the MCP; some Node-RED versions are unstable on this WebSocket"
 	case CapEndpointNotMounted:
 		if !p.RuntimeLogsMounted {
 			return "GET /logs is not mounted on this Node-RED (stock 5.x removed the admin endpoint)",

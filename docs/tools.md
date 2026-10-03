@@ -108,7 +108,7 @@ explains the non-`ok` ones.
         "remedy": "Upgrade Node-RED to at least 5.0.0"
       },
       "get_flows_state": {
-        "reason": "settings.runtimeState.enabled is false; the runtime-state gate is closed in /settings",
+        "reason": "the runtime-state setting did not read as enabled; settings.runtimeState.enabled was false, absent, or /settings was unreadable",
         "remedy": "Set settings.runtimeState.enabled to true in settings.js (or via the runtime settings UI) and restart Node-RED"
       }
     }
@@ -130,3 +130,11 @@ here is inferred, and no mutating endpoint is touched to produce it. The
 version reason names the actual minimum for that specific tool, so
 `set_context` (needs 5.0.0) and `get_diagnostics` (needs 3.1.0) give
 different advice.
+
+Some states have more than one possible cause and the probes cannot tell
+them apart, so the reason states the observation rather than a verdict.
+`setting_disabled` covers an operator-closed gate, a missing setting
+key, and an unreadable `/settings` alike. `stream_disabled` is reported
+without naming a cause, because the capability is classified regardless
+of the `MCP_DEBUG_STREAM` flag — the remedy is the flag, not a
+diagnosis.

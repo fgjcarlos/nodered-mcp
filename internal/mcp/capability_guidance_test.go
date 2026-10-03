@@ -102,22 +102,65 @@ func TestCapabilityGuidance_EndpointNotMountedNamesLogs(t *testing.T) {
 	}
 }
 
-// Stream-disabled reason must name the MCP-side flag, not a Node-RED
-// setting — DebugStreamEnabled is s.debugStream, set by MCP_DEBUG_STREAM.
+// Stream-disabled reason must name the MCP-side flag in the REMEDY, not
+// blame Node-RED settings — DebugStreamEnabled is s.debugStream, set by
+// MCP_DEBUG_STREAM.
+//
+// It must also NOT claim the flag is off. The matrix assigns
+// stream_disabled unconditionally (no classifier reads
+// p.DebugStreamEnabled), so the flag's state is not evidence about the
+// cause: asserting "the flag is off" would send an operator who already
+// set it after a remedy that changes nothing.
 func TestCapabilityGuidance_StreamDisabledNamesMCPFlag(t *testing.T) {
-	p := RuntimeProbe{DebugStreamEnabled: false}
+	// Both flag states must produce the same reason, because the matrix
+	// does not consult the flag.
+	on := RuntimeProbe{DebugStreamEnabled: true}
+	off := RuntimeProbe{DebugStreamEnabled: false}
+
 	for _, tool := range []string{"get_node_status", "get_debug_messages"} {
-		r, m := capabilityGuidance(tool, CapStreamDisabled, p)
+		r, m := capabilityGuidance(tool, CapStreamDisabled, on)
+		rOff, _ := capabilityGuidance(tool, CapStreamDisabled, off)
+
 		if r == "" {
 			t.Errorf("%s reason should be non-empty", tool)
 		}
-		// Must not blame Node-RED settings: the flag is MCP-side.
-		if !strings.Contains(strings.ToLower(r), "mcp_debug_stream") &&
-			!strings.Contains(strings.ToLower(r), "debug stream") {
-			t.Errorf("%s reason should mention the MCP-side flag, got %q", tool, r)
+		if r != rOff {
+			t.Errorf("%s reason must not depend on the debug-stream flag "+
+				"(the matrix ignores it): on=%q off=%q", tool, r, rOff)
+		}
+		// Must not assert a cause the probe never checked.
+		lower := strings.ToLower(r)
+		for _, claim := range []string{"is off", "is disabled", "is not connected", "not connected"} {
+			if strings.Contains(lower, claim) {
+				t.Errorf("%s reason asserts %q, but the matrix classifies "+
+					"stream_disabled regardless of the flag: %q", tool, claim, r)
+			}
+		}
+		// The remedy points at the MCP-side flag.
+		if !strings.Contains(strings.ToLower(m), "mcp_debug_stream") {
+			t.Errorf("%s remedy should name MCP_DEBUG_STREAM, got %q", tool, m)
 		}
 		if m == "" {
-			t.Errorf("%s remedy should be non-empty: set MCP_DEBUG_STREAM=on", tool)
+			t.Errorf("%s remedy should be non-empty", tool)
+		}
+	}
+}
+
+// The setting-disabled reason must not claim the operator closed the
+// gate. parseRuntimeStateEnabled returns false for three different
+// causes — enabled:false, a missing runtimeState key, and an
+// unreadable /settings body — and the probe cannot tell them apart.
+func TestCapabilityGuidance_SettingDisabledDoesNotClaimAClosedGate(t *testing.T) {
+	for _, tool := range []string{"get_flows_state", "set_flows_state"} {
+		r, _ := capabilityGuidance(tool, CapSettingDisabled, RuntimeProbe{})
+		lower := strings.ToLower(r)
+		if strings.Contains(lower, "is false") || strings.Contains(lower, "gate is closed") {
+			t.Errorf("%s reason asserts a cause the probe cannot confirm: %q", tool, r)
+		}
+		// The setting key is camelCase in the real Node-RED payload;
+		// compare case-insensitively.
+		if !strings.Contains(strings.ToLower(r), strings.ToLower("runtimeState.enabled")) {
+			t.Errorf("%s reason should name the setting it reads, got %q", tool, r)
 		}
 	}
 }
