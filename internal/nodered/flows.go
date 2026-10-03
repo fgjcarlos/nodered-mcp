@@ -13,7 +13,7 @@ import (
 // API returns it, as opaque JSON. The shape depends on the Node-RED API
 // version negotiated: a bare array (v1) or a {"rev":..,"flows":[..]} envelope
 // (v2). We keep it opaque so nothing is ever lost — callers that need to
-// inspect it use FlowTabCount / extractFlowArray.
+// inspect it use FlowTabCount / FlowArray.
 func (c *Client) ListFlows(ctx context.Context) (RawFlow, error) {
 	var raw RawFlow
 	if err := c.do(ctx, "GET", "/flows", nil, &raw); err != nil {
@@ -61,7 +61,7 @@ func (c *Client) GetFlow(ctx context.Context, id string) (RawFlow, error) {
 // configs}) for the tab with the given id out of a GET /flows array.
 // Returns (nil, false) when no such tab exists in the array.
 func synthesizeFlowFromFlat(flat RawFlow, id string) (RawFlow, bool) {
-	items := extractFlowArray(flat)
+	items := FlowArray(flat)
 	var tabRaw, nodeRaws, configRaws []json.RawMessage
 	for _, item := range items {
 		var meta struct {
@@ -208,7 +208,7 @@ func (c *Client) DeleteFlow(ctx context.Context, id string) error {
 // array so the stale rev never triggers a 409 conflict.
 func (c *Client) RestoreFlows(ctx context.Context, backup RawFlow) error {
 	defer c.writeGuard()()
-	arr := extractFlowArray(backup)
+	arr := FlowArray(backup)
 	if arr == nil {
 		return errors.New("backup does not contain a recognizable flow array")
 	}
@@ -299,7 +299,7 @@ func (c *Client) nodeType(ctx context.Context, id string) (string, bool, error) 
 	if err != nil {
 		return "", false, err
 	}
-	for _, item := range extractFlowArray(raw) {
+	for _, item := range FlowArray(raw) {
 		var m nodeMeta
 		if json.Unmarshal(item, &m) != nil {
 			continue
@@ -347,7 +347,7 @@ func (c *Client) LookupInjectTarget(ctx context.Context, id string) (InjectLooku
 	if err != nil {
 		return InjectLookup{}, false, fmt.Errorf("looking up inject target %q: %w", id, err)
 	}
-	items := extractFlowArray(raw)
+	items := FlowArray(raw)
 	byID, _, _ := containers(items)
 	for _, item := range items {
 		var m nodeMeta
@@ -382,7 +382,7 @@ func (c *Client) NodeExists(ctx context.Context, id string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	for _, item := range extractFlowArray(raw) {
+	for _, item := range FlowArray(raw) {
 		var m struct {
 			ID string `json:"id"`
 		}
@@ -398,7 +398,7 @@ func (c *Client) NodeExists(ctx context.Context, id string) (bool, error) {
 // the {"flows":[...]} envelope (API v2). Returns 0 on any parse failure.
 func FlowTabCount(raw RawFlow) int {
 	n := 0
-	for _, item := range extractFlowArray(raw) {
+	for _, item := range FlowArray(raw) {
 		var meta struct {
 			Type string `json:"type"`
 		}
@@ -504,10 +504,12 @@ func validateZRefsInFlow(flow RawFlow, tabID string) error {
 	return nil
 }
 
-// extractFlowArray pulls the flat list of flow objects out of a GET /flows
+// FlowArray pulls the flat list of flow objects out of a GET /flows
 // response regardless of API-version envelope. Returns nil if neither shape
-// parses.
-func extractFlowArray(raw RawFlow) []json.RawMessage {
+// parses. Exported (issue #311) so the MCP layer can inspect a backup with
+// the SAME extractor the client deploys it with — a second envelope check
+// here would let a shape through that RestoreFlows accepts.
+func FlowArray(raw RawFlow) []json.RawMessage {
 	var arr []json.RawMessage
 	if json.Unmarshal(raw, &arr) == nil {
 		return arr

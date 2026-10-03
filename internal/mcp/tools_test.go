@@ -1822,6 +1822,145 @@ func TestSetFlows_RejectsDeniedNodeType(t *testing.T) {
 	}
 }
 
+// TestRestoreBackup_RejectsDeniedNodeType is the issue #311 regression:
+// restore_backup deploys the whole config, so a backup written before a
+// policy change could otherwise reintroduce a now-prohibited node type.
+// Every backup shape RestoreFlows accepts is covered — the flat array
+// Node-RED serves, the {"flows":[...]} API-version envelope, and a
+// subflow definition whose nested nodes carry the exec type.
+//
+// The fixture fails the test on ANY request: the guard has to fire before
+// the runtime is contacted, so a rejected backup must produce zero
+// deployment requests (and zero backup snapshots).
+func TestRestoreBackup_RejectsDeniedNodeType(t *testing.T) {
+	cases := map[string]string{
+		"flat array": `[
+			{"type":"tab","id":"tabA","label":"A"},
+			{"type":"exec","id":"e1","z":"tabA","x":140,"y":140,"command":"id","wires":[]}
+		]`,
+		"api envelope": `{"flows":[
+			{"type":"tab","id":"tabA","label":"A"},
+			{"type":"exec","id":"e1","z":"tabA","x":140,"y":140,"command":"id","wires":[]}
+		]}`,
+		"subflow definition": `[
+			{"type":"subflow","id":"sf1","name":"sf","in":[],"out":[],"nodes":[
+				{"id":"e2","type":"exec","z":"sf1","x":140,"y":140,"command":"id","wires":[]}
+			]}
+		]`,
+		"nested flow tab": `[{
+			"id":"tabA","label":"A",
+			"nodes":[{"id":"e1","type":"exec","z":"tabA","x":140,"y":140,"command":"id","wires":[]}],
+			"configs":[{"id":"c1","type":"system","name":"pwn"}]
+		}]`,
+	}
+
+	for name, doc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var mu sync.Mutex
+			var requests []string
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				requests = append(requests, r.Method+" "+r.URL.Path)
+				mu.Unlock()
+				_, _ = w.Write([]byte(`[]`))
+			}))
+			t.Cleanup(srv.Close)
+
+			backupDir := t.TempDir()
+			backupName := "flows-20260101-000000.000000000-000001.json"
+			if err := os.WriteFile(filepath.Join(backupDir, backupName), []byte(doc), 0o600); err != nil {
+				t.Fatalf("write backup: %v", err)
+			}
+
+			c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: backupDir})
+			if err != nil {
+				t.Fatalf("NewClient: %v", err)
+			}
+			s := New(c, Options{Version: "test", NodeDenylist: []string{"exec", "system"}})
+
+			res, err := s.handleRestoreBackup(context.Background(), mcp.CallToolRequest{
+				Params: mcp.CallToolParams{Arguments: map[string]any{"backup": backupName}},
+			})
+			if err != nil {
+				t.Fatalf("handleRestoreBackup returned err=%v", err)
+			}
+			if res == nil || !res.IsError {
+				t.Fatalf("expected an error result, got %+v", res)
+			}
+			tc, ok := res.Content[0].(mcp.TextContent)
+			if !ok {
+				t.Fatalf("expected TextContent, got %T", res.Content[0])
+			}
+			if !strings.Contains(tc.Text, "MCP_NODE_DENYLIST") {
+				t.Errorf("error must name MCP_NODE_DENYLIST so the operator can act, got %q", tc.Text)
+			}
+			if !strings.Contains(tc.Text, `"exec"`) && !strings.Contains(tc.Text, `"system"`) {
+				t.Errorf("error must echo the denied type back, got %q", tc.Text)
+			}
+
+			mu.Lock()
+			defer mu.Unlock()
+			if len(requests) != 0 {
+				t.Errorf("a rejected backup must not reach the runtime at all, got %v", requests)
+			}
+		})
+	}
+}
+
+// TestRestoreBackup_AllowsNonDeniedNodeType is the positive case: a backup
+// with only allowed node types still restores, so the new guard cannot be
+// a blanket refusal of restore_backup.
+func TestRestoreBackup_AllowsNonDeniedNodeType(t *testing.T) {
+	backupDir := t.TempDir()
+	doc := `[
+		{"type":"tab","id":"tabA","label":"A"},
+		{"type":"inject","id":"i1","z":"tabA","x":140,"y":140,"wires":[]}
+	]`
+	backupName := "flows-20260101-000000.000000000-000001.json"
+	if err := os.WriteFile(filepath.Join(backupDir, backupName), []byte(doc), 0o600); err != nil {
+		t.Fatalf("write backup: %v", err)
+	}
+
+	var deployed []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			// Pre-deploy snapshot.
+			_, _ = w.Write([]byte(`[{"type":"tab","id":"other","label":"Other","nodes":[]}]`))
+		case r.Method == "POST" && r.URL.Path == "/flows":
+			var err error
+			deployed, err = io.ReadAll(r.Body)
+			if err != nil {
+				t.Errorf("reading deploy body: %v", err)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: backupDir})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	s := New(c, Options{Version: "test", NodeDenylist: []string{"exec", "system"}})
+
+	res, err := s.handleRestoreBackup(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{"backup": backupName}},
+	})
+	if err != nil {
+		t.Fatalf("handleRestoreBackup returned err=%v", err)
+	}
+	if res == nil || res.IsError {
+		t.Fatalf("allowed backup must restore, got %+v", res)
+	}
+	if !bytes.Contains(deployed, []byte(`"id":"tabA"`)) {
+		t.Errorf("restore did not deploy the backup: %s", deployed)
+	}
+}
+
 // TestHandleSetFlows_NonTabOnlyRejected is the MCP-layer regression
 // pin for issue #106: an array of orphan nodes (no tab entry) used to
 // pass through normalizeFlowsArray and deploy, leaving the runtime
