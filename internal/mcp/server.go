@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -69,7 +70,15 @@ type Server struct {
 	// (issue #52). It is provisioned lazily on the first set_context call
 	// and reused across calls — the same inject + function node pair stays
 	// in the flow config until the operator deletes the flow tab.
-	ctxHelper *setContextHelper
+	//
+	// ctxHelperMu is the single shared synchronization point for the
+	// helper lifecycle: pointer publication, metadata writes, and
+	// restore-side invalidation. Issue #310. Every set_context path and
+	// every restore_backup that touches ctxHelper must take this lock;
+	// see ensureSetContextHelper for the lock-ordering contract with
+	// nodered.Client.writeMu.
+	ctxHelper   *setContextHelper
+	ctxHelperMu sync.Mutex
 
 	// denylist reports whether a given node type is forbidden by the
 	// operator-configured MCP_NODE_DENYLIST. Issue #81: defaults to a

@@ -18,10 +18,14 @@ package mcp
 // recreated" requirement.
 //
 // Concurrency: the helper is shared across all goroutines that call
-// set_context concurrently. provisioningMu guards the lazy provisioning
-// step; after it is provisioned, the helper ids are immutable, and
-// concurrent POSTs to /inject/:id are serialised by the runtime (which
-// already serialises inject triggers per node id).
+// set_context concurrently. Server.ctxHelperMu guards the entire
+// helper lifecycle — pointer publication, metadata writes, and the
+// restore-side invalidation. The lock is held across the whole
+// critical section (provisioning + inject dispatch) so the helper
+// observed at the fast path is the same one the inject uses, and a
+// restore cannot interleave so a caller uses a stale helper after a
+// successful restore. See ensureSetContextHelper for the full
+// contract and issue #310 for the original audit.
 
 import (
 	"context"
@@ -29,7 +33,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/fgjcarlos/nodered-mcp/internal/nodered"
@@ -38,6 +41,12 @@ import (
 // setContextHelper holds the runtime-side ids of the helper flow the MCP
 // provisions for the set_context tool. Zero value = not provisioned. The
 // helper is stable for the lifetime of the Server.
+//
+// Once a helper is published (its flowID/injectID/functionID are set),
+// it is effectively immutable: every field is written exactly once,
+// under Server.ctxHelperMu, before the pointer becomes visible to other
+// readers. Readers only consult a non-nil, fully-populated helper and
+// never mutate it, so the fields can be loaded without re-locking.
 type setContextHelper struct {
 	// flowID, injectID, functionID are the Node-RED ids the helper
 	// installs in the runtime. They are chosen at provisioning time
@@ -45,12 +54,6 @@ type setContextHelper struct {
 	flowID     string
 	injectID   string
 	functionID string
-
-	// provisioningMu guards the lazy "if zero, provision" step. After
-	// the first successful provision it is never re-taken — the helper
-	// is a Server-lifetime singleton. A single field in Server.ctxHelper
-	// would be racy under concurrent first-callers, hence the mutex.
-	provisioningMu sync.Mutex
 }
 
 // provisioned reports whether the helper has been installed on the
@@ -102,21 +105,6 @@ if (scope === "global") {
 return msg;
 `
 
-// ensureSetContextHelper lazy-provisions the on-runtime helper used by
-// set_context. It is a no-op after the first successful provision.
-//
-// Why a custom flow tab: the helper is invisible-by-default to the
-// user (label begins with __, label prefix is what shows in the
-// editor sidebar) and lives in its own tab so the wires, function
-// code, and inject trigger stay together even if the user moves
-// other nodes around.
-//
-// Why a mutex and not a sync.Once: the cheap test inside the mutex
-// is `if h.provisioned()`, which lets the common case (already
-// provisioned) skip the slow part. A sync.Once would also work but
-// forces every caller to share the same gate, even on the no-op
-// path; the explicit mutex makes that fast path obvious in the
-// trace.
 // setContextProvisioningDelay is how long the first call after a
 // lazy-provisioned helper waits before retrying a 404 on /inject/:id.
 // Node-RED's routing layer occasionally answers 404 to the first
@@ -153,6 +141,29 @@ func (s *Server) injectWithProvisioningRetry(ctx context.Context, injectID strin
 	return s.nrClient.InjectNodeWithBody(ctx, injectID, body)
 }
 
+// ensureSetContextHelper returns the lazily-provisioned set_context
+// helper, provisioning it on the first call. It is a no-op after the
+// first successful provision.
+//
+// Locking contract (issue #310): the caller MUST hold
+// Server.ctxHelperMu for the entire critical section that includes
+// the inject dispatch in handleSetContext. Holding the lock here
+// means:
+//   - pointer publication (s.ctxHelper = h) and metadata writes
+//     (h.flowID, h.injectID, h.functionID) happen under the same
+//     mutex acquisition, so a reader can never observe a partially-
+//     populated helper;
+//   - the "at most one provisioning" property is enforced: only the
+//     first goroutine to acquire the lock passes the
+//     `!provisioned` check, the rest re-check under the lock and
+//     skip the slow path;
+//   - a restore_backup cannot nil s.ctxHelper out from under an
+//     in-flight set_context, so no caller can use a helper that the
+//     restore has invalidated.
+//
+// The second return value (justProvisioned) is true when this call
+// performed the provisioning work; it gates the post-provisioning
+// retry on a 404 (issue #158).
 func (s *Server) ensureSetContextHelper(ctx context.Context) (*setContextHelper, bool, error) {
 	if s.readOnly {
 		// Defensive: the tool is withheld in read-only mode, so this
@@ -161,24 +172,19 @@ func (s *Server) ensureSetContextHelper(ctx context.Context) (*setContextHelper,
 		return nil, false, fmt.Errorf("set_context is not available in read-only mode")
 	}
 
+	// Fast path: a previous caller already provisioned. The helper
+	// is immutable past this point, so reading its fields off the
+	// pointer is safe without re-locking.
 	if s.ctxHelper != nil && s.ctxHelper.provisioned() {
 		return s.ctxHelper, false, nil
 	}
 
+	// Slow path: install the placeholder, then provision. A failed
+	// provision rolls the placeholder back so the next call retries
+	// from scratch rather than seeing a "provisioned" helper that
+	// has no flow on the runtime.
 	s.ctxHelper = &setContextHelper{}
-	s.ctxHelper.provisioningMu.Lock()
-	defer s.ctxHelper.provisioningMu.Unlock()
-
-	// Re-check under the lock: another goroutine may have just finished
-	// provisioning.
-	if s.ctxHelper.provisioned() {
-		return s.ctxHelper, false, nil
-	}
-
 	if err := s.provisionSetContextHelper(ctx); err != nil {
-		// Roll back the placeholder so the next call retries from
-		// scratch rather than seeing a "provisioned" helper that
-		// actually has no flow on the runtime.
 		s.ctxHelper = nil
 		return nil, false, err
 	}
