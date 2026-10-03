@@ -29,7 +29,7 @@ func TestMergeServer_PureKeepsExistingSecretsAtKnownKeys(t *testing.T) {
   },
   "somePref": true
 }`
-	root, err := mergeServer([]byte(original), "mcpServers", "/bin/nodered-mcp", map[string]string{"NODERED_URL": "http://localhost:1880"})
+	root, err := mergeServer([]byte(original), "", "mcpServers", "/bin/nodered-mcp", map[string]string{"NODERED_URL": "http://localhost:1880"})
 	if err != nil {
 		t.Fatalf("mergeServer: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestMergeServer_PureKeepsExistingSecretsAtKnownKeys(t *testing.T) {
 // is run with an env map that does include NODERED_TOKEN, simulating the
 // real flow where the operator typed one.
 func TestMergeServer_NewNoderedEntryNeverCarriesToken(t *testing.T) {
-	_, err := mergeServer([]byte(`{}`), "mcpServers", "/bin/nodered-mcp", map[string]string{
+	_, err := mergeServer([]byte(`{}`), "", "mcpServers", "/bin/nodered-mcp", map[string]string{
 		"NODERED_URL":   "http://localhost:1880",
 		"NODERED_TOKEN": "leak-me",
 	})
@@ -76,7 +76,7 @@ func TestMergeServer_NewNoderedEntryNeverCarriesToken(t *testing.T) {
 	}
 	// We re-run the merge to capture the resulting root so we can assert
 	// against the same path the dry-run code uses.
-	root, err := mergeServer([]byte(`{}`), "mcpServers", "/bin/nodered-mcp", map[string]string{
+	root, err := mergeServer([]byte(`{}`), "", "mcpServers", "/bin/nodered-mcp", map[string]string{
 		"NODERED_URL":   "http://localhost:1880",
 		"NODERED_TOKEN": "leak-me",
 	})
@@ -126,7 +126,7 @@ func TestDryRun_TouchesNoFilesystem(t *testing.T) {
 	}
 
 	// Run the pure merge (the same code path dry-run uses).
-	root, err := mergeServer(beforeBytes, "mcpServers", "/bin/nodered-mcp", map[string]string{"NODERED_URL": "http://localhost:1880"})
+	root, err := mergeServer(beforeBytes, "", "mcpServers", "/bin/nodered-mcp", map[string]string{"NODERED_URL": "http://localhost:1880"})
 	if err != nil {
 		t.Fatalf("mergeServer: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestDryRun_TouchesNoFilesystem(t *testing.T) {
 	//    emit by re-running mergeServer with the *fresh* file bytes
 	//    (which is what the real --write code does) and checking the
 	//    preview matches the same shape.
-	mergedWriteShape, err := mergeServer(beforeBytes, "mcpServers", "/bin/nodered-mcp", map[string]string{"NODERED_URL": "http://localhost:1880"})
+	mergedWriteShape, err := mergeServer(beforeBytes, "", "mcpServers", "/bin/nodered-mcp", map[string]string{"NODERED_URL": "http://localhost:1880"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func TestDryRun_MissingTargetFileStillPreviews(t *testing.T) {
 	// Simulate the missing-file case by handing mergeServer an empty
 	// document — the same shape readJSONObject returns for a non-existent
 	// file.
-	root, err := mergeServer([]byte(""), "mcpServers", "/bin/nodered-mcp", map[string]string{"NODERED_URL": "http://localhost:1880"})
+	root, err := mergeServer([]byte(""), "", "mcpServers", "/bin/nodered-mcp", map[string]string{"NODERED_URL": "http://localhost:1880"})
 	if err != nil {
 		t.Fatalf("mergeServer on empty input: %v", err)
 	}

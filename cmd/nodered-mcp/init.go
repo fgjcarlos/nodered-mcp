@@ -189,7 +189,8 @@ func runInitDryRun(target mcpClient, bin string, env map[string]string) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	root, err := mergeServer(data, rootKey, bin, env)
+	// The file exists, so label errors with its path exactly as --write does.
+	root, err := mergeServer(data, path, rootKey, bin, env)
 	if err != nil {
 		return err
 	}
@@ -285,8 +286,11 @@ func writableTarget(key string) (path, rootKey string, ok bool) {
 // not touch the filesystem. --dry-run calls this directly to preview the
 // exact merge that --write would commit; the seam guarantees both paths
 // produce the same bytes.
-func mergeServer(data []byte, rootKey, bin string, env map[string]string) (map[string]any, error) {
-	root, err := parseJSONObject(data)
+//
+// path labels the error messages; pass "" when the bytes did not come from
+// a file on disk (the --dry-run preview of a file that may not exist).
+func mergeServer(data []byte, path, rootKey, bin string, env map[string]string) (map[string]any, error) {
+	root, err := parseJSONObject(data, path)
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +302,10 @@ func mergeServer(data []byte, rootKey, bin string, env map[string]string) (map[s
 		var ok bool
 		servers, ok = value.(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("existing config has non-object %q; refusing to overwrite it", rootKey)
+			if path == "" {
+				return nil, fmt.Errorf("existing config has non-object %q; refusing to overwrite it", rootKey)
+			}
+			return nil, fmt.Errorf("existing config at %s has non-object %q; refusing to overwrite it", path, rootKey)
 		}
 	}
 	servers["nodered"] = map[string]any{"command": bin, "env": envWithoutToken(env)}
@@ -314,27 +321,30 @@ func mergeServerIntoFile(path, rootKey, bin string, env map[string]string) error
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	root, err := mergeServer(data, rootKey, bin, env)
+	root, err := mergeServer(data, path, rootKey, bin, env)
 	if err != nil {
-		if strings.HasPrefix(err.Error(), "existing config has non-object") {
-			return fmt.Errorf("existing config at %s has non-object %q; refusing to overwrite it", path, rootKey)
-		}
 		return err
 	}
 	return writeJSONObject(path, root)
 }
 
-// parseJSONObject is readJSONObject's file-IO-free twin: it returns an
+// parseJSONObject is readJSONObject's file-IO-free half: it returns an
 // empty map for missing-or-blank input, an error for non-empty invalid
 // JSON, and a usable map otherwise. Used by mergeServer so --dry-run
 // never has to touch the filesystem.
-func parseJSONObject(data []byte) (map[string]any, error) {
+//
+// path is only used to label the error; pass "" when there is no file
+// behind the bytes (the --dry-run preview of a file that may not exist).
+func parseJSONObject(data []byte, path string) (map[string]any, error) {
 	if len(strings.TrimSpace(string(data))) == 0 {
 		return map[string]any{}, nil
 	}
 	var m map[string]any
 	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("existing config is not valid JSON — refusing to overwrite it: %w", err)
+		if path == "" {
+			return nil, fmt.Errorf("existing config is not valid JSON — refusing to overwrite it: %w", err)
+		}
+		return nil, fmt.Errorf("existing config at %s is not valid JSON — refusing to overwrite it: %w", path, err)
 	}
 	if m == nil {
 		m = map[string]any{}
@@ -390,7 +400,8 @@ func redactSecrets(root map[string]any) map[string]any {
 
 // readJSONObject reads a JSON object, returning an empty map if the file is
 // missing or blank. A non-empty file that fails to parse is an error — we do
-// NOT overwrite a config we can't understand.
+// NOT overwrite a config we can't understand. Thin file-IO wrapper over
+// parseJSONObject so both read paths share one validation.
 func readJSONObject(path string) (map[string]any, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -399,17 +410,7 @@ func readJSONObject(path string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(strings.TrimSpace(string(data))) == 0 {
-		return map[string]any{}, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("existing config at %s is not valid JSON — refusing to overwrite it: %w", path, err)
-	}
-	if m == nil {
-		m = map[string]any{}
-	}
-	return m, nil
+	return parseJSONObject(data, path)
 }
 
 // writeJSONObject writes m as indented JSON, creating parent dirs and backing

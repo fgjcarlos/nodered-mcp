@@ -110,8 +110,14 @@ func TestMergeServerIntoFile_RefusesInvalidJSON(t *testing.T) {
 	if err := os.WriteFile(path, []byte("{ not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := mergeServerIntoFile(path, "mcpServers", "/bin/x", map[string]string{}); err == nil {
+	err := mergeServerIntoFile(path, "mcpServers", "/bin/x", map[string]string{})
+	if err == nil {
 		t.Fatal("expected refusal to overwrite invalid JSON, got nil")
+	}
+	// The refusal must name the file: an operator who ran init for one
+	// client needs to know which config is broken, not just that one is.
+	if !strings.Contains(err.Error(), path) {
+		t.Fatalf("expected refusal to name the offending path, got %v", err)
 	}
 }
 
