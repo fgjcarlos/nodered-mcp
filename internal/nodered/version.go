@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // Version is a parsed Node-RED semver triple. Pre-release tags are
@@ -84,8 +85,15 @@ func ParseVersion(s string) Version {
 // versionCache is a one-shot probe wrapper: the first call to
 // NodeRedVersion probes the runtime, every later call returns the
 // cached value. sync.Once guarantees the probe runs at most once
-// even with concurrent callers (atomic.Load+Store would race:
-// all goroutines see nil and all probe).
+// even with concurrent callers (a plain check-then-set would race:
+// all goroutines see "not probed" and all probe).
+//
+// value and probed are read by CachedNodeRedVersion from a request
+// handler, which does not take the Once. probed is therefore atomic;
+// a plain bool would race with the closure that sets it. The value is
+// stored BEFORE probed, so a reader that observes probed==true also
+// observes the value — that ordering is what makes reading value
+// without the Once safe.
 //
 // probed distinguishes "the probe ran, here is the result"
 // (known-supported or known-too-low) from "nobody ever asked the
@@ -93,9 +101,15 @@ func ParseVersion(s string) Version {
 // CachedNodeRedVersion; they get the zero Version on the cold
 // side, never a surprise network call mid-request.
 type versionCache struct {
-	once   sync.Once
+	once sync.Once
+	// value is a plain field, not atomic. Every read of it is either
+	// after once.Do returns (which sync.Once already orders) or after
+	// probed.Load() returns true — and probed is atomic, so the
+	// value-then-probed store order makes that read safe. A
+	// non-atomic probed would race here: the handler reads the
+	// cache without taking the Once.
 	value  Version
-	probed bool
+	probed atomic.Bool
 }
 
 // NodeRedVersion returns the cached Node-RED version. The first
@@ -112,12 +126,17 @@ type versionCache struct {
 // constructor do not hit a nil httpClient.
 func (c *Client) NodeRedVersion(ctx context.Context) Version {
 	c.nrVersion.once.Do(func() {
-		c.nrVersion.probed = true
 		if c == nil || c.baseURL == "" {
+			c.nrVersion.probed.Store(true)
 			return
 		}
-		c.nrVersion.value = detectNodeRedVersion(ctx, c)
+		v := detectNodeRedVersion(ctx, c)
+		c.nrVersion.value = v
+		c.nrVersion.probed.Store(true)
 	})
+	if !c.nrVersion.probed.Load() {
+		return Version{}
+	}
 	return c.nrVersion.value
 }
 
@@ -141,7 +160,7 @@ func (c *Client) NodeRedVersion(ctx context.Context) Version {
 // `var onceProbe sync.Once` the gate selects against so
 // "unknown" only means "the probe is still running".
 func (c *Client) CachedNodeRedVersion() Version {
-	if c == nil || !c.nrVersion.probed {
+	if c == nil || !c.nrVersion.probed.Load() {
 		return Version{}
 	}
 	return c.nrVersion.value

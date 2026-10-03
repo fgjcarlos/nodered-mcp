@@ -214,3 +214,28 @@ func TestExtractVersionField(t *testing.T) {
 		t.Errorf("got %q, want 3.1.0", v)
 	}
 }
+
+// TestCachedNodeRedVersion_ConcurrentWithProbe is the regression for a
+// real data race: CachedNodeRedVersion reads the cache from a request
+// handler without taking the Once, so both the value and the probed
+// flag must be atomic. A plain bool/struct pair races with the once
+// closure that writes them; run with -race to catch a regression.
+func TestCachedNodeRedVersion_ConcurrentWithProbe(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"version":"5.0.1"}`))
+	})
+	var wg sync.WaitGroup
+	for i := 0; i < 64; i++ {
+		wg.Add(2)
+		go func() { defer wg.Done(); _ = c.NodeRedVersion(context.Background()) }()
+		go func() { defer wg.Done(); _ = c.CachedNodeRedVersion() }()
+	}
+	wg.Wait()
+
+	// After the storm both accessors must agree, and the probe must
+	// have populated the cache exactly once.
+	want := c.NodeRedVersion(context.Background())
+	if got := c.CachedNodeRedVersion(); got != want {
+		t.Errorf("cached read disagrees with the probe: got %+v, want %+v", got, want)
+	}
+}
