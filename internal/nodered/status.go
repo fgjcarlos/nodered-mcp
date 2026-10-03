@@ -257,9 +257,9 @@ func (t *StatusTail) session(ctx context.Context) error {
 
 	conn, _, err := websocket.Dial(ctx, t.wsURL, opts)
 	if err != nil {
-		// redactedWrap preserves errors.Is/As via Unwrap while
-		// stripping the token from the rendered string. Issue #312.
-		return redactedWrap(err)
+		// Name the redacted destination and scrub the wrapped error, which
+		// reports the handshake URL itself. Issue #312.
+		return fmt.Errorf("connecting to %s: %w", RedactURL(t.wsURL), redactedWrap(err))
 	}
 	defer conn.CloseNow()
 	// Status payloads are tiny ({text,fill,shape} at most), but
