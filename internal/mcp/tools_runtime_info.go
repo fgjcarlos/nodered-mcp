@@ -30,10 +30,20 @@ type runtimeInfo struct {
 		RuntimeState json.RawMessage `json:"runtimeState,omitempty"`
 	} `json:"nodeRed"`
 	MCP struct {
-		Version                string            `json:"version"`
-		NodeRedVersionDetected bool              `json:"nodeRedVersionDetected"`
-		CapabilityMatrix       map[string]string `json:"capabilityMatrix"`
+		Version                string                             `json:"version"`
+		NodeRedVersionDetected bool                               `json:"nodeRedVersionDetected"`
+		CapabilityMatrix       map[string]string                  `json:"capabilityMatrix"`
+		CapabilityGuidance     map[string]capabilityGuidanceEntry `json:"capabilityGuidance"`
 	} `json:"mcp"`
+}
+
+// capabilityGuidanceEntry is the reason/remedy pair attached to a
+// non-ok capability entry. reason is required when the entry is
+// present; remedy is omitted when we have no concrete next step
+// (e.g. unknown runtime — we don't know what would fix it).
+type capabilityGuidanceEntry struct {
+	Reason string `json:"reason"`
+	Remedy string `json:"remedy,omitempty"`
 }
 
 // handleGetRuntimeInfo reports the MCP's view of the runtime. It
@@ -55,9 +65,18 @@ func (s *Server) handleGetRuntimeInfo(ctx context.Context, _ mcp.CallToolRequest
 	info.NodeRed.VersionKnown = probe.NodeRedVersion.Known
 	info.MCP.Version = s.version
 	info.MCP.NodeRedVersionDetected = probe.NodeRedVersion.Known
-	info.MCP.CapabilityMatrix = make(map[string]string, 12)
-	for tool, cap := range noderedCapabilityMatrix(probe) {
+	matrix := noderedCapabilityMatrix(probe)
+	info.MCP.CapabilityMatrix = make(map[string]string, len(matrix))
+	info.MCP.CapabilityGuidance = make(map[string]capabilityGuidanceEntry, len(matrix))
+	for tool, cap := range matrix {
 		info.MCP.CapabilityMatrix[tool] = string(cap)
+		// ok carries nothing — absence is the signal that the
+		// tool is fine. Every other capability owes the operator
+		// a reason (and a remedy where a concrete next step
+		// exists), derived from the same probe the matrix used.
+		if reason, remedy := capabilityGuidance(tool, cap, probe); reason != "" {
+			info.MCP.CapabilityGuidance[tool] = capabilityGuidanceEntry{Reason: reason, Remedy: remedy}
+		}
 	}
 
 	// Settings + runtimeState come from /settings; we keep them as
