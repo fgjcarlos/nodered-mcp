@@ -80,7 +80,7 @@ was not proven incompatible.
 - No push, PR or issue closure without authorization.
 
 ## Work unit
-- [ ] T1: Gate set_context and the inject payload path on the existing
+- [x] T1: Gate set_context and the inject payload path on the existing
   version table.
   - Route: delegated direct (2+ non-trivial files).
   - Risk: high — it is a refusal path in front of real writes. A wrong
@@ -157,6 +157,39 @@ the next person does not read the loopback branch as "tests only".
 The gate remains fail-open by design, and a call that proceeds without a
 version check carries `UnknownVersionNotice`, so a caller is at least
 told no guarantee was applied.
+
+### Closure verification (parent, this session)
+
+T1 closed. Risk tier high, so verification was proportionate: writer
+self-verification plus an independent read-only verifier for the full
+suite, and a parent sabotage in both directions.
+
+- `go build ./...`, `go test ./... -count=1` (5/5 packages),
+  `go test -race ./internal/mcp/ ./internal/nodered/`, `go vet ./...`,
+  `gofmt -l ./internal/` — all clean, **no DATA RACE warning**.
+- Sabotage, parent-run, restored clean afterwards: neutering
+  `RefuseForVersion` to never refuse produced
+  `refused set_context should not hit POST /flow`,
+  `refused call reached the fixture 1 times, want 0` and
+  `refused inject_node(payload) should not probe /flows`. The tests
+  assert real writes, not just the error string.
+- Acceptance mapping confirmed by test name: known-too-low refuses,
+  known-supported proceeds, unknown proceeds with notice, and
+  `TestHandleInjectNode_NoPayloadStillFiresOnTooLowVersion` pins the
+  one case a top-of-handler gate would have broken.
+
+Confirmed by grep that the documented gap is the *only* path that
+leaves the cache cold: the banner probe (server.go:286) and
+`get_runtime_info` (tools_runtime_info.go:108) are the only two
+callers of `NodeRedVersion`, and every gate reads
+`CachedNodeRedVersion`. So on a `localhost` deployment the gate does
+not engage until something calls `get_runtime_info` — a narrower
+claim than "never", and the `UnknownVersionNotice` is the only signal
+during that window.
+
+## Next step
+T1 is the whole of #316. Remaining work is delivery, and it is the
+user's call: push the branch, open the PR, close the issue.
 
 Verified by reading before delegating:
 - `NodeRedVersion` is `sync.Once`-cached (version.go:89-114) and skips
