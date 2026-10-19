@@ -101,20 +101,21 @@ func (s *Server) handleSetContext(ctx context.Context, req mcp.CallToolRequest) 
 	// the other two it is required AND must point at the helper's
 	// own target, because the helper is the only place that can
 	// actually accept the write.
-	switch scope {
-	case "global", "flow", "node":
-	default:
-		return mcp.NewToolResultError(
-			fmt.Sprintf(`scope must be "global", "flow" or "node", got %q`, scope),
-		), nil
+	value, err := parseSetContextValue(scope, valueRaw)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	var value any
-	if err := json.Unmarshal([]byte(valueRaw), &value); err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf(
-			"value is not valid JSON: %v (pass it as a JSON-encoded string, e.g. \"42\" or \"\\\"hello\\\"\")",
-			err,
-		)), nil
+	// Version gate (issue #316). The whole body of set_context
+	// depends on the __user_inject_props__ override that only
+	// behaves as documented on Node-RED 5.x; a refused call
+	// must provision no flow tab, no inject and no function
+	// node, so the check sits above the lock. Argument and
+	// scope validation stay above the gate so a caller who
+	// forgot a required field still sees a field error rather
+	// than a misleading version error.
+	if refuse, msg := RefuseForVersion("set_context", s.nrClient.CachedNodeRedVersion()); refuse {
+		return mcp.NewToolResultError(msg), nil
 	}
 
 	// The validation, the helper selection, and the inject must all
@@ -158,11 +159,42 @@ func (s *Server) handleSetContext(ctx context.Context, req mcp.CallToolRequest) 
 		return mcp.NewToolResultError(fmt.Sprintf("dispatching set_context: %v", err)), nil
 	}
 
+	return s.setContextSuccessResult(scope, key, value, helper), nil
+}
+
+// parseSetContextValue validates the scope before decoding the JSON value.
+func parseSetContextValue(scope, valueRaw string) (any, error) {
+	switch scope {
+	case "global", "flow", "node":
+	default:
+		return nil, fmt.Errorf(`scope must be "global", "flow" or "node", got %q`, scope)
+	}
+
+	var value any
+	if err := json.Unmarshal([]byte(valueRaw), &value); err != nil {
+		return nil, fmt.Errorf(
+			"value is not valid JSON: %v (pass it as a JSON-encoded string, e.g. \"42\" or \"\\\"hello\\\"\")",
+			err,
+		)
+	}
+	return value, nil
+}
+
+// setContextSuccessResult renders the completed write and its version notice.
+func (s *Server) setContextSuccessResult(scope, key string, value any, helper *setContextHelper) *mcp.CallToolResult {
+	// If the version was never detected, RefuseForVersion let the
+	// call through (no evidence of incompatibility) but the caller
+	// still needs to know the call was not verified. Append the
+	// notice only in that case; known-supported runs stay quiet.
+	notice := ""
+	if !s.nrClient.CachedNodeRedVersion().Known {
+		notice = UnknownVersionNotice
+	}
 	return mcp.NewToolResultText(fmt.Sprintf(
 		"Set context %s key %q to %s (via helper flow %q, inject %q). "+
-			"Read it back with get_context; the helper is reused, not re-created.",
-		scope, key, prettyJSONValue(value), helper.flowID, helper.injectID,
-	)), nil
+			"Read it back with get_context; the helper is reused, not re-created.%s",
+		scope, key, prettyJSONValue(value), helper.flowID, helper.injectID, notice,
+	))
 }
 
 // validateContextTarget enforces the scope/id invariants for set_context.

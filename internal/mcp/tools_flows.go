@@ -485,6 +485,28 @@ func (s *Server) handleInjectNode(ctx context.Context, req mcp.CallToolRequest) 
 		payload = encoded
 	}
 
+	// Version gate (issue #316). The guard is conditional on the
+	// payload being present: the no-payload path is the original
+	// behaviour and works on every supported NR, while the
+	// __user_inject_props__ payload override is what only behaves
+	// as documented on 5.0+. Gating only on hasPayload is what
+	// preserves the no-payload call on an old runtime (Decision
+	// 1) while still placing the check before the disabled/lookup
+	// probe (the issue's acceptance criterion that "no GET
+	// /flows reaches the fixture on a refused call").
+	//
+	// ponytail: condition-on-payload is the smallest structural
+	// change that satisfies both constraints. A future audit
+	// that wants the no-payload path gated too (e.g. a feature
+	// that lands after 5.0) can drop the conditional and the
+	// no-payload regression test will need to flip its expected
+	// outcome.
+	if hasPayload && rawPayload != nil {
+		if refuse, msg := RefuseForVersion("inject_node", s.nrClient.CachedNodeRedVersion()); refuse {
+			return mcp.NewToolResultError(msg), nil
+		}
+	}
+
 	// Reject disabled candidates before touching the wire. The
 	// admin /inject/:id endpoint accepts the call regardless and
 	// returns success — the runtime then silently drops the
@@ -524,7 +546,11 @@ func (s *Server) handleInjectNode(ctx context.Context, req mcp.CallToolRequest) 
 		slog.Error("inject_node failed", "error", err, "id", id)
 		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
 	}
-	return mcp.NewToolResultText(fmt.Sprintf("Inject node %q fired with payload.", id)), nil
+	notice := ""
+	if !s.nrClient.CachedNodeRedVersion().Known {
+		notice = UnknownVersionNotice
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("Inject node %q fired with payload.%s", id, notice)), nil
 }
 
 // encodePayloadArg normalises a payload argument that arrived as
