@@ -302,10 +302,10 @@ func TestHandleSetContext_ProceedsOnUnknownVersion_WithNotice(t *testing.T) {
 
 // setcontextSupportedHandler returns a handler that handles the
 // minimum provisioning chain (GET /flows, POST /flow, AddNode
-// GET/PUT /flow/:id, ConnectNodes PUT /flow/:id, POST
-// /inject/:id). The shape mirrors the live-flow fixture in
-// tools_test.go: a single mutable liveFlow tracks the helper
-// tab's current nodes; every PUT /flow/:id updates it so the
+// GET /flow/:id, revisioned POST /flows, POST /inject/:id).
+// The shape mirrors the live-flow fixture in tools_test.go:
+// a mutable liveFlow tracks the helper tab's current nodes;
+// every partial deployment updates it so the
 // next GET /flow/:id (the read half of every editFlow call)
 // reflects the just-installed state. This is the smallest
 // fixture that lets a known-supported set_context succeed end
@@ -342,10 +342,7 @@ func setcontextSupportedHandler() http.Handler {
 		defer mu.Unlock()
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/flows":
-			_, _ = w.Write([]byte(fmt.Sprintf(
-				`[{"type":"tab","id":"other","label":"Other","nodes":[]},%s]`,
-				refreshSnapshot(),
-			)))
+			_, _ = w.Write(mockFlowSnapshot(r, []byte(`{"id":"other","label":"Other"}`), refreshSnapshot()))
 		case r.Method == http.MethodPost && r.URL.Path == "/flow":
 			// CreateFlow: echo the body so the response
 			// carries the requested tab id
@@ -357,11 +354,10 @@ func setcontextSupportedHandler() http.Handler {
 			// read-modify-write cycle sees the
 			// just-installed nodes.
 			_, _ = w.Write(refreshSnapshot())
-		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/flow/"):
-			// editFlow's write half: ingest the body
-			// so the next GET reflects it.
+		case r.Method == http.MethodPost && r.URL.Path == "/flows":
+			// editFlow's write half: rebuild the nested read shape.
 			body, _ := io.ReadAll(r.Body)
-			ingestPUT(body)
+			ingestPUT(mockNestedTab(body, "mcp_ctx_helper_tab"))
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/inject/"):
 			_, _ = w.Write([]byte(`{}`))

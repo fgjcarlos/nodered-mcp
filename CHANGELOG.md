@@ -8,6 +8,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Preserve editor tab order when updating a flow or editing its nodes (#324).
+  Updates now back up the revisioned configuration and deploy in place using
+  Admin API v2 with deployment type `flows`. Unrelated configuration and omitted
+  metadata are retained; revision conflicts are returned without retrying.
+
 - fix(npm): retry registry reads after `npm publish` and `npm
   dist-tag add` to tolerate npmjs propagation delay (#298). The
   v0.7.2 release required two manual reruns because the verifier

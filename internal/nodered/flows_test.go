@@ -50,9 +50,9 @@ func TestUpdateFlow_RoundTripPreservesFields(t *testing.T) {
 		case r.Method == "GET" && r.URL.Path == "/flow/tab1":
 			_, _ = w.Write([]byte(richFlow))
 		case r.Method == "GET" && r.URL.Path == "/flows":
-			// Backup snapshot fetch.
-			_, _ = w.Write([]byte("[" + richFlow + "]"))
-		case r.Method == "PUT" && r.URL.Path == "/flow/tab1":
+			// The revisioned deployment base is also the backup.
+			_, _ = w.Write(testRevisionedTab(t, richFlow))
+		case r.Method == "POST" && r.URL.Path == "/flows":
 			putBody, _ = io.ReadAll(r.Body)
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -87,8 +87,12 @@ func TestUpdateFlow_WritesBackupFirst(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flows":
-			_, _ = w.Write([]byte("[" + richFlow + "]"))
-		case r.Method == "PUT":
+			_, _ = w.Write(testRevisionedTab(t, richFlow))
+		case r.Method == "POST" && r.URL.Path == "/flows":
+			entries, err := os.ReadDir(dir)
+			if err != nil || len(entries) != 1 {
+				t.Errorf("deployment reached runtime before backup: entries=%v err=%v", entries, err)
+			}
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
@@ -226,8 +230,8 @@ func TestUpdateFlow_AcceptsValidZ(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flows":
-			_, _ = w.Write([]byte(`[]`))
-		case r.Method == "PUT" && r.URL.Path == "/flow/tabA":
+			_, _ = w.Write([]byte(`{"rev":"r","flows":[{"id":"tabA","type":"tab"}]}`))
+		case r.Method == "POST" && r.URL.Path == "/flows":
 			putPath = r.URL.Path
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -247,8 +251,8 @@ func TestUpdateFlow_AcceptsValidZ(t *testing.T) {
 	if err := c.UpdateFlow(context.Background(), "tabA", good); err != nil {
 		t.Fatalf("UpdateFlow rejected a node with a valid z: %v", err)
 	}
-	if putPath != "/flow/tabA" {
-		t.Errorf("expected the PUT to reach /flow/tabA, got %q", putPath)
+	if putPath != "/flows" {
+		t.Errorf("expected the POST to reach /flows, got %q", putPath)
 	}
 }
 

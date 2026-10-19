@@ -424,13 +424,12 @@ func TestInstantiateSubflow_HappyPath(t *testing.T) {
 		case r.Method == "GET" && r.URL.Path == "/flow/tab_x":
 			getPath = r.URL.Path
 			_, _ = w.Write(flowBody)
-		case r.Method == "PUT" && r.URL.Path == "/flow/tab_x":
+		case r.Method == "POST" && r.URL.Path == "/flows":
 			putPath = r.URL.Path
 			putBody, _ = io.ReadAll(r.Body)
 			w.WriteHeader(http.StatusNoContent)
-		case r.URL.Path == "/flows":
-			// Backup snapshot for UpdateFlow's safety net.
-			_, _ = w.Write([]byte(`[` + string(flowBody) + `]`))
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			_, _ = w.Write(testRevisionedTab(t, string(flowBody)))
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
@@ -447,8 +446,8 @@ func TestInstantiateSubflow_HappyPath(t *testing.T) {
 	if getPath != "/flow/tab_x" {
 		t.Errorf("expected GET /flow/tab_x for the read step, got %q", getPath)
 	}
-	if putPath != "/flow/tab_x" {
-		t.Errorf("expected PUT /flow/tab_x for the write, got %q", putPath)
+	if putPath != "/flows" {
+		t.Errorf("expected POST /flows for the write, got %q", putPath)
 	}
 	// The returned node must carry the runtime-required fields set
 	// by the helper regardless of the caller's payload.
@@ -482,11 +481,11 @@ func TestInstantiateSubflow_NoParams(t *testing.T) {
 			_, _ = w.Write([]byte(globalSubflowsBody))
 		case r.Method == "GET" && r.URL.Path == "/flow/tab_x":
 			_, _ = w.Write([]byte(`{"id":"tab_x","label":"X","nodes":[]}`))
-		case r.Method == "PUT" && r.URL.Path == "/flow/tab_x":
+		case r.Method == "POST" && r.URL.Path == "/flows":
 			putBody, _ = io.ReadAll(r.Body)
 			w.WriteHeader(http.StatusNoContent)
-		case r.URL.Path == "/flows":
-			_, _ = w.Write([]byte(`[{"id":"tab_x","type":"tab","label":"X","nodes":[]}]`))
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			_, _ = w.Write(testRevisionedTab(t, `{"id":"tab_x","label":"X","nodes":[]}`))
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
@@ -571,15 +570,15 @@ func TestSubflowCRUD_EndToEnd(t *testing.T) {
 		return out
 	}
 	ingestTabPut := func(body []byte) {
-		tab = body
+		tab = testNestedDeployment(t, body, "tab_app")
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flows":
-			// Backup snapshot fetch.
-			_, _ = w.Write([]byte(`[` + string(refreshTab()) + `]`))
+			// Revisioned deployment base and backup.
+			_, _ = w.Write(testRevisionedTab(t, string(refreshTab())))
 		case r.Method == "GET" && r.URL.Path == "/flow/global":
 			// Initial state: no subflows. After CreateSubflow, the
 			// next GET sees the new one because the mock reads
@@ -594,7 +593,7 @@ func TestSubflowCRUD_EndToEnd(t *testing.T) {
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == "GET" && r.URL.Path == "/flow/tab_app":
 			_, _ = w.Write(refreshTab())
-		case r.Method == "PUT" && r.URL.Path == "/flow/tab_app":
+		case r.Method == "POST" && r.URL.Path == "/flows":
 			putTabBody, _ = io.ReadAll(r.Body)
 			ingestTabPut(putTabBody)
 			w.WriteHeader(http.StatusNoContent)

@@ -81,7 +81,7 @@ func TestSetContextHelper_ConcurrentFirstCallersProvisionOnce(t *testing.T) {
 	var createFlow atomic.Int64
 	release := make(chan struct{})
 	// The fixture tracks the live flow state across requests so
-	// successive GET /flow/:id reads see the previous PUTs — same
+	// successive GET /flow/:id reads see the previous deployments — same
 	// as a real Node-RED. Without this, ConnectNodes would see an
 	// empty nodes list and reject the wire (production reads the
 	// in-memory flow, fixture must mirror that).
@@ -90,9 +90,11 @@ func TestSetContextHelper_ConcurrentFirstCallersProvisionOnce(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flows":
-			// snapshotFlows inside CreateFlow backs up the
-			// current config before the write.
-			_, _ = w.Write([]byte(`[]`))
+			// Serve the same live state for backups and revisioned edits.
+			liveMu.Lock()
+			body := mockFlowSnapshot(r, liveFlow)
+			liveMu.Unlock()
+			_, _ = w.Write(body)
 		case r.Method == "POST" && r.URL.Path == "/flow":
 			createFlow.Add(1)
 			<-release
@@ -102,7 +104,7 @@ func TestSetContextHelper_ConcurrentFirstCallersProvisionOnce(t *testing.T) {
 			body := append([]byte(nil), liveFlow...)
 			liveMu.Unlock()
 			_, _ = w.Write(body)
-		case r.Method == "PUT" && r.URL.Path == "/flow/runtime_helper_tab":
+		case r.Method == "POST" && r.URL.Path == "/flows":
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
 				t.Errorf("reading flow update: %v", err)
@@ -110,7 +112,7 @@ func TestSetContextHelper_ConcurrentFirstCallersProvisionOnce(t *testing.T) {
 				return
 			}
 			liveMu.Lock()
-			liveFlow = body
+			liveFlow = mockNestedTab(body, "runtime_helper_tab")
 			liveMu.Unlock()
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -192,7 +194,10 @@ func TestSetContextHelper_ProvisioningFailureIsRetryable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flows":
-			_, _ = w.Write([]byte(`[]`))
+			liveMu.Lock()
+			body := mockFlowSnapshot(r, liveFlow)
+			liveMu.Unlock()
+			_, _ = w.Write(body)
 		case r.Method == "POST" && r.URL.Path == "/flow":
 			createFlow.Add(1)
 			if fail.Load() {
@@ -205,7 +210,7 @@ func TestSetContextHelper_ProvisioningFailureIsRetryable(t *testing.T) {
 			body := append([]byte(nil), liveFlow...)
 			liveMu.Unlock()
 			_, _ = w.Write(body)
-		case r.Method == "PUT" && r.URL.Path == "/flow/runtime_helper_tab":
+		case r.Method == "POST" && r.URL.Path == "/flows":
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
 				t.Errorf("reading flow update: %v", err)
@@ -213,7 +218,7 @@ func TestSetContextHelper_ProvisioningFailureIsRetryable(t *testing.T) {
 				return
 			}
 			liveMu.Lock()
-			liveFlow = body
+			liveFlow = mockNestedTab(body, "runtime_helper_tab")
 			liveMu.Unlock()
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -375,8 +380,7 @@ func TestSetContext_RestoreCannotDeployWhileInFlightInjectHoldsLock(t *testing.T
 				return
 			}
 			_, _ = w.Write(body)
-		case r.Method == "PUT" && strings.HasPrefix(r.URL.Path, "/flow/"):
-			id := strings.TrimPrefix(r.URL.Path, "/flow/")
+		case mockTabDeployment(r):
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
 				t.Errorf("reading flow update: %v", err)
@@ -384,7 +388,9 @@ func TestSetContext_RestoreCannotDeployWhileInFlightInjectHoldsLock(t *testing.T
 				return
 			}
 			liveMu.Lock()
-			liveFlows[id] = body
+			for id := range liveFlows {
+				liveFlows[id] = mockNestedTab(body, id)
+			}
 			liveMu.Unlock()
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/inject/"):
@@ -410,8 +416,7 @@ func TestSetContext_RestoreCannotDeployWhileInFlightInjectHoldsLock(t *testing.T
 				tabs = append(tabs, body)
 			}
 			liveMu.Unlock()
-			arr, _ := json.Marshal(tabs)
-			_, _ = w.Write(arr)
+			_, _ = w.Write(mockFlowSnapshot(r, tabs...))
 		case r.Method == "POST" && r.URL.Path == "/flows":
 			// The deploy step. With the fix, this is reached
 			// only after ctxHelperMu is released by the

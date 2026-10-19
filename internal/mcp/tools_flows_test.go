@@ -122,15 +122,15 @@ func TestHandleGetFlow_MissingIDIsError(t *testing.T) {
 // --- node CRUD (handleUpdateNode, handleDeleteNode) ---
 
 func TestHandleUpdateNode_PartialPatch(t *testing.T) {
-	// UpdateNode is implemented via editFlow: client GETs /flow/{id},
-	// mutates locally, then PUTs back. Mock both legs, plus the backup
-	// snapshotFlows call to /flows.
+	// UpdateNode reads the nested tab, then deploys a revisioned flat config.
 	const flow = `{"id":"tab1","label":"Home","nodes":[{"id":"n1","type":"inject","z":"tab1","name":"tick","wires":[]}]}`
-	const flowsList = `[{"id":"tab1","type":"tab","disabled":false}]`
+	const flowsList = `{"rev":"r","flows":[{"id":"tab1","type":"tab","disabled":false}]}`
 	s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/flows":
 			_, _ = w.Write([]byte(flowsList))
+		case r.Method == http.MethodPost && r.URL.Path == "/flows":
+			w.WriteHeader(http.StatusNoContent)
 		case r.URL.Path == "/flow/tab1":
 			_, _ = w.Write([]byte(flow))
 		default:
@@ -181,9 +181,9 @@ func TestHandleUpdateNode_PropagatesUpstreamError(t *testing.T) {
 }
 
 func TestHandleDeleteNode_RoundTrip(t *testing.T) {
-	// editFlow: GET /flow/{id} then PUT, plus /flows snapshot for backup.
+	// editFlow: nested GET, revisioned snapshot, then POST /flows.
 	const flow = `{"id":"tab1","label":"Home","nodes":[{"id":"n1","type":"inject","z":"tab1","name":"tick","wires":[]}]}`
-	const flowsList = `[{"id":"tab1","type":"tab","disabled":false}]`
+	const flowsList = `{"rev":"r","flows":[{"id":"tab1","type":"tab","disabled":false}]}`
 	s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/flows":
@@ -238,10 +238,9 @@ func TestHandleDeleteFlow_MissingIDIsError(t *testing.T) {
 }
 
 func TestHandleDisableEnableFlow_RoundTrip(t *testing.T) {
-	// SetFlowDisabled -> editFlow -> GET /flow/{id} then PUT /flow/{id},
-	// plus /flows snapshot for backup.
+	// SetFlowDisabled reads the tab and deploys via revisioned /flows.
 	const flow = `{"id":"tab1","type":"tab","disabled":false,"nodes":[]}`
-	const flowsList = `[{"id":"tab1","type":"tab","disabled":false}]`
+	const flowsList = `{"rev":"r","flows":[{"id":"tab1","type":"tab","disabled":false}]}`
 	for _, name := range []string{"disable_flow", "enable_flow"} {
 		t.Run(name, func(t *testing.T) {
 			s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
@@ -434,11 +433,10 @@ func TestHandleDeleteSubflow_RoundTrip(t *testing.T) {
 
 func TestHandleInstantiateSubflow_RoundTrip(t *testing.T) {
 	// InstantiateSubflow: GetSubflow reads /flow/global; then writes the
-	// new instance into /flow/{flowID} via editFlow (GET + PUT).
-	// /flows snapshot for the backup.
+	// new instance via editFlow (nested GET + revisioned POST /flows).
 	const globalEnvelope = `{"subflows":[{"id":"sf1","name":"Helper"}],"configs":[]}`
 	const flow = `{"id":"tab1","type":"tab","nodes":[]}`
-	const flowsList = `[{"id":"tab1","type":"tab","disabled":false}]`
+	const flowsList = `{"rev":"r","flows":[{"id":"tab1","type":"tab","disabled":false}]}`
 	s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/flows":
@@ -469,7 +467,7 @@ func TestHandleInstantiateSubflow_ParamsOptional(t *testing.T) {
 	// must not require it. Same /flow/global + /flow/{id} + /flows trio.
 	const globalEnvelope = `{"subflows":[{"id":"sf1","name":"Helper"}],"configs":[]}`
 	const flow = `{"id":"tab1","type":"tab","nodes":[]}`
-	const flowsList = `[{"id":"tab1","type":"tab","disabled":false}]`
+	const flowsList = `{"rev":"r","flows":[{"id":"tab1","type":"tab","disabled":false}]}`
 	s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/flows":

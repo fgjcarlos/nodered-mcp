@@ -35,6 +35,12 @@ func (c *Client) snapshotFlows(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("backup: fetching current flows: %w", err)
 	}
 
+	return c.saveFlowSnapshot(raw)
+}
+
+// saveFlowSnapshot persists an already-fetched configuration. Revision-aware
+// deployments use it so the backup and deployed base cannot come from different reads.
+func (c *Client) saveFlowSnapshot(raw RawFlow) (string, error) {
 	dir := c.backupsDir()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("backup: creating dir %q: %w", dir, err)

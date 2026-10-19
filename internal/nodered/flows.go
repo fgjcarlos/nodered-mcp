@@ -149,8 +149,9 @@ func (c *Client) CreateFlow(ctx context.Context, flow RawFlow) (RawFlow, error) 
 }
 
 // UpdateFlow replaces the contents of an existing flow tab. The flow document
-// is opaque JSON, sent verbatim (PUT replaces the whole document). Wires are
-// validated first, then a backup of the current config is taken (fail-closed).
+// is opaque JSON. Its contents are replaced in the full configuration without
+// moving the tab. Wires are validated first, then the revisioned configuration
+// is backed up and deployed with API v2 (fail-closed, no conflict replay).
 //
 // Takes writeMu so concurrent mutations on the same client do not race.
 // Callers that already hold the lock (e.g. editFlow) must call
@@ -179,10 +180,7 @@ func (c *Client) updateFlowLocked(ctx context.Context, id string, flow RawFlow) 
 	if err := validateZRefsInFlow(flow, id); err != nil {
 		return err
 	}
-	if _, err := c.snapshotFlows(ctx); err != nil {
-		return err
-	}
-	return c.do(ctx, "PUT", "/flow/"+id, flow, nil)
+	return c.deployFlowUpdate(ctx, id, flow)
 }
 
 // DeleteFlow removes a flow tab and all its nodes. A backup of the current
