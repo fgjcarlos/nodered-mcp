@@ -44,11 +44,11 @@ func (s *Server) handleDiffFlows(ctx context.Context, req mcp.CallToolRequest) (
 
 	before, err := s.resolveFlowSource(ctx, from)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("reading %q: %v", from, err)), nil
+		return toolResultError(err, fmt.Sprintf("reading %q: %v", from, err))
 	}
 	after, err := s.resolveFlowSource(ctx, to)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("reading %q: %v", to, err)), nil
+		return toolResultError(err, fmt.Sprintf("reading %q: %v", to, err))
 	}
 
 	diff := nodered.DiffFlows(before, after)
@@ -161,7 +161,7 @@ func (s *Server) handleRestoreBackup(ctx context.Context, req mcp.CallToolReques
 	defer s.ctxHelperMu.Unlock()
 	if err := s.nrClient.RestoreFlows(ctx, content); err != nil {
 		slog.Error("restore_backup failed", "error", err, "backup", name)
-		return mcp.NewToolResultError(fmt.Sprintf("restoring: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("restoring: %v", err))
 	}
 	s.ctxHelper = nil
 	return mcp.NewToolResultText(fmt.Sprintf("Restored flow config from %q (current state was backed up first).", name)), nil

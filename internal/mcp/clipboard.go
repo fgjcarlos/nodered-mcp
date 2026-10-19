@@ -36,7 +36,7 @@ func (s *Server) handleExportFlow(ctx context.Context, req mcp.CallToolRequest) 
 	tab, err := s.nrClient.GetFlow(ctx, id)
 	if err != nil {
 		slog.Error("export_flow failed", "error", err, "id", id)
-		return mcp.NewToolResultError(fmt.Sprintf("reading flow: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("reading flow: %v", err))
 	}
 
 	clipboard, err := wrapTabInClipboardArray(tab)
@@ -77,7 +77,7 @@ func (s *Server) handleImportFlow(ctx context.Context, req mcp.CallToolRequest) 
 	created, err := s.nrClient.CreateFlow(ctx, tab)
 	if err != nil {
 		slog.Error("import_flow failed", "error", err)
-		return mcp.NewToolResultError(fmt.Sprintf("creating flow: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("creating flow: %v", err))
 	}
 	newID, err := extractFlowID(created)
 	if err != nil {

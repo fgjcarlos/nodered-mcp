@@ -16,7 +16,7 @@ func (s *Server) handleListNodes(ctx context.Context, _ mcp.CallToolRequest) (*m
 	nodes, err := s.nrClient.ListNodes(ctx)
 	if err != nil {
 		slog.Error("list_nodes failed", "error", err)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	out, err := json.MarshalIndent(nodes, "", "  ")
 	if err != nil {
@@ -38,7 +38,7 @@ func (s *Server) handleGetNodeInfo(ctx context.Context, req mcp.CallToolRequest)
 	info, err := s.nrClient.GetNodeInfo(ctx, module)
 	if err != nil {
 		slog.Error("get_node_info failed", "error", err, "module", module)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	out, err := json.MarshalIndent(info, "", "  ")
 	if err != nil {
@@ -61,7 +61,7 @@ func (s *Server) handleInstallNode(ctx context.Context, req mcp.CallToolRequest)
 	info, err := s.nrClient.InstallNode(ctx, module, version)
 	if err != nil {
 		slog.Error("install_node failed", "error", err, "module", module)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	out, err := json.MarshalIndent(info, "", "  ")
 	if err != nil {
@@ -82,7 +82,7 @@ func (s *Server) handleUninstallNode(ctx context.Context, req mcp.CallToolReques
 
 	if err := s.nrClient.UninstallNode(ctx, module); err != nil {
 		slog.Error("uninstall_node failed", "error", err, "module", module)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Uninstalled %q.", module)), nil
 }
@@ -115,7 +115,7 @@ func (s *Server) setNodeEnabled(ctx context.Context, req mcp.CallToolRequest, en
 	info, err := s.nrClient.SetNodeEnabled(ctx, module, set, enabled)
 	if err != nil {
 		slog.Error("set_node_enabled failed", "error", err, "module", module, "enabled", enabled)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	verb := "disabled"
 	if enabled {
@@ -150,7 +150,7 @@ func (s *Server) handleSearchNodes(ctx context.Context, req mcp.CallToolRequest)
 	hits, err := s.nrClient.SearchNodes(ctx, query, limit)
 	if err != nil {
 		slog.Error("search_nodes failed", "error", err, "query", query)
-		return mcp.NewToolResultError(fmt.Sprintf("searching npm registry: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("searching npm registry: %v", err))
 	}
 	out, err := json.MarshalIndent(hits, "", "  ")
 	if err != nil {

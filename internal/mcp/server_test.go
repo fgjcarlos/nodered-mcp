@@ -164,9 +164,8 @@ func TestWithTimeoutRetry_NoRetryOnNonTransport(t *testing.T) {
 
 // TestWithTimeoutRetry_RetriesOnTransportResult covers the case that
 // the audit's headline fix exists for: the handler returns a result
-// whose IsError is true AND whose first text content carries a
-// transport marker (the universal pattern across all 29 tools). The
-// wrapper must retry.
+// whose IsError is true and whose typed transport error is preserved by
+// the adapter. The wrapper must retry without inspecting display text.
 func TestWithTimeoutRetry_RetriesOnTransportResult(t *testing.T) {
 	var calls atomic.Int32
 	handler := func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -175,7 +174,7 @@ func TestWithTimeoutRetry_RetriesOnTransportResult(t *testing.T) {
 			// Mirror what nodered.Client.do emits when its 30s defaultTimeout
 			// fires before the wrapper's 15s — the handler sees ctx.Err()
 			// and rewrites it via NewToolResultError.
-			return mcp.NewToolResultError("calling GET http://localhost:1880/flows: context deadline exceeded"), nil
+			return toolResultError(context.DeadlineExceeded, "calling GET http://localhost:1880/flows: context deadline exceeded")
 		}
 		return mcp.NewToolResultText("ok"), nil
 	}

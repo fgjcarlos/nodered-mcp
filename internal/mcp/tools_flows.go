@@ -30,7 +30,7 @@ func (s *Server) handleListFlows(ctx context.Context, req mcp.CallToolRequest) (
 	raw, err := s.nrClient.ListFlows(ctx)
 	if err != nil {
 		slog.Error("list_flows failed", "error", err)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	if len(raw) == 0 {
 		raw = []byte("[]")
@@ -84,7 +84,7 @@ func (s *Server) handleSearchFlows(ctx context.Context, req mcp.CallToolRequest)
 	raw, err := s.nrClient.ListFlows(ctx)
 	if err != nil {
 		slog.Error("search_flows failed", "error", err)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 
 	matches, total := nodered.SearchFlows(raw, query, nodeType, limit)
@@ -124,7 +124,7 @@ func (s *Server) handleGetFlow(ctx context.Context, req mcp.CallToolRequest) (*m
 	raw, err := s.nrClient.GetFlow(ctx, id)
 	if err != nil {
 		slog.Error("get_flow failed", "error", err, "id", id)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("```json\n%s\n```", prettyJSON(raw))), nil
 }
@@ -158,7 +158,7 @@ func (s *Server) handleCreateFlow(ctx context.Context, req mcp.CallToolRequest) 
 	created, err := s.nrClient.CreateFlow(ctx, flow)
 	if err != nil {
 		slog.Error("create_flow failed", "error", err)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Flow created.\n\n```json\n%s\n```", prettyJSON(created))), nil
 }
@@ -191,7 +191,7 @@ func (s *Server) handleUpdateFlow(ctx context.Context, req mcp.CallToolRequest) 
 
 	if err := s.nrClient.UpdateFlow(ctx, id, flow); err != nil {
 		slog.Error("update_flow failed", "error", err, "id", id)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Flow %q updated (a backup was taken first).", id)), nil
 }
@@ -220,7 +220,7 @@ func (s *Server) handleAddNode(ctx context.Context, req mcp.CallToolRequest) (*m
 
 	if err := s.nrClient.AddNode(ctx, flowID, node); err != nil {
 		slog.Error("add_node failed", "error", err, "flow_id", flowID)
-		return mcp.NewToolResultError(fmt.Sprintf("adding node: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("adding node: %v", err))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf(
 		"Node added to flow %q (a backup was taken first). Wire it up with connect_nodes.", flowID,
@@ -256,7 +256,7 @@ func (s *Server) handleUpdateNode(ctx context.Context, req mcp.CallToolRequest) 
 
 	if err := s.nrClient.UpdateNode(ctx, flowID, nodeID, patch); err != nil {
 		slog.Error("update_node failed", "error", err, "flow_id", flowID, "node_id", nodeID)
-		return mcp.NewToolResultError(fmt.Sprintf("updating node: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("updating node: %v", err))
 	}
 	keys := make([]string, 0, len(patch))
 	for k := range patch {
@@ -285,7 +285,7 @@ func (s *Server) handleDeleteNode(ctx context.Context, req mcp.CallToolRequest) 
 
 	if err := s.nrClient.DeleteNode(ctx, flowID, nodeID); err != nil {
 		slog.Error("delete_node failed", "error", err, "flow_id", flowID, "node_id", nodeID)
-		return mcp.NewToolResultError(fmt.Sprintf("deleting node: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("deleting node: %v", err))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf(
 		"Node %q deleted from flow %q, along with any wires pointing at it (a backup was taken first).",
@@ -320,7 +320,7 @@ func (s *Server) handleConnectNodes(ctx context.Context, req mcp.CallToolRequest
 
 	if err := s.nrClient.ConnectNodes(ctx, flowID, fromID, port, toID); err != nil {
 		slog.Error("connect_nodes failed", "error", err, "flow_id", flowID)
-		return mcp.NewToolResultError(fmt.Sprintf("connecting nodes: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("connecting nodes: %v", err))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf(
 		"Wired %q output %d to %q (a backup was taken first).", fromID, port, toID,
@@ -339,7 +339,7 @@ func (s *Server) handleDeleteFlow(ctx context.Context, req mcp.CallToolRequest) 
 
 	if err := s.nrClient.DeleteFlow(ctx, id); err != nil {
 		slog.Error("delete_flow failed", "error", err, "id", id)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Flow %q deleted (a backup was taken first).", id)), nil
 }
@@ -398,7 +398,7 @@ func (s *Server) handleDisableFlow(ctx context.Context, req mcp.CallToolRequest)
 
 	if err := s.nrClient.SetFlowDisabled(ctx, id, true); err != nil {
 		slog.Error("disable_flow failed", "error", err, "id", id)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Flow %q disabled (a backup was taken first).", id)), nil
 }
@@ -415,7 +415,7 @@ func (s *Server) handleEnableFlow(ctx context.Context, req mcp.CallToolRequest) 
 
 	if err := s.nrClient.SetFlowDisabled(ctx, id, false); err != nil {
 		slog.Error("enable_flow failed", "error", err, "id", id)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Flow %q enabled (a backup was taken first).", id)), nil
 }
@@ -518,7 +518,7 @@ func (s *Server) handleInjectNode(ctx context.Context, req mcp.CallToolRequest) 
 	lookup, found, lookupErr := s.nrClient.LookupInjectTarget(ctx, id)
 	if lookupErr != nil {
 		slog.Error("inject_node lookup failed", "error", lookupErr, "id", id)
-		return mcp.NewToolResultError(fmt.Sprintf("looking up node %q: %v", id, lookupErr)), nil
+		return toolResultError(lookupErr, fmt.Sprintf("looking up node %q: %v", id, lookupErr))
 	}
 	if !found {
 		return mcp.NewToolResultError(fmt.Sprintf("node %q not found in any tab", id)), nil
@@ -533,7 +533,7 @@ func (s *Server) handleInjectNode(ctx context.Context, req mcp.CallToolRequest) 
 	if !hasPayload || rawPayload == nil {
 		if err := s.nrClient.InjectNode(ctx, id); err != nil {
 			slog.Error("inject_node failed", "error", err, "id", id)
-			return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+			return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 		}
 		return mcp.NewToolResultText(fmt.Sprintf("Inject node %q fired.", id)), nil
 	}
@@ -544,7 +544,7 @@ func (s *Server) handleInjectNode(ctx context.Context, req mcp.CallToolRequest) 
 	body := buildInjectPayloadBody(payload)
 	if err := s.nrClient.InjectNodeWithBody(ctx, id, body); err != nil {
 		slog.Error("inject_node failed", "error", err, "id", id)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	notice := ""
 	if !s.nrClient.CachedNodeRedVersion().Known {

@@ -19,7 +19,7 @@ func (s *Server) handleListSubflows(ctx context.Context, _ mcp.CallToolRequest) 
 	list, err := s.nrClient.ListSubflows(ctx)
 	if err != nil {
 		slog.Error("list_subflows failed", "error", err)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	// An empty list is a common answer on a fresh instance; render
 	// it as [] so callers do not have to special-case the empty
@@ -48,7 +48,7 @@ func (s *Server) handleGetSubflow(ctx context.Context, req mcp.CallToolRequest) 
 	raw, err := s.nrClient.GetSubflow(ctx, id)
 	if err != nil {
 		slog.Error("get_subflow failed", "error", err, "id", id)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("```json\n%s\n```", prettyJSON(raw))), nil
 }
@@ -68,7 +68,7 @@ func (s *Server) handleCreateSubflow(ctx context.Context, req mcp.CallToolReques
 	created, err := s.nrClient.CreateSubflow(ctx, raw)
 	if err != nil {
 		slog.Error("create_subflow failed", "error", err)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Subflow created (a backup was taken first).\n\n```json\n%s\n```", prettyJSON(created))), nil
 }
@@ -93,7 +93,7 @@ func (s *Server) handleUpdateSubflow(ctx context.Context, req mcp.CallToolReques
 
 	if err := s.nrClient.UpdateSubflow(ctx, id, raw); err != nil {
 		slog.Error("update_subflow failed", "error", err, "id", id)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Subflow %q updated (a backup was taken first).", id)), nil
 }
@@ -110,7 +110,7 @@ func (s *Server) handleDeleteSubflow(ctx context.Context, req mcp.CallToolReques
 
 	if err := s.nrClient.DeleteSubflow(ctx, id); err != nil {
 		slog.Error("delete_subflow failed", "error", err, "id", id)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Subflow %q deleted (a backup was taken first).", id)), nil
 }
@@ -142,7 +142,7 @@ func (s *Server) handleInstantiateSubflow(ctx context.Context, req mcp.CallToolR
 	node, err := s.nrClient.InstantiateSubflow(ctx, flowID, subflowID, params)
 	if err != nil {
 		slog.Error("instantiate_subflow failed", "error", err, "flow_id", flowID, "subflow_id", subflowID)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf(
 		"Subflow instance added to flow %q (a backup was taken first). Wire it up with connect_nodes.\n\n```json\n%s\n```",
