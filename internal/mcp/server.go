@@ -313,10 +313,21 @@ const bannerProbeTimeout = 5 * time.Second
 
 // isLoopbackTestFixture returns true when the Client's BaseURL
 // resolves to a 127.0.0.1 / ::1 address — the httptest default.
-// Production deployments point at a real hostname so this stays
-// false. The check is intentionally shallow (string match on the
-// host portion of the URL); a future test that mocks NR via DNS
-// would need an explicit options flag.
+//
+// Read the next lines before trusting this to mean "test": the
+// shipped default for NODERED_URL is http://localhost:1880
+// (internal/config/config.go), so an ordinary local Node-RED
+// install ALSO matches and skips the probe. That is a production
+// shape being treated as a test fixture, and it means the #316
+// version gate never engages there unless something else already
+// warmed the cache (for example a prior get_runtime_info call).
+//
+// The gate stays fail-open by design, and a call that passes
+// without a version check carries UnknownVersionNotice so the
+// caller is told no guarantee was applied. ponytail: invert this
+// into an explicit Options.NoBannerProbe the tests opt into — a
+// string match on a user-supplied URL cannot tell a fixture from
+// a real local install.
 func isLoopbackTestFixture(c *nodered.Client) bool {
 	if c == nil {
 		return true
