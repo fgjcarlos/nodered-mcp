@@ -70,7 +70,7 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         # No registry-url here: setting it tells actions/setup-node
         # to write a runtime .npmrc that routes npm publish through
         # a tokenless path the registry rejects with E404 on scoped
@@ -251,7 +251,7 @@ jobs:
       #      `registry-url: https://registry.npmjs.org` and dropping
       #      the `~/.npmrc` write below.
       # ponytail: keep the token path reversible, document upgrade.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         with:
           node-version: 20
 
@@ -332,7 +332,7 @@ jobs:
       # Keep the final verifier on the token path used by both publishers.
       # Do not add registry-url while the npmjs Trusted Publisher dead-lock
       # documented in #278 remains unresolved.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         with:
           node-version: 20
 
