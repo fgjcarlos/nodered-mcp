@@ -182,6 +182,12 @@ la pestaña anidada antes de tomar el snapshot, por lo que un cambio externo
 durante ese intervalo previo todavía puede sobrescribirse. Lee de nuevo el
 flow actual antes de reintentar una edición tras un conflicto.
 
+Las tools de lectura reintentan los fallos de transporte hasta dos veces. Las
+tools mutantes se ejecutan una sola vez: si la conexión se cierra sin una
+respuesta completa, la tool informa un resultado indeterminado y pide
+revisar el runtime antes de repetir la operación, porque la acción puede
+haberse ejecutado ya.
+
 Arranca con `--read-only` (o `MCP_READ_ONLY=true`) para anunciar
 solo las 21 tools de lectura y esconder todas las mutantes en el
 registro. `inject_node` también se esconde: disparar un inject puede

@@ -178,6 +178,11 @@ the snapshot, so an external edit in that
 earlier window can still be overwritten. Read the current flow again before
 retrying an edit after a conflict.
 
+Read tools retry transport failures up to twice. Mutating tools run once: if
+the connection closes without a complete response, the tool reports an
+indeterminate outcome and asks you to check the runtime before repeating the
+operation, because the action may already have executed.
+
 Run with `--read-only` (or `MCP_READ_ONLY=true`) to advertise only
 the 21 read tools and withhold every mutating one at registration.
 `inject_node` is also withheld: firing an inject can send a real
