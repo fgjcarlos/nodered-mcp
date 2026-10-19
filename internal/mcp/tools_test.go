@@ -19,6 +19,67 @@ import (
 	"github.com/fgjcarlos/nodered-mcp/internal/nodered"
 )
 
+// mockFlowSnapshot exposes the fixture's nested tabs as the flat admin API
+// configuration, negotiating the v2 envelope only when explicitly requested.
+func mockFlowSnapshot(r *http.Request, tabs ...[]byte) []byte {
+	entries := []json.RawMessage{}
+	for _, raw := range tabs {
+		var tab map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &tab)
+		for _, key := range []string{"nodes", "configs"} {
+			var members []json.RawMessage
+			_ = json.Unmarshal(tab[key], &members)
+			entries = append(entries, members...)
+			delete(tab, key)
+		}
+		tab["type"] = json.RawMessage(`"tab"`)
+		top, _ := json.Marshal(tab)
+		entries = append(entries, top)
+	}
+	if r.Header.Get("Node-RED-API-Version") == "v2" {
+		out, _ := json.Marshal(map[string]any{"rev": "r", "flows": entries})
+		return out
+	}
+	out, _ := json.Marshal(entries)
+	return out
+}
+
+// mockTabDeployment distinguishes partial tab updates from full restores.
+func mockTabDeployment(r *http.Request) bool {
+	return r.Method == http.MethodPost && r.URL.Path == "/flows" && r.Header.Get("Node-RED-Deployment-Type") == "flows"
+}
+
+// mockNestedTab rebuilds the single-flow read shape after a flat deployment.
+func mockNestedTab(body []byte, id string) []byte {
+	var tab map[string]json.RawMessage
+	nodes, configs := []json.RawMessage{}, []json.RawMessage{}
+	for _, raw := range nodered.FlowArray(body) {
+		var m map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &m)
+		var entryID, z string
+		_ = json.Unmarshal(m["id"], &entryID)
+		_ = json.Unmarshal(m["z"], &z)
+		if entryID == id {
+			tab = m
+			delete(tab, "type")
+		}
+		if z != id {
+			continue
+		}
+		if m["x"] != nil && m["y"] != nil {
+			nodes = append(nodes, raw)
+		} else {
+			configs = append(configs, raw)
+		}
+	}
+	tab["nodes"], _ = json.Marshal(nodes)
+	if len(configs) > 0 {
+		tab["configs"], _ = json.Marshal(configs)
+	}
+	out, _ := json.Marshal(tab)
+	return out
+}
+
 // readOnlyTools is the exact set a server started with readOnly=true must
 // expose. Anything that writes config, mutates the palette, or fires a node
 // into a live runtime is deliberately absent — inject_node included: firing an
@@ -510,18 +571,16 @@ func TestNodeParam(t *testing.T) {
 
 // TestNormalizeFlowDoc_FlatArray covers issue #35 end-to-end through the
 // client: feeding the literal output of GET /flows into update_flow and
-// expecting it to land at Node-RED as a nested tab doc with the right
-// nodes/configs split.
+// expecting normalization to preserve the nodes/configs split before the
+// client deploys the flat configuration.
 func TestNormalizeFlowDoc_FlatArray(t *testing.T) {
 	var putBody []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flows":
-			// Snapshot for backup.
-			_, _ = w.Write([]byte(`[
-				{"type":"tab","id":"tabA","label":"A","nodes":[]}
-			]`))
-		case r.Method == "PUT" && r.URL.Path == "/flow/tabA":
+			// Revisioned deployment base and backup.
+			_, _ = w.Write(mockFlowSnapshot(r, []byte(`{"id":"tabA","label":"A","nodes":[]}`)))
+		case r.Method == "POST" && r.URL.Path == "/flows":
 			putBody, _ = io.ReadAll(r.Body)
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -553,16 +612,18 @@ func TestNormalizeFlowDoc_FlatArray(t *testing.T) {
 		t.Fatalf("UpdateFlow: %v", err)
 	}
 
-	// The PUT must carry a nested shape: top-level "label" (not "type":"tab"),
-	// a nodes array containing i1.
+	// The normalized document remains nested; the deployment is flat.
+	if !bytes.Contains(normalized, []byte(`"nodes":[`)) || bytes.Contains(normalized, []byte(`"type":"tab"`)) {
+		t.Errorf("expected nested normalized tab, got %s", normalized)
+	}
 	if !bytes.Contains(putBody, []byte(`"label":"A"`)) {
 		t.Errorf("expected nested doc with label, got %s", putBody)
 	}
 	if !bytes.Contains(putBody, []byte(`"id":"i1"`)) {
 		t.Errorf("expected nodes[].id=i1, got %s", putBody)
 	}
-	if bytes.Contains(putBody, []byte(`"type":"tab"`)) {
-		t.Errorf("expected the type:tab marker to be dropped, got %s", putBody)
+	if !bytes.Contains(putBody, []byte(`"type":"tab"`)) || len(nodered.FlowArray(putBody)) != 2 {
+		t.Errorf("expected flat tab and node entries, got %s", putBody)
 	}
 }
 
@@ -592,7 +653,7 @@ func TestSetContext_HappyPathAndHelperReuse(t *testing.T) {
 		injected [][]byte
 		// liveFlow is the in-memory representation of the helper flow
 		// on the (mocked) Node-RED instance. It starts as an empty
-		// flow with just the tab and grows with each PUT the mock
+		// flow with just the tab and grows with each deployment the mock
 		// sees. GET /flow/:id returns the current snapshot so the
 		// read-modify-write AddNode / ConnectNodes path sees the
 		// right state.
@@ -608,7 +669,7 @@ func TestSetContext_HappyPathAndHelperReuse(t *testing.T) {
 		out, _ := json.Marshal(liveFlow)
 		return out
 	}
-	// ingestPUT applies a PUT /flow/mcp_ctx_helper_tab body to
+	// ingestPUT applies the reconstructed nested deployment to
 	// liveFlow. It preserves the tab id/label and overwrites the
 	// nodes array with whatever the body said. That is enough for
 	// the wire-validation step and for the next read to see the
@@ -632,13 +693,8 @@ func TestSetContext_HappyPathAndHelperReuse(t *testing.T) {
 		defer mu.Unlock()
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flows":
-			// Backup snapshot. Two-flow array so the snapshot file
-			// looks like a real config, with the helper tab
-			// alongside one unrelated tab.
-			_, _ = w.Write([]byte(fmt.Sprintf(
-				`[{"type":"tab","id":"other","label":"Other","nodes":[]},%s]`,
-				refreshSnapshot(),
-			)))
+			// Keep the unrelated tab alongside the revisioned helper state.
+			_, _ = w.Write(mockFlowSnapshot(r, []byte(`{"id":"other","label":"Other"}`), refreshSnapshot()))
 		case r.Method == "POST" && r.URL.Path == "/flow":
 			// CreateFlow for the helper tab.
 			postFlow++
@@ -655,15 +711,13 @@ func TestSetContext_HappyPathAndHelperReuse(t *testing.T) {
 		case r.Method == "GET" && r.URL.Path == "/flow/mcp_ctx_helper_tab":
 			// GetFlow, called by AddNode (read-modify-write) and
 			// also by the fallback path on /flows synthesis. The
-			// snapshot reflects whatever PUT last wrote.
+			// snapshot reflects the last deployment.
 			_, _ = w.Write(refreshSnapshot())
-		case r.Method == "PUT" && r.URL.Path == "/flow/mcp_ctx_helper_tab":
-			// Every AddNode + ConnectNodes goes through PUT /flow/:id.
-			// The mock captures the body so the next GET reflects
-			// the just-installed nodes.
+		case r.Method == "POST" && r.URL.Path == "/flows":
+			// Every AddNode + ConnectNodes deploys a flat configuration.
 			putFlow++
 			body, _ := io.ReadAll(r.Body)
-			ingestPUT(body)
+			ingestPUT(mockNestedTab(body, "mcp_ctx_helper_tab"))
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/inject/"):
 			postInj++
@@ -712,15 +766,14 @@ func TestSetContext_HappyPathAndHelperReuse(t *testing.T) {
 	if postInj != 2 {
 		t.Errorf("expected 2 inject dispatches, got %d", postInj)
 	}
-	// The inject dispatch count == putFlow count only if AddNode and
-	// ConnectNodes each went through PUT /flow/:id exactly once. We
-	// provision 2 nodes (inject + function) and 1 wire, so 3 PUTs
+	// AddNode and ConnectNodes each deploy exactly once. We provision
+	// 2 nodes (inject + function) and 1 wire, so 3 POST /flows calls
 	// total — the magic number, not a coincidence. If it changes the
 	// test still catches it; the "exactly 3" assertion is the
 	// anti-regression for the helper being created in one shot
 	// rather than incrementally.
 	if putFlow != 3 {
-		t.Errorf("expected 3 PUT /flow/:id calls (2 add_node + 1 connect_nodes), got %d", putFlow)
+		t.Errorf("expected 3 POST /flows calls (2 add_node + 1 connect_nodes), got %d", putFlow)
 	}
 	// Bodies must carry the value the caller asked for, not the
 	// value from the first call. Two separate dispatches with two
@@ -778,18 +831,15 @@ func TestSetContext_RetriesOnFirstCall404(t *testing.T) {
 		defer mu.Unlock()
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flows":
-			_, _ = w.Write([]byte(fmt.Sprintf(
-				`[{"type":"tab","id":"other","label":"Other","nodes":[]},%s]`,
-				refreshSnapshot(),
-			)))
+			_, _ = w.Write(mockFlowSnapshot(r, []byte(`{"id":"other","label":"Other"}`), refreshSnapshot()))
 		case r.Method == "POST" && r.URL.Path == "/flow":
 			body, _ := io.ReadAll(r.Body)
 			_, _ = w.Write(body)
 		case r.Method == "GET" && r.URL.Path == "/flow/mcp_ctx_helper_tab":
 			_, _ = w.Write(refreshSnapshot())
-		case r.Method == "PUT" && r.URL.Path == "/flow/mcp_ctx_helper_tab":
+		case r.Method == "POST" && r.URL.Path == "/flows":
 			body, _ := io.ReadAll(r.Body)
-			ingestPUT(body)
+			ingestPUT(mockNestedTab(body, "mcp_ctx_helper_tab"))
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/inject/"):
 			postInj++
@@ -883,18 +933,15 @@ func TestSetContext_NoRetryWhenHelperAlreadyProvisioned(t *testing.T) {
 		defer mu.Unlock()
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flows":
-			_, _ = w.Write([]byte(fmt.Sprintf(
-				`[{"type":"tab","id":"other","label":"Other","nodes":[]},%s]`,
-				refreshSnapshot(),
-			)))
+			_, _ = w.Write(mockFlowSnapshot(r, []byte(`{"id":"other","label":"Other"}`), refreshSnapshot()))
 		case r.Method == "POST" && r.URL.Path == "/flow":
 			body, _ := io.ReadAll(r.Body)
 			_, _ = w.Write(body)
 		case r.Method == "GET" && r.URL.Path == "/flow/mcp_ctx_helper_tab":
 			_, _ = w.Write(refreshSnapshot())
-		case r.Method == "PUT" && r.URL.Path == "/flow/mcp_ctx_helper_tab":
+		case r.Method == "POST" && r.URL.Path == "/flows":
 			body, _ := io.ReadAll(r.Body)
-			ingestPUT(body)
+			ingestPUT(mockNestedTab(body, "mcp_ctx_helper_tab"))
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/inject/"):
 			postInj++
@@ -959,18 +1006,18 @@ func TestRestoreBackup_ClearsSetContextHelper(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flows":
-			_, _ = w.Write([]byte(`[{"type":"tab","id":"other","label":"Other","nodes":[]}]`))
+			_, _ = w.Write(mockFlowSnapshot(r, []byte(`{"id":"other","label":"Other"}`), liveFlow))
 		case r.Method == "POST" && r.URL.Path == "/flow":
 			liveFlow = []byte(`{"id":"runtime_helper_tab","label":"__mcp_context_helper__","nodes":[]}`)
 			_, _ = w.Write(liveFlow)
 		case r.Method == "GET" && r.URL.Path == "/flow/runtime_helper_tab":
 			_, _ = w.Write(liveFlow)
-		case r.Method == "PUT" && r.URL.Path == "/flow/runtime_helper_tab":
-			var err error
-			liveFlow, err = io.ReadAll(r.Body)
+		case mockTabDeployment(r):
+			body, err := io.ReadAll(r.Body)
 			if err != nil {
 				t.Errorf("reading flow update: %v", err)
 			}
+			liveFlow = mockNestedTab(body, "runtime_helper_tab")
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == "POST" && r.URL.Path == "/flows":
 			var err error

@@ -2,6 +2,7 @@ package nodered
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -20,21 +21,23 @@ import (
 // one handler to overwrite another's write while both reported success.
 func TestConcurrentMutationsAreSerialized(t *testing.T) {
 	var writes atomic.Int64
+	var runtimeMu sync.Mutex
+	tab := []byte(`{"id":"tabA","label":"A","nodes":[{"id":"n1","type":"inject","z":"tabA","x":1,"y":1,"wires":[]}]}`)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		runtimeMu.Lock()
+		defer runtimeMu.Unlock()
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flow/tabA":
 			// Slightly slow so the goroutines pile up at the lock, not at the socket.
 			time.Sleep(2 * time.Millisecond)
-			_, _ = w.Write([]byte(`{"id":"tabA","label":"A","nodes":[{"id":"n1","type":"inject","x":1,"y":1,"wires":[]}]}`))
+			_, _ = w.Write(tab)
 		case r.Method == "GET" && r.URL.Path == "/flows":
 			// Backup snapshot fetch.
-			_, _ = w.Write([]byte(`[{"type":"tab","id":"tabA","label":"A","nodes":[]}]`))
-		case r.Method == "PUT" && r.URL.Path == "/flow/tabA":
-			// The serialization guarantee is what we care about: every PUT
-			// the runtime sees carries a complete flow body, and the
-			// previous PUT's mutation is reflected. If writeMu were missing,
-			// two PUTs would carry the same n1 (last GET snapshot) and one
-			// mutation would be silently lost.
+			_, _ = w.Write(testRevisionedTab(t, string(tab)))
+		case r.Method == "POST" && r.URL.Path == "/flows":
+			// Retain each edit so a missing lock also loses nodes visibly.
+			body, _ := io.ReadAll(r.Body)
+			tab = testNestedDeployment(t, body, "tabA")
 			writes.Add(1)
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -70,8 +73,11 @@ func TestConcurrentMutationsAreSerialized(t *testing.T) {
 		t.Errorf("concurrent AddNode failed: %v", err)
 	}
 
+	if got := nodeCount(t, RawFlow(tab)); got != N+1 {
+		t.Errorf("expected %d retained nodes, got %d", N+1, got)
+	}
 	if got := writes.Load(); got != int64(N) {
-		t.Errorf("expected %d PUTs, got %d (some were lost to a race)", N, got)
+		t.Errorf("expected %d POSTs, got %d (some were lost to a race)", N, got)
 	}
 }
 
