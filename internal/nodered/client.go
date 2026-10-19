@@ -251,13 +251,13 @@ func (c *Client) doURL(ctx context.Context, method, u, errorPath string, body in
 		// the full request URL. redactedWrap is still required on top of that:
 		// the wrapped *url.Error renders the raw URL in its own .Error(), so a
 		// plain %w would still leak the token. Issue #312.
-		return fmt.Errorf("cannot reach Node-RED at %s: %w", RedactURL(u), redactedWrap(err))
+		return &TransportError{Err: fmt.Errorf("cannot reach Node-RED at %s: %w", RedactURL(u), redactedWrap(err))}
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("reading response body: %w", err)
+		return &TransportError{Err: fmt.Errorf("reading response body: %w", err)}
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -333,13 +333,13 @@ func (c *Client) getRaw(ctx context.Context, path string) ([]byte, error) {
 		// Name the redacted destination, and scrub the wrapped error's own
 		// string: a *url.Error renders the raw URL, so %w alone leaks the
 		// token. Issue #312.
-		return nil, fmt.Errorf("calling GET %s: %w", RedactURL(joined), redactedWrap(err))
+		return nil, &TransportError{Err: fmt.Errorf("calling GET %s: %w", RedactURL(joined), redactedWrap(err))}
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("reading response body: %w", err)
+		return nil, &TransportError{Err: fmt.Errorf("reading response body: %w", err)}
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
