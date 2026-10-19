@@ -171,9 +171,10 @@ guardrails. Three are built in:
 Tab updates (including granular node edits) preserve editor tab order. They
 require the Node-RED Admin API v2 revisioned `/flows` response and deploy with
 `Node-RED-Deployment-Type: flows`, backing up the exact deployment base first.
-Conflict protection starts at that revisioned snapshot: a deployment after the
-snapshot returns HTTP 409 rather than replaying stale changes. Granular edits
-read the nested tab before taking the snapshot, so an external edit in that
+Conflict protection starts at that revisioned snapshot: if another deployment
+changes the revision after the snapshot, this update returns HTTP 409 rather
+than replaying stale changes. Granular edits read the nested tab before taking
+the snapshot, so an external edit in that
 earlier window can still be overwritten. Read the current flow again before
 retrying an edit after a conflict.
 

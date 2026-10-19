@@ -170,6 +170,18 @@ en marcha exige guardarraíles. Hay tres integrados:
 - Los wires se validan antes de que la escritura llegue al runtime;
   los destinos colgantes se rechazan en la capa MCP.
 
+Las actualizaciones de pestañas (incluidas las ediciones puntuales de nodos)
+conservan el orden de las pestañas del editor. Requieren la respuesta de
+`/flows` con revisión de la API de administración v2 de Node-RED y despliegan
+con `Node-RED-Deployment-Type: flows`, guardando primero un backup de la
+configuración exacta usada como base. La protección contra conflictos empieza
+en ese snapshot con revisión: si otro despliegue cambia la revisión después
+del snapshot, esta actualización devuelve HTTP 409 en lugar de reaplicar
+cambios obsoletos. Las ediciones puntuales leen
+la pestaña anidada antes de tomar el snapshot, por lo que un cambio externo
+durante ese intervalo previo todavía puede sobrescribirse. Lee de nuevo el
+flow actual antes de reintentar una edición tras un conflicto.
+
 Arranca con `--read-only` (o `MCP_READ_ONLY=true`) para anunciar
 solo las 21 tools de lectura y esconder todas las mutantes en el
 registro. `inject_node` también se esconde: disparar un inject puede

@@ -1,5 +1,5 @@
 # Issue 324 — Preserve tab order on updates
-Branch: `fix/issue-324-preserve-tab-order`; delivery: `auto-chain`; chain strategy: `feature-branch-chain`; original forecast ~350 authored lines; current ~585 before MCP mock adaptations.
+Branch: `fix/issue-324-preserve-tab-order`; delivery: `single-pr` (user-selected after repository-policy check); chain strategy: not applicable; original forecast ~350 authored lines; implementation/tests/docs 975 before Spanish README sync.
 Runner: Go tests and repository complexity check; Engram mirror pending (no callable memory tools).
 
 ## Specs
@@ -11,12 +11,18 @@ S4. Reproduction (issue verbatim):
 2. Call `update_node` on any node in a tab that is not the last one, changing only `name`.
 3. `GET /flows` again: that tab is now last.
 
+S5. Publication request verbatim: “Abre PR”. User decisions verbatim: “Sí, abrir una única PR” and “Sí, añadir status:approved”. Publish to fgjcarlos/nodered-mcp toward main, using Refs #324 (no automatic close); no merge authorized.
+
 ## Tasks
 T1 | S1–S4 | delegated writer (context backstop) | done | B1 public RED/GREEN and focused/package/full suite/complexity PASS; hidden credentials retained without restoring operational fields | commit: 427d097 (snapshot preparation 9eefc23)
 T2 | S1–S4 | independent verifier + parent spot check | done | Independent initial + B1-limited recheck PASS; parent public spot-check PASS; differential 16/16 cases compatible | commit: 427d097
 T3 | S1–S4 | inline | done | Baseline-safe preparation and final behavior committed; slice boundaries and proof recorded | commits: 9eefc23, 427d097; final tracking record follows
 
+T4 | S5 | inline | in_progress | Synchronize Spanish README, complete preflight and publish single PR | commit: pending
+
 ## Log
+L17. Spanish README synchronized with English change; structural readback and passive ASSESS completed. Publication preflight: git diff --check, gofmt, go vet ./..., go test ./... all PASS (job-15 exit 0). Authorized status:approved applied to issue #324 and read back (job-16 exit 0). Push and PR creation pending.
+L16. User request verbatim: “Abre PR”. CONTRIBUTING.md requires one branch/PR per issue and synchronized README.es.md; this supersedes the previously chosen chain. Explicit user choices: “Sí, abrir una única PR” and “Sí, añadir status:approved”. Repository permissions confirm authenticated account admin=true, maintain=true. User-authorized target: GitHub fgjcarlos/nodered-mcp using existing session, base main; Refs #324, no automatic issue closure. No merge authorized. Translation follow-up required; delivery_strategy=single-pr, chain_strategy cleared. No size:exception policy in this repository.
 L1. User request verbatim: “Resuelve la issue abierta”.
 L2. Issue #324 source: https://github.com/fgjcarlos/nodered-mcp/issues/324
 
