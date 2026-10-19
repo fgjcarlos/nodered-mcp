@@ -18,7 +18,7 @@ T1 | S1–S4 | delegated writer (context backstop) | done | B1 public RED/GREEN 
 T2 | S1–S4 | independent verifier + parent spot check | done | Independent initial + B1-limited recheck PASS; parent public spot-check PASS; differential 16/16 cases compatible | commit: 427d097
 T3 | S1–S4 | inline | done | Baseline-safe preparation and final behavior committed; slice boundaries and proof recorded | commits: 9eefc23, 427d097; final tracking record follows
 
-T4 | S5 | inline | in_progress | Synchronize Spanish README, complete preflight and publish single PR | commit: pending
+T4 | S5 | inline | done | Spanish README and preflight complete; single PR #327 published toward main with type:bug and Refs #324 | commit: 6fb1947
 
 ## Log
 L17. Spanish README synchronized with English change; structural readback and passive ASSESS completed. Publication preflight: git diff --check, gofmt, go vet ./..., go test ./... all PASS (job-15 exit 0). Authorized status:approved applied to issue #324 and read back (job-16 exit 0). Push and PR creation pending.
@@ -102,3 +102,4 @@ L6. RED observed for tab-order regression, revision conflicts and invalid snapsh
 L7. User decisions verbatim: “Autorizar los cuatro archivos (recomendado)” (internal/mcp/setcontext_concurrency_test.go, tools_flows_test.go, tools_test.go, version_gate_enforcement_test.go) and “Cadena sobre rama de feature (recomendado)” (feature-branch-chain). Scope: adapt mocks and retain coverage, not weaken production safety. No publication authorized. Plan slice boundaries after the complete verified diff; avoid artificial code/test separation.
 L5. User authorized edit-surface expansion: “Autorizar ambos archivos (recomendado)” — internal/nodered/backup.go and internal/nodered/subflows_test.go. No source edits or RED before this decision.
 L4. Baseline: origin/main c42831c. Risk: item 1 (full configuration deployment), item 3 (shared mutation helper), item 4 (external revision conflicts). No push, PR publication, issue closure or merge is authorized by this work unit. Delivery scope: one coherent fix; revisit delivery strategy if actual diff exceeds forecast/budget before commit.
+L18. Publication completed: https://github.com/fgjcarlos/nodered-mcp/pull/327 (OPEN, base main), published head 6fb1947390a93f2d94fd1a6b29f688d42c9f9049. Exactly one type label: type:bug. Refs #324 retains nonclosing linkage; issue approval applied under explicit authorization. Initial CI run 39249780183 queued. This final publication record is documentation-only; observe the resulting head's exact CI run after pushing it. No merge or issue closure performed.
