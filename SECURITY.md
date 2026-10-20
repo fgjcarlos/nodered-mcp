@@ -10,10 +10,11 @@ README for context.
 
 `nodered-mcp` is an MCP server that talks to a Node-RED instance over
 its admin HTTP API. Every caller of an MCP write tool
-(`create_flow`, `update_flow`, `add_node`, `set_flows`,
-`import_flow`, `update_node`) is effectively a deployer for that
-instance. Any node type the Node-RED runtime has installed — including
-shell-executing ones — can be deployed through these tools.
+(`create_flow`, `update_flow`, `add_node`, `update_node`, `import_flow`,
+`set_flows`, `create_subflow`, `update_subflow`, `restore_backup`) is
+effectively a deployer for that instance. Any node type the Node-RED
+runtime has installed — including shell-executing ones — can be deployed
+through these tools.
 
 The most acute risk is **remote code execution on the Node-RED host**
 via the Node-RED `exec` and `system` node types:
@@ -40,19 +41,61 @@ Out of the box, `nodered-mcp` defaults to a deny-list that blocks the
 | `MCP_NODE_DENYLIST=` (empty) | Operator opt-out — every node type is allowed. |
 | `MCP_NODE_DENYLIST=exec,system,foo,bar` | Custom denylist (replaces defaults). |
 
-The check runs in the MCP layer, BEFORE the runtime is contacted and
-BEFORE a backup snapshot is taken. A denied node type returns a typed
-error to the model and never touches the live instance:
+The check runs in the Node-RED client, BEFORE the runtime is contacted and
+BEFORE a backup snapshot is taken. It is evaluated on the **effective
+configuration the write would deploy** — the document as it will be sent,
+not the request as it arrived — and it walks that document recursively,
+so a forbidden node type nested inside a subflow definition is found too.
+A denied node type returns a typed error to the model and never touches
+the live instance:
 
 ```
 node type "exec" is in MCP_NODE_DENYLIST; remove it from the denylist
 or use a different node type (see SECURITY.md)
 ```
 
+It covers every write surface that can carry a node type:
+`create_flow`, `update_flow`, `add_node`, `update_node`, `connect_nodes`,
+`import_flow`, `set_flows`, `restore_backup`, `create_subflow`,
+`update_subflow` and `instantiate_subflow`. The server's own
+`set_context` helper is subject to the same policy: a denylist naming
+`function` or `inject` stops the helper from being provisioned.
+
 The check is **case-sensitive** because Node-RED node types are. It
 is per-node — a single bad node rejects the entire write (so a model
 that builds a flow mixing safe and dangerous types gets the same
 defence as one that ships a payload of pure `exec`).
+
+### What is judged
+
+The policy is evaluated on the content the write would deploy, walked
+recursively over the admin API's own shapes (`nodes`, `configs`,
+`subflows`), so a forbidden type nested inside a subflow definition is
+found too.
+
+- A write that submits a whole document — `create_flow`, `update_flow`,
+  `import_flow`, `set_flows`, `restore_backup`, `create_subflow`,
+  `update_subflow` — is judged in full, recursively.
+- A write that edits one part of a tab is judged on the part it
+  introduces or touches: the node `add_node` appends, the node
+  `update_node` patches (**after** the patch is merged, so a patch that
+  changes a node's `type` is refused on the type it would end up with),
+  and the two nodes `connect_nodes` wires together.
+- A forbidden type that already exists in the runtime is not judged by a
+  write that leaves it alone: the policy governs what a call introduces
+  and what it arms, not what the operator already deployed by hand. A
+  write that *touches* such a node — patching it, or wiring it — is
+  refused, because that is how a forbidden node gets armed.
+
+### When the refusal happens
+
+Before the runtime is contacted and before any backup snapshot is
+taken, for every surface where the effective content is known up front.
+
+Two checks cannot know that before reading the runtime: the node
+`update_node` would produce, and the nodes `connect_nodes` would wire.
+Those refusals follow a read of the tab, and never a deployment and
+never a backup.
 
 ## How to harden an install
 

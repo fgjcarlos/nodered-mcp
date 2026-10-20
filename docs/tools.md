@@ -15,6 +15,23 @@ command to real hardware.
 The 21 tools marked `read` are the only ones registered under
 `--read-only`.
 
+## Node-type policy
+
+Every write tool that can carry a node type is subject to the
+`MCP_NODE_DENYLIST` policy (default `exec,system`). The policy is
+judged on the effective configuration the write would deploy, and the
+document is walked recursively, so a forbidden type nested inside a
+subflow definition is refused too. `update_node` is judged on the node
+as it is after the patch is merged. The refusal names
+`MCP_NODE_DENYLIST` and the offending type, and it happens before the
+runtime is contacted and before any backup snapshot is taken.
+
+Covered surfaces: `create_flow`, `update_flow`, `add_node`,
+`update_node`, `connect_nodes`, `import_flow`, `set_flows`,
+`restore_backup`, `create_subflow`, `update_subflow`,
+`instantiate_subflow`. The server's own `set_context` helper obeys the
+same policy. See [`SECURITY.md`](../SECURITY.md).
+
 ## Retry safety
 
 Read tools retry typed HTTP transport failures up to twice (three attempts
