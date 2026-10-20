@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -158,7 +159,7 @@ func (c *Client) SearchNodes(ctx context.Context, query string, limit int) ([]Se
 	if err != nil {
 		// Strip any query string (may contain tokens) before reporting the URL.
 		redactedBase := strings.SplitN(base, "?", 2)[0]
-		return nil, fmt.Errorf("cannot reach npm registry at %s (check network connectivity): %w", redactedBase, err)
+		return nil, &TransportError{Err: fmt.Errorf("cannot reach npm registry at %s (check network connectivity): %w", redactedBase, err)}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -184,7 +185,11 @@ func (c *Client) SearchNodes(ctx context.Context, query string, limit int) ([]Se
 			} `json:"package"`
 		} `json:"objects"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, &TransportError{Err: fmt.Errorf("decoding registry response: %w", err)}
+	}
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&raw); err != nil {
 		return nil, fmt.Errorf("decoding registry response: %w", err)
 	}
 

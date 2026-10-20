@@ -3,6 +3,7 @@ package nodered
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -411,5 +412,44 @@ func TestSearchNodes_VerifiesTLS_EvenIfNodeRedInsecure(t *testing.T) {
 	// "x509" or "certificate".
 	if !strings.Contains(msg, "tls") && !strings.Contains(msg, "x509") && !strings.Contains(msg, "certificate") {
 		t.Errorf("expected a TLS/certificate error, got: %v", err)
+	}
+}
+
+func TestSearchNodesTransportError(t *testing.T) {
+	for _, mode := range []string{"disconnect", "truncated", "invalid-json", "api-error"} {
+		t.Run(mode, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if mode == "disconnect" {
+					conn, _, err := w.(http.Hijacker).Hijack()
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					_ = conn.Close()
+					return
+				}
+				if mode == "truncated" {
+					w.Header().Set("Content-Length", "100")
+					_, _ = w.Write([]byte(`{"objects":`))
+					return
+				}
+				if mode == "api-error" {
+					http.Error(w, "EOF", 400)
+					return
+				}
+				_, _ = w.Write([]byte(`not JSON: EOF`))
+			}))
+			defer srv.Close()
+			c, err := NewClient(Options{BaseURL: srv.URL, SearchBaseURL: srv.URL, BackupDir: t.TempDir()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = c.SearchNodes(context.Background(), "test", 1)
+			var transport *TransportError
+			want := mode == "disconnect" || mode == "truncated"
+			if err == nil || errors.As(err, &transport) != want {
+				t.Fatalf("error = %v; want transport = %v", err, want)
+			}
+		})
 	}
 }
