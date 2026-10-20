@@ -179,6 +179,12 @@ func (c *Client) CreateSubflow(ctx context.Context, subflow json.RawMessage) (Ra
 	if err != nil {
 		return nil, err
 	}
+	// A subflow definition carries its own nodes, so it is judged like any
+	// other document: a forbidden type nested inside it is refused before
+	// the global configuration is read.
+	if err := c.deniedNodeType(prepared); err != nil {
+		return nil, err
+	}
 	var newID string
 	_ = json.Unmarshal(prepared, &struct {
 		ID *string `json:"id"`
@@ -218,6 +224,12 @@ func (c *Client) UpdateSubflow(ctx context.Context, id string, subflow json.RawM
 	}
 	prepared, err := prepareSubflowForWrite(subflow)
 	if err != nil {
+		return err
+	}
+	// A subflow definition carries its own nodes, so it is judged like any
+	// other document: a forbidden type nested inside it is refused before
+	// the global configuration is read.
+	if err := c.deniedNodeType(prepared); err != nil {
 		return err
 	}
 	// Force the id in the body to match the path argument. The editor
@@ -370,7 +382,12 @@ func (c *Client) InstantiateSubflow(ctx context.Context, flowID, subflowID strin
 	if subflowID == "" {
 		return nil, errors.New("subflow id is required")
 	}
-	if _, err := c.GetSubflow(ctx, subflowID); err != nil {
+	// The instance node's type is "subflow:<id>", and that is a node type
+	// an operator can name in the denylist. The type is known before the
+	// runtime is read, so the policy is consulted here: refusing after
+	// the lookup would contact the runtime for a write that was never
+	// going to happen.
+	if err := c.deniedNodeTypeForType("subflow:" + subflowID); err != nil {
 		return nil, err
 	}
 	// Build the instance node. We start from the caller's payload
@@ -424,6 +441,15 @@ func (c *Client) InstantiateSubflow(ctx context.Context, flowID, subflowID strin
 	built, err := json.Marshal(node)
 	if err != nil {
 		return nil, fmt.Errorf("encoding instance node: %w", err)
+	}
+	// The node is judged here, before the runtime is read: the caller's
+	// params are merged into it, so a forbidden type nested in them
+	// would otherwise travel to the runtime before being noticed.
+	if err := c.deniedNodeType(built); err != nil {
+		return nil, err
+	}
+	if _, err := c.GetSubflow(ctx, subflowID); err != nil {
+		return nil, err
 	}
 	if err := c.AddNode(ctx, flowID, built); err != nil {
 		return nil, err

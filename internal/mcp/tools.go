@@ -115,6 +115,10 @@ func (s *Server) registerTools() {
 				"argument shape is the same one export_flow returns: a single-element "+
 				"array whose element is the flow tab. Only one tab per call — split "+
 				"multi-tab pastes by hand. Returns the runtime-assigned id of the new tab.\n\n"+
+				"WARNING: this tool can deploy any node type the Node-RED instance has "+
+				"installed, including exec/system nodes that execute shell commands on "+
+				"the Node-RED host. The MCP server blocks a configurable set of node "+
+				"types (MCP_NODE_DENYLIST, default: exec,system); see SECURITY.md.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
 				"write and can be restored with restore_backup.",
 		),
@@ -179,6 +183,12 @@ func (s *Server) registerTools() {
 				"body, or a name without risking the rest of the flow.\n\n"+
 				"A node's id cannot be changed, because the wires reference it. The "+
 				"wires are validated before the write.\n\n"+
+				"WARNING: this tool can deploy any node type, including exec/system "+
+				"nodes that execute shell commands on the Node-RED host. The MCP "+
+				"server blocks a configurable set of node types (MCP_NODE_DENYLIST, "+
+				"default: exec,system); the node is judged after your patch is "+
+				"merged, so changing a node's type to a blocked one is refused; see "+
+				"SECURITY.md.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
 				"write and can be restored with restore_backup.",
 		),
@@ -340,6 +350,11 @@ func (s *Server) registerTools() {
 				"describing the internal logic. Fails with a clear error if a "+
 				"subflow with the same id already exists; use update_subflow to "+
 				"change an existing one.\n\n"+
+				"WARNING: this tool can deploy any node type, including exec/system "+
+				"nodes that execute shell commands on the Node-RED host. The MCP "+
+				"server blocks a configurable set of node types (MCP_NODE_DENYLIST, "+
+				"default: exec,system), including inside the subflow's own nodes; see "+
+				"SECURITY.md.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
 				"write and can be restored with restore_backup.",
 		),
@@ -355,6 +370,11 @@ func (s *Server) registerTools() {
 				"current set, swaps the named entry, and writes the lot back. "+
 				"Fails with a 404-style error if no subflow with the given id "+
 				"exists; use create_subflow for new ones.\n\n"+
+				"WARNING: this tool can deploy any node type, including exec/system "+
+				"nodes that execute shell commands on the Node-RED host. The MCP "+
+				"server blocks a configurable set of node types (MCP_NODE_DENYLIST, "+
+				"default: exec,system), including inside the subflow's own nodes; see "+
+				"SECURITY.md.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
 				"write and can be restored with restore_backup.",
 		),
@@ -543,7 +563,10 @@ func (s *Server) registerTools() {
 			"Restore the ENTIRE Node-RED flow config from a saved backup (a full "+
 				"deployment that replaces everything). The current config is snapshotted "+
 				"first, so a restore can itself be undone. Use list_backups to find "+
-				"available snapshots; pass the backup filename or \"latest\" for the most recent.",
+				"available snapshots; pass the backup filename or \"latest\" for the most recent.\n\n"+
+				"A backup taken before the denylist changed can hold a now-blocked node "+
+				"type; the restore is refused in that case (MCP_NODE_DENYLIST, default: "+
+				"exec,system); see SECURITY.md.",
 		),
 		mcp.WithString("backup", mcp.Required(),
 			mcp.Description("Backup filename (from list_backups), or \"latest\".")),

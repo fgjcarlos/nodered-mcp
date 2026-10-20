@@ -147,12 +147,6 @@ func (s *Server) handleCreateFlow(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	if denied, t := s.findDeniedNodeInFlow(flow); denied {
-		return mcp.NewToolResultError(fmt.Sprintf(
-			"node type %q is in MCP_NODE_DENYLIST; remove it from the denylist or use a different node type (see SECURITY.md)",
-			t,
-		)), nil
-	}
 	slog.Debug("tool: create_flow")
 
 	created, err := s.nrClient.CreateFlow(ctx, flow)
@@ -181,12 +175,6 @@ func (s *Server) handleUpdateFlow(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	if denied, t := s.findDeniedNodeInFlow(flow); denied {
-		return mcp.NewToolResultError(fmt.Sprintf(
-			"node type %q is in MCP_NODE_DENYLIST; remove it from the denylist or use a different node type (see SECURITY.md)",
-			t,
-		)), nil
-	}
 	slog.Debug("tool: update_flow", "id", id)
 
 	if err := s.nrClient.UpdateFlow(ctx, id, flow); err != nil {
@@ -209,12 +197,6 @@ func (s *Server) handleAddNode(ctx context.Context, req mcp.CallToolRequest) (*m
 	node, err := nodeParam(req, "node")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
-	}
-	if denied, t := s.findDeniedNodeInNode(node); denied {
-		return mcp.NewToolResultError(fmt.Sprintf(
-			"node type %q is in MCP_NODE_DENYLIST; remove it from the denylist or use a different node type (see SECURITY.md)",
-			t,
-		)), nil
 	}
 	slog.Debug("tool: add_node", "flow_id", flowID)
 

@@ -102,6 +102,7 @@ nodered-mcp/
 │   │   ├── status.go       # node-status cache from /comms
 │   │   ├── logs.go         # /logs client
 │   │   ├── subflows.go     # subflow CRUD
+│   │   ├── policy.go       # node-type policy: walk + enforcement point
 │   │   ├── validate.go     # local structural validation
 │   │   └── types.go        # minimal types + RawFlow
 │   ├── mcp/
@@ -115,6 +116,7 @@ nodered-mcp/
 │   │   ├── tools_settings.go
 │   │   ├── tools_backups.go
 │   │   ├── tools_shared.go
+│   │   ├── denylist.go     # policy content + canonical refusal wording
 │   │   ├── resources.go    # 3 resources
 │   │   ├── prompts.go      # 2 prompts
 │   │   ├── httpauth.go     # bearer + OAuth middleware
@@ -203,6 +205,34 @@ fields it needs, where it needs them. No field is ever lost.
   **merges** properties instead of replacing; `delete_node` cleans
   up incoming wires; `connect_nodes` appends to the named port and
   grows the wires array when that port does not exist yet.
+
+## Safety: node-type policy on every write (issue #329)
+
+`MCP_NODE_DENYLIST` (default `exec,system`) is a policy over node
+types. It is owned by the MCP layer, which owns the operator-facing
+wording, and enforced by the `nodered` client, which is the only layer
+that knows the **effective configuration** a write would deploy.
+
+- The client holds the policy (`nodered.SetNodePolicy`) and consults it
+  at the entry of every write path: `CreateFlow`, `UpdateFlow`,
+  `AddNode`, `UpdateNode`, `ConnectNodes`, `SetFlows`, `RestoreFlows`,
+  `CreateSubflow`, `UpdateSubflow` and `InstantiateSubflow`.
+- The document is walked **recursively** over the admin API's own shapes
+  (`nodes`, `configs`, `subflows`), so a forbidden type nested inside a
+  subflow definition is found. The walk stops at nothing but the
+  document's own structure; it never guesses from free text.
+- `update_node` is judged twice: on the type the patch names, and on
+  the node as it is after the merge — which is what the deployment
+  would carry. `connect_nodes` is judged on the two nodes it wires.
+- Whole-document writes are judged in full; granular writes are judged
+  on the nodes they introduce or touch. A forbidden type already in the
+  runtime is not judged by a write that leaves it alone.
+- The refusal is a typed error (`nodered.DeniedNodeError`) that the MCP
+  layer renders with one canonical message naming `MCP_NODE_DENYLIST` and
+  the denied type.
+- The server's own `set_context` helper is subject to the same policy:
+  a denylist naming `function` or `inject` stops it from being
+  provisioned.
 
 ## Safety: backup before every write (v0.1 guardrail)
 

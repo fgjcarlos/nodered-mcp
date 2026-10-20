@@ -8,6 +8,21 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Enforce the node denylist on every mutating surface (#329).
+  `MCP_NODE_DENYLIST` is now judged on the effective configuration a write
+  would deploy, and the document is walked recursively, so a forbidden type
+  nested inside a subflow definition is refused. `update_node` is judged on
+  the node as it is after the patch is merged, which closes the path where a
+  patch changed a node's `type` to a forbidden value; `connect_nodes` is
+  judged on the nodes it wires. `import_flow`, `create_subflow`,
+  `update_subflow` and `instantiate_subflow` are covered too, and the
+  server's own `set_context` helper obeys a custom policy. The refusal names
+  `MCP_NODE_DENYLIST` and the denied type, and happens before the runtime is
+  contacted and before any backup snapshot is taken — except for the two
+  checks that cannot know the effective content without reading the runtime
+  first (the merged node, and the nodes a wire touches), which refuse after
+  a read but never after a deployment.
+
 - Do not replay mutating MCP tools after ambiguous transport failures (#328).
   Writes and actions run once and report an indeterminate outcome with guidance
   to inspect the runtime before repeating. Read tools retain up to three

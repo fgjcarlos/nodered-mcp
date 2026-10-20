@@ -48,6 +48,12 @@ type Client struct {
 	// Atomic pointer so the cache survives concurrent reads without
 	// locking; the probe itself runs at most once per Client.
 	nrVersion versionCache
+
+	// policy is the node-type policy consulted before any write is
+	// deployed (see policy.go). A nil policy allows every node type.
+	// Set once at construction time by the MCP layer, which owns the
+	// operator-facing policy.
+	policy NodePolicy
 }
 
 // authStrategy encapsulates how Authorization headers are produced.

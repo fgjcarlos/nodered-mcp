@@ -570,12 +570,6 @@ func (s *Server) handleSetFlows(ctx context.Context, req mcp.CallToolRequest) (*
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	if denied, t := s.findDeniedNodeInFlowsArray(flows); denied {
-		return mcp.NewToolResultError(fmt.Sprintf(
-			"node type %q is in MCP_NODE_DENYLIST; remove it from the denylist or use a different node type (see SECURITY.md)",
-			t,
-		)), nil
-	}
 	slog.Debug("tool: set_flows")
 
 	if err := s.nrClient.SetFlows(ctx, flows); err != nil {

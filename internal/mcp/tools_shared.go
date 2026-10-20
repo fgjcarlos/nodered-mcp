@@ -344,120 +344,13 @@ func normalizeFlowsArray(raw json.RawMessage) ([]json.RawMessage, error) {
 	return flows, nil
 }
 
-// findDeniedNodeInFlow walks every node entry of a single nested
-// tab document and reports the first one whose type is in the
-// configured denylist. Returns (false, "") when the document is
-// empty, malformed, or contains no denied node — the caller treats
-// "no denied node" the same as "no denylist". Issue #81.
-//
-// A nested tab doc is {"label":...,"nodes":[...],...}. The
-// "nodes" array carries the canvas nodes; "configs" carries
-// brokers, credentials, and other shared definitions. The latter
-// can also carry shell-executing node types (any "exec"-class
-// instance the operator pasted in), so both arrays are walked.
-
-// findDeniedNodeInFlow walks every node entry of a single nested
-// tab document and reports the first one whose type is in the
-// configured denylist. Returns (false, "") when the document is
-// empty, malformed, or contains no denied node — the caller treats
-// "no denied node" the same as "no denylist". Issue #81.
-//
-// A nested tab doc is {"label":...,"nodes":[...],...}. The
-// "nodes" array carries the canvas nodes; "configs" carries
-// brokers, credentials, and other shared definitions. The latter
-// can also carry shell-executing node types (any "exec"-class
-// instance the operator pasted in), so both arrays are walked.
-func (s *Server) findDeniedNodeInFlow(raw nodered.RawFlow) (denied bool, nodeType string) {
-	if s.denylist == nil {
-		return false, ""
-	}
-	var doc struct {
-		Nodes   []json.RawMessage `json:"nodes"`
-		Configs []json.RawMessage `json:"configs"`
-	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return false, ""
-	}
-	for _, n := range doc.Nodes {
-		if t := readNodeType(n); s.denylist(t) {
-			return true, t
-		}
-	}
-	for _, n := range doc.Configs {
-		if t := readNodeType(n); s.denylist(t) {
-			return true, t
-		}
-	}
-	return false, ""
-}
-
-// findDeniedNodeInNode inspects a single node payload (as accepted by
-// add_node). Issue #81: a caller can ship an "exec" node directly,
-// without wrapping it in a flow document.
-
-// findDeniedNodeInNode inspects a single node payload (as accepted by
-// add_node). Issue #81: a caller can ship an "exec" node directly,
-// without wrapping it in a flow document.
-func (s *Server) findDeniedNodeInNode(raw json.RawMessage) (denied bool, nodeType string) {
-	if s.denylist == nil {
-		return false, ""
-	}
-	if t := readNodeType(raw); s.denylist(t) {
-		return true, t
-	}
-	return false, ""
-}
-
-// findDeniedNodeInFlowsArray walks every tab of a full /flows
-// payload and reports the first denied node type encountered. The
-// set_flows shape is a flat array; each element is a tab object or a
-// canvas/config node, so we delegate to the same walker the single-
-// flow handlers use. Issue #81.
-
-// findDeniedNodeInFlowsArray walks every tab of a full /flows
-// payload and reports the first denied node type encountered. The
-// set_flows shape is a flat array; each element is a tab object or a
-// canvas/config node, so we delegate to the same walker the single-
-// flow handlers use. Issue #81.
-func (s *Server) findDeniedNodeInFlowsArray(flows []json.RawMessage) (denied bool, nodeType string) {
-	if s.denylist == nil {
-		return false, ""
-	}
-	for _, entry := range flows {
-		// Each entry can be either a tab doc ({"nodes":[...],"configs":[...]})
-		// or a flat /flows element (just a single node). Try the nested
-		// shape first: a single node has no "nodes" array, so the walker
-		// returns no hit; we then fall back to inspecting the entry as a
-		// node directly.
-		if d, t := s.findDeniedNodeInFlow(nodered.RawFlow(entry)); d {
-			return true, t
-		}
-		if d, t := s.findDeniedNodeInNode(entry); d {
-			return true, t
-		}
-	}
-	return false, ""
-}
-
-// readNodeType extracts the "type" field of a node object as a
-// string, returning "" when the payload is not a JSON object or has
-// no type. Failure-to-parse is treated as "" because the write
-// handlers downstream of this check have their own validation; the
-// denylist guard only needs to react to types it can name.
-
-// readNodeType extracts the "type" field of a node object as a
-// string, returning "" when the payload is not a JSON object or has
-// no type. Failure-to-parse is treated as "" because the write
-// handlers downstream of this check have their own validation; the
-// denylist guard only needs to react to types it can name.
-func readNodeType(raw json.RawMessage) string {
-	var probe struct {
-		Type string `json:"type"`
-	}
-	if err := json.Unmarshal(raw, &probe); err != nil {
-		return ""
-	}
-	return probe.Type
-}
+// The node-type policy is enforced by the nodered client, on the
+// effective configuration each write would deploy (see
+// internal/nodered/policy.go). The MCP layer owns the policy content
+// and the operator-facing wording; it installs the policy on the client
+// and renders the refusal the client reports. The walkers that used to
+// live here are gone: they read the submitted payload, which is why they
+// missed the patched node, the imported tab and the nested subflow
+// definitions (issue #329).
 
 // handleGetSettings returns the Node-RED server settings as JSON.
