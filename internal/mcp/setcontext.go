@@ -212,6 +212,17 @@ func (s *Server) ensureSetContextHelper(ctx context.Context) (*setContextHelper,
 // Server is up, s.ctxHelper is the source of truth, and the
 // runtime ids never change.
 func (s *Server) provisionSetContextHelper(ctx context.Context) error {
+	// The helper installs a function and an inject node. A custom
+	// denylist may name either type, and the helper must respect it:
+	// the check happens before anything is deployed, so a refused
+	// provisioning leaves no half-built tab behind.
+	//
+	// The refusal is the same typed one every other write path raises,
+	// so the MCP layer renders it with the canonical wording.
+	if denied := s.deniedHelperNodeType(); denied != "" {
+		return &nodered.DeniedNodeError{NodeType: denied}
+	}
+
 	// 1. The flow tab. The id is included in the request body, but
 	// Node-RED's POST /flow reassigns it. We capture whatever id
 	// the runtime settled on from the response, because the
@@ -268,6 +279,25 @@ func (s *Server) provisionSetContextHelper(ctx context.Context) error {
 	s.ctxHelper.injectID = setContextHelperInjectID
 	s.ctxHelper.functionID = setContextHelperFunctionID
 	return nil
+}
+
+// deniedHelperNodeType returns the node type the configured policy
+// forbids among the ones the set_context helper installs, or "" when the
+// helper may be provisioned.
+//
+// The question is asked of the client's policy — the same predicate the
+// helper's own AddNode calls are judged by — so the pre-flight answer and
+// the enforcement cannot drift apart.
+func (s *Server) deniedHelperNodeType() string {
+	if s.nrClient == nil {
+		return ""
+	}
+	for _, nodeType := range []string{"function", "inject"} {
+		if !s.nrClient.NodeTypeAllowed(nodeType) {
+			return nodeType
+		}
+	}
+	return ""
 }
 
 // extractFlowID pulls the id out of a CreateFlow response. The

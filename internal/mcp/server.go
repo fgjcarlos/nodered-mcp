@@ -174,6 +174,11 @@ const defaultHTTPRateBurst = 10
 // predicate they like (the slice path is reserved for production). A
 // nil or empty slice yields a pass-through closure: empty denylist is
 // the documented opt-out, not a regression.
+//
+// The closure reports whether a type is DENIED. The client consumes the
+// same predicate through nodered.NodePolicy, which reports the opposite
+// (whether a type is ALLOWED), so the two are bridged where the policy
+// is installed.
 func buildDenylist(types []string) func(string) bool {
 	if len(types) == 0 {
 		return func(string) bool { return false }
@@ -231,6 +236,16 @@ func New(nrClient *nodered.Client, opts Options) *Server {
 		debugStream: opts.DebugStream,
 		denylist:    buildDenylist(opts.NodeDenylist),
 	}
+
+	// Issue #329: the policy is enforced by the client, on the effective
+	// configuration each write would deploy. The client is the only layer
+	// that knows the final node after a patch is merged, and the only one
+	// that sees a whole document with nested subflow definitions. The
+	// server keeps the deny-list closure for the checks that must be
+	// reported before a request is built.
+	nrClient.SetNodePolicy(func(nodeType string) bool {
+		return !srv.denylist(nodeType)
+	})
 
 	// Issue #111: apply the threshold, falling back to 200 when zero.
 	if opts.ListFlowsFullThreshold > 0 {
@@ -460,7 +475,15 @@ func (e *toolTransportError) Unwrap() error { return e.cause }
 
 // toolResultError preserves transport identity without serializing it into the
 // MCP result. Validation and HTTP API errors keep their existing result shape.
+//
+// A node-type policy refusal is rendered with the canonical operator-facing
+// message, whichever handler produced it: the policy is enforced by the
+// client (see nodered.SetNodePolicy), so the refusal can surface from any
+// write path and the operator must see the same wording everywhere.
 func toolResultError(err error, message string) (*mcp.CallToolResult, error) {
+	if nodeType, denied := deniedNodeType(err); denied {
+		return mcp.NewToolResultError(deniedNodeMessage(nodeType)), nil
+	}
 	res := mcp.NewToolResultError(message)
 	if isTransportError(err) {
 		return res, &toolTransportError{message: message, cause: err}
