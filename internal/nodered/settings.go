@@ -83,6 +83,11 @@ func (c *Client) SetFlows(ctx context.Context, flows []json.RawMessage) error {
 	if len(flows) == 0 {
 		return errors.New("flows: at least one element is required")
 	}
+	// A full deployment replaces the whole configuration, so the policy is
+	// judged on the array before anything is snapshotted or sent.
+	if err := c.deniedNodeTypeInFlows(flows); err != nil {
+		return err
+	}
 	// Issue #106: Node-RED accepts a non-empty flows array that contains
 	// zero tab entries (e.g. one orphan inject node) and deploys it,
 	// leaving the runtime with no tabs and a node that has nowhere to

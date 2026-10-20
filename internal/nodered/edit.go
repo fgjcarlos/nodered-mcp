@@ -47,16 +47,36 @@ func (c *Client) editFlow(ctx context.Context, flowID string, edit func(RawFlow)
 }
 
 // AddNode appends a node to a flow tab.
+//
+// The configured node policy is consulted before the tab is read, so a
+// forbidden node type is refused without contacting the runtime.
 func (c *Client) AddNode(ctx context.Context, flowID string, node json.RawMessage) error {
+	if err := c.deniedNodeType(node); err != nil {
+		return err
+	}
 	return c.editFlow(ctx, flowID, func(f RawFlow) (RawFlow, error) {
 		return AddNodeToFlow(f, node)
 	})
 }
 
 // UpdateNode merges properties into one node, leaving the rest of it intact.
+//
+// A patch may change the node's type, so the policy is judged twice: once
+// on the type the patch names, before the tab is read, and once on the
+// node as it will be after the merge, which is what the deployment would
+// actually carry. Both refusals happen before anything is written.
 func (c *Client) UpdateNode(ctx context.Context, flowID, nodeID string, patch map[string]json.RawMessage) error {
+	if nodeType := stringField(patch, "type"); nodeType != "" {
+		if err := c.deniedNodeTypeForType(nodeType); err != nil {
+			return err
+		}
+	}
 	return c.editFlow(ctx, flowID, func(f RawFlow) (RawFlow, error) {
-		return UpdateNodeInFlow(f, nodeID, patch)
+		next, err := UpdateNodeInFlow(f, nodeID, patch)
+		if err != nil {
+			return nil, err
+		}
+		return next, c.deniedNodeTypeOfNode(next, nodeID)
 	})
 }
 
@@ -68,9 +88,21 @@ func (c *Client) DeleteNode(ctx context.Context, flowID, nodeID string) error {
 }
 
 // ConnectNodes wires one node's output port to another node.
+//
+// A wire into or out of a forbidden node is what puts it in a position to
+// run, so the nodes this call touches are judged like a patched node is.
+// The judgement happens after the tab is read (the effective wiring is not
+// known before that) but before anything is deployed.
 func (c *Client) ConnectNodes(ctx context.Context, flowID, fromID string, port int, toID string) error {
 	return c.editFlow(ctx, flowID, func(f RawFlow) (RawFlow, error) {
-		return ConnectNodesInFlow(f, fromID, port, toID)
+		next, err := ConnectNodesInFlow(f, fromID, port, toID)
+		if err != nil {
+			return nil, err
+		}
+		if err := c.deniedNodeTypeOfNode(next, fromID); err != nil {
+			return nil, err
+		}
+		return next, c.deniedNodeTypeOfNode(next, toID)
 	})
 }
 

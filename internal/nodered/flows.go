@@ -133,8 +133,14 @@ func hasCanvasCoords(raw json.RawMessage) bool {
 // verbatim; Node-RED assigns the ID and returns the created flow. Wires are
 // validated first, then a backup of the current config is taken (fail-closed:
 // no write if backup fails).
+//
+// The configured node policy is consulted first, so a document carrying a
+// forbidden node type is refused before the runtime is contacted at all.
 func (c *Client) CreateFlow(ctx context.Context, flow RawFlow) (RawFlow, error) {
 	defer c.writeGuard()()
+	if err := c.deniedNodeType(flow); err != nil {
+		return nil, err
+	}
 	if err := validateFlowWires(flow); err != nil {
 		return nil, err
 	}
@@ -156,8 +162,14 @@ func (c *Client) CreateFlow(ctx context.Context, flow RawFlow) (RawFlow, error) 
 // Takes writeMu so concurrent mutations on the same client do not race.
 // Callers that already hold the lock (e.g. editFlow) must call
 // updateFlowLocked instead.
+//
+// The configured node policy is consulted first, so a document carrying a
+// forbidden node type is refused before the runtime is contacted at all.
 func (c *Client) UpdateFlow(ctx context.Context, id string, flow RawFlow) error {
 	defer c.writeGuard()()
+	if err := c.deniedNodeType(flow); err != nil {
+		return err
+	}
 	return c.updateFlowLocked(ctx, id, flow)
 }
 
@@ -209,6 +221,13 @@ func (c *Client) RestoreFlows(ctx context.Context, backup RawFlow) error {
 	arr := FlowArray(backup)
 	if arr == nil {
 		return errors.New("backup does not contain a recognizable flow array")
+	}
+	// A backup taken before the policy changed can hold a type that is
+	// denied now, and restoring it would reintroduce the exact RCE path
+	// the policy closes. The check happens before the snapshot, so a
+	// rejected restore costs zero runtime requests.
+	if err := c.deniedNodeTypeInFlows(arr); err != nil {
+		return err
 	}
 	body, err := json.Marshal(arr)
 	if err != nil {
