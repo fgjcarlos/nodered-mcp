@@ -363,15 +363,7 @@ func degradedTools(nrVersion nodered.Version, tools []mcp.Tool) int {
 	return degraded
 }
 
-// addReadTool registers a side-effect-free tool. Always registered.
-//
-// The handler is wrapped in withTimeoutRetry so every tool call is bounded
-// by toolTimeout and gets up to maxRetries retries on transport-level hangs
-// (context.DeadlineExceeded, *net.OpError). The audit of v0.5.12 (28 Jul
-// 2026) reported 9 hangs of ~4 minutes each across a session; the inner
-// nodered.Client already has its own 30s defaultTimeout, but the outer MCP
-// transport (stdio / Streamable HTTP) keeps waiting on the goroutine. The
-// wrapper here cuts that wait at toolTimeout and surfaces a typed error.
+// addReadTool registers a side-effect-free tool with bounded transport retries.
 func (s *Server) addReadTool(tool mcp.Tool, handler server.ToolHandlerFunc) {
 	s.attachMinVersion(&tool)
 	s.mcpServer.AddTool(tool, s.withTimeoutRetry(tool.Name, handler))
@@ -380,13 +372,13 @@ func (s *Server) addReadTool(tool mcp.Tool, handler server.ToolHandlerFunc) {
 
 // addWriteTool registers a tool that mutates the Node-RED instance — its
 // persisted config, its palette, or its running flows. Skipped entirely in
-// read-only mode. Same withTimeoutRetry wrapping as addReadTool.
+// read-only mode. Writes get one bounded attempt, never an automatic replay.
 func (s *Server) addWriteTool(tool mcp.Tool, handler server.ToolHandlerFunc) {
 	if s.readOnly {
 		return
 	}
 	s.attachMinVersion(&tool)
-	s.mcpServer.AddTool(tool, s.withTimeoutRetry(tool.Name, handler))
+	s.mcpServer.AddTool(tool, s.withTimeoutAttempts(tool.Name, handler, 1))
 	s.tools = append(s.tools, tool)
 }
 
@@ -413,123 +405,70 @@ func (s *Server) attachMinVersion(tool *mcp.Tool) {
 // the largest legitimate write (set_flows on a 50-node instance).
 const toolTimeout = 15 * time.Second
 
-// maxRetries is the number of additional attempts after the first call.
-// Total worst case is (1 + maxRetries) * toolTimeout = 45s end-to-end.
-// Per-issue #42 decision: stay under the 4-minute hang and still cover
-// the intermittent transport failures the audit attributed to the
-// Node-RED runtime.
+// maxRetries is the number of additional read attempts after the first call.
+// Each attempt has its own toolTimeout (45s total with no outer deadline).
 const maxRetries = 2
 
-// withTimeoutRetry wraps a tool handler so every call gets a fresh ctx
-// with toolTimeout and is retried up to maxRetries times on transport
-// errors. Two ways an error reaches us:
-//
-//  1. The handler returns (nil, err) directly — typical of helpers
-//     that did not go through mcp.NewToolResultError.
-//  2. The handler returns (result, nil) with result.IsError == true,
-//     which is the convention every handle* uses (the audit confirmed
-//     this is the universal shape across all 29 tools).
-//
-// We respect both: in case 2 we inspect the result's first text
-// content for transport-error markers so the wrapper does not silently
-// treat a "Node-RED hung up" response as a clean answer.
-//
-// HTTP 4xx/5xx responses from Node-RED (after the handler has
-// rewritten them via NewToolResultError) are NOT retried: those are
-// the server answering, not hanging. The audit verified the hangs are
-// atomic (no partial wire, no backup written for the hung call), so
-// re-running the call is safe.
+// withTimeoutRetry is reserved for side-effect-free read tools.
 func (s *Server) withTimeoutRetry(toolName string, handler server.ToolHandlerFunc) server.ToolHandlerFunc {
+	return s.withTimeoutAttempts(toolName, handler, maxRetries+1)
+}
+
+// withTimeoutAttempts bounds each attempt. A failed write exchange is not
+// evidence that the runtime did nothing, so single-attempt tools report an
+// indeterminate outcome rather than replaying the handler.
+func (s *Server) withTimeoutAttempts(toolName string, handler server.ToolHandlerFunc, attempts int) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		var lastErr error
-		attempts := maxRetries + 1
-		for attempt := 1; attempt <= attempts; attempt++ {
+		for attempt := 1; ; attempt++ {
 			callCtx, cancel := context.WithTimeout(ctx, toolTimeout)
 			res, err := handler(callCtx, req)
 			cancel()
-			if err == nil && !resultIsTransportError(res) {
-				return res, nil
-			}
-			// Pick the most informative error to keep for the final wrap.
-			if err != nil {
-				lastErr = err
-			} else if res != nil {
-				lastErr = errors.New(resultFirstText(res))
-			}
-			if !isRetryableTransport(err, res) {
+			if !isTransportError(err) {
 				return res, err
 			}
-			if attempt < attempts {
-				slog.Warn("tool call retried after transport error",
-					"tool", toolName, "attempt", attempt, "error", lastErr)
+			if attempts == 1 {
+				return mcp.NewToolResultError(fmt.Sprintf("tool %q outcome is indeterminate: %v. The action may already have executed; inspect the Node-RED runtime before repeating the operation.", toolName, err)), nil
 			}
+			if attempt == attempts || ctx.Err() != nil {
+				return nil, fmt.Errorf("tool %q failed after %d attempts: %w", toolName, attempt, err)
+			}
+			slog.Warn("tool call retried after transport error", "tool", toolName, "attempt", attempt, "error", err)
 		}
-		return nil, fmt.Errorf("tool %q failed after %d attempts: %w", toolName, attempts, lastErr)
 	}
 }
 
-// isRetryableTransport reports whether an error (or a result flagged as
-// error) is a transport-level hang that may succeed on retry. HTTP
-// 4xx/5xx responses (apiError, "Cannot GET", "not found") are answered
-// by the server, so retrying just spams it.
-func isRetryableTransport(err error, res *mcp.CallToolResult) bool {
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return true
-		}
-		var netErr *net.OpError
-		if errors.As(err, &netErr) {
-			return true
-		}
-		// The nodered.Client.do wrapper formats transport failures as
-		// "calling <method> <url>: <cause>". Reject once we see an
-		// APIError (server answered) and let other errors fall through.
-		var apiErr *nodered.APIError
-		if errors.As(err, &apiErr) {
-			return false
-		}
-		// Untyped errors from net/http/io packages — retry; the next
-		// attempt may catch a transient blip.
-		return true
-	}
-	// err == nil but the handler signalled an error result.
-	return resultIsTransportError(res)
-}
-
-// resultIsTransportError reports whether a CallToolResult whose
-// IsError == true was caused by a transport-level hang (the case the
-// audit observed) rather than a clean 4xx/5xx answer from Node-RED.
-func resultIsTransportError(res *mcp.CallToolResult) bool {
-	if res == nil || !res.IsError {
+// isTransportError uses types, never operator-facing text, to classify failures.
+func isTransportError(err error) bool {
+	var apiErr *nodered.APIError
+	if errors.As(err, &apiErr) {
 		return false
 	}
-	text := resultFirstText(res)
-	if text == "" {
-		return false
-	}
-	// Strings the nodered.Client.do path emits on transport failure.
-	// Keep this list tight: false positives here turn every legitimate
-	// 4xx into a retry storm.
-	for _, marker := range []string{
-		"context deadline exceeded",
-		"connection reset",
-		"connection refused",
-		"EOF",
-		"i/o timeout",
-		"no such host",
-		"network is unreachable",
-		"broken pipe",
-	} {
-		if strings.Contains(text, marker) {
-			return true
-		}
-	}
-	return false
+	var transportErr *nodered.TransportError
+	var netErr *net.OpError
+	return errors.As(err, &transportErr) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.As(err, &netErr)
 }
 
-// resultFirstText returns the first TextContent's text from a result,
-// or "" if the result has none. Used to inspect what a handler
-// reported when its result carries an error.
+// toolTransportError preserves both the displayed handler context and the
+// underlying error chain until the registration wrapper applies its policy.
+type toolTransportError struct {
+	message string
+	cause   error
+}
+
+func (e *toolTransportError) Error() string { return e.message }
+func (e *toolTransportError) Unwrap() error { return e.cause }
+
+// toolResultError preserves transport identity without serializing it into the
+// MCP result. Validation and HTTP API errors keep their existing result shape.
+func toolResultError(err error, message string) (*mcp.CallToolResult, error) {
+	res := mcp.NewToolResultError(message)
+	if isTransportError(err) {
+		return res, &toolTransportError{message: message, cause: err}
+	}
+	return res, nil
+}
+
+// resultFirstText returns the first text content, if any.
 func resultFirstText(res *mcp.CallToolResult) string {
 	if res == nil || len(res.Content) == 0 {
 		return ""

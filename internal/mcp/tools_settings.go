@@ -19,7 +19,7 @@ func (s *Server) handleGetSettings(ctx context.Context, _ mcp.CallToolRequest) (
 	raw, err := s.nrClient.GetSettings(ctx)
 	if err != nil {
 		slog.Error("get_settings failed", "error", err)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("```json\n%s\n```", prettyJSON(raw))), nil
 }
@@ -51,7 +51,7 @@ func (s *Server) handleGetDiagnostics(ctx context.Context, _ mcp.CallToolRequest
 				), nil
 			}
 		}
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("```json\n%s\n```", prettyJSON(raw))), nil
 }
@@ -65,7 +65,7 @@ func (s *Server) handleListPlugins(ctx context.Context, _ mcp.CallToolRequest) (
 	raw, err := s.nrClient.ListPlugins(ctx)
 	if err != nil {
 		slog.Error("list_plugins failed", "error", err)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	if len(raw) == 0 || string(raw) == "[]" {
 		return mcp.NewToolResultText("No editor plugins are loaded."), nil

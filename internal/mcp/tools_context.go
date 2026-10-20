@@ -23,7 +23,7 @@ func (s *Server) handleGetContext(ctx context.Context, req mcp.CallToolRequest) 
 	raw, err := s.nrClient.GetContext(ctx, scope, id, key)
 	if err != nil {
 		slog.Error("get_context failed", "error", err, "scope", scope, "id", id)
-		return mcp.NewToolResultError(fmt.Sprintf("reading context: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("reading context: %v", err))
 	}
 	// An empty store is a legitimate answer and a common one. Saying so beats
 	// returning "{}" and letting the model read it as a failure.
@@ -129,7 +129,7 @@ func (s *Server) handleSetContext(ctx context.Context, req mcp.CallToolRequest) 
 	helper, justProvisioned, err := s.ensureSetContextHelper(ctx)
 	if err != nil {
 		slog.Error("set_context: provisioning helper failed", "error", err)
-		return mcp.NewToolResultError(fmt.Sprintf("provisioning set_context helper: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("provisioning set_context helper: %v", err))
 	}
 
 	if errMsg := validateContextTarget(scope, id, helper); errMsg != "" {
@@ -156,7 +156,7 @@ func (s *Server) handleSetContext(ctx context.Context, req mcp.CallToolRequest) 
 
 	if err := s.injectWithProvisioningRetry(ctx, helper.injectID, bodyBytes, justProvisioned); err != nil {
 		slog.Error("set_context failed", "error", err, "scope", scope, "id", id, "key", key)
-		return mcp.NewToolResultError(fmt.Sprintf("dispatching set_context: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("dispatching set_context: %v", err))
 	}
 
 	return s.setContextSuccessResult(scope, key, value, helper), nil

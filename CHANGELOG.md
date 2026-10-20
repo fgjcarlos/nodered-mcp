@@ -8,6 +8,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Do not replay mutating MCP tools after ambiguous transport failures (#328).
+  Writes and actions run once and report an indeterminate outcome with guidance
+  to inspect the runtime before repeating. Read tools retain up to three
+  attempts; transport classification uses typed errors, not message substrings.
+
 - Preserve editor tab order when updating a flow or editing its nodes (#324).
   Updates now back up the revisioned configuration and deploy in place using
   Admin API v2 with deployment type `flows`. Unrelated configuration and omitted

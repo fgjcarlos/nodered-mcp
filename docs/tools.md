@@ -15,6 +15,21 @@ command to real hardware.
 The 21 tools marked `read` are the only ones registered under
 `--read-only`.
 
+## Retry safety
+
+Read tools retry typed HTTP transport failures up to twice (three attempts
+in total), with a 15-second deadline per attempt. Validation errors and
+complete HTTP error responses are not retried, regardless of their text.
+
+Write and action tools run once. If a connection closes or a deadline
+expires without a complete response, the tool reports an **indeterminate
+outcome**: the action may already have executed. Inspect the Node-RED runtime
+before repeating the operation; a final error does not prove nothing changed.
+Backups protect configuration recovery, not against duplicate messages or
+hardware commands. This policy governs automatic MCP handler replays; the
+existing `set_context` retry after an explicit provisioning-related HTTP 404
+is unchanged.
+
 ## Flows
 
 | Tool | HTTP | Risk | Notes |

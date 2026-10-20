@@ -61,6 +61,21 @@ flowchart LR
   validate -- "reject" --> err["Typed error to caller<br/>(no write)"]
 ```
 
+## Tool timeouts and retries
+
+The registration wrapper gives each tool attempt a 15-second context deadline.
+Only read tools retry transport failures, up to three total attempts. The HTTP
+client marks failed exchanges with `TransportError`; MCP adapters preserve that
+error chain until the wrapper chooses a retry policy. Display text such as
+`EOF` never determines whether an operation is retried. Complete HTTP errors
+and local validation errors keep their existing tool-error responses.
+
+Mutating handlers are never automatically replayed. A transport failure returns
+a tool-error result stating that the outcome is indeterminate and that the
+caller must inspect the runtime before repeating the operation. Losing a
+response does not roll back the action. The backup-before-write and write-lock
+guards remain in place, but cannot undo runtime messages or hardware commands.
+
 ## Source tree
 
 ```

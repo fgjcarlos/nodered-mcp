@@ -177,7 +177,7 @@ func (s *Server) handleGetRuntimeLogs(ctx context.Context, req mcp.CallToolReque
 					"~/.node-red/*.log or the container's stdout).",
 			), nil
 		}
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 
 	filtered := filterLogs(raw, level, sinceTime, lineOffset, limit)
@@ -392,7 +392,7 @@ func (s *Server) handleGetNodeStatus(ctx context.Context, req mcp.CallToolReques
 	raw, err := s.nrClient.GetFlow(ctx, flowID)
 	if err != nil {
 		slog.Error("get_node_status: GetFlow failed", "error", err, "flow_id", flowID)
-		return mcp.NewToolResultError(fmt.Sprintf("reading flow %q: %v", flowID, err)), nil
+		return toolResultError(err, fmt.Sprintf("reading flow %q: %v", flowID, err))
 	}
 	ids := nodered.ParseFlowNodeIDs(raw)
 	if len(ids) == 0 {
@@ -519,7 +519,7 @@ func (s *Server) handleGetFlowsState(ctx context.Context, _ mcp.CallToolRequest)
 					"settings.js and restart Node-RED, then retry.",
 			), nil
 		}
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("```json\n%s\n```", prettyJSON(raw))), nil
 }
@@ -549,7 +549,7 @@ func (s *Server) handleSetFlowsState(ctx context.Context, req mcp.CallToolReques
 					"settings.js and restart Node-RED, then retry.",
 			), nil
 		}
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Node-RED runtime %sed (a backup was taken first).", state)), nil
 }
@@ -580,7 +580,7 @@ func (s *Server) handleSetFlows(ctx context.Context, req mcp.CallToolRequest) (*
 
 	if err := s.nrClient.SetFlows(ctx, flows); err != nil {
 		slog.Error("set_flows failed", "error", err)
-		return mcp.NewToolResultError(fmt.Sprintf("calling Node-RED: %v", err)), nil
+		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	return mcp.NewToolResultText("Flows deployed (a backup was taken first)."), nil
 }
