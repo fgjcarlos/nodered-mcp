@@ -29,6 +29,7 @@ package mcp
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,7 +41,7 @@ import (
 
 // setContextHelper holds the runtime-side ids of the helper flow the MCP
 // provisions for the set_context tool. Zero value = not provisioned. The
-// helper is stable for the lifetime of the Server.
+// helper is rediscovered and verified against runtime state before each use.
 //
 // Once a helper is published (its flowID/injectID/functionID are set),
 // it is effectively immutable: every field is written exactly once,
@@ -49,16 +50,18 @@ import (
 // never mutate it, so the fields can be loaded without re-locking.
 type setContextHelper struct {
 	// flowID, injectID, functionID are the Node-RED ids the helper
-	// installs in the runtime. They are chosen at provisioning time
-	// (deterministic, fixed strings) and never change after.
+	// installs in the runtime. They are selected without colliding with
+	// existing entries and never change after this helper is published.
 	flowID     string
 	injectID   string
 	functionID string
+	// Legacy aliases are valid only when no unrelated entry occupies that ID.
+	flowAliasAllowed     bool
+	functionAliasAllowed bool
 }
 
 // provisioned reports whether the helper has been installed on the
-// runtime. It is the only state readers look at: callers running with
-// a non-nil ctxHelper can fire injects without taking the mutex.
+// runtime. Callers must still hold ctxHelperMu and verify runtime state.
 func (h *setContextHelper) provisioned() bool {
 	return h != nil && h.flowID != "" && h.injectID != ""
 }
@@ -67,8 +70,8 @@ func (h *setContextHelper) provisioned() bool {
 // labels are what shows in the editor; the ids are what GET /flows and
 // POST /inject/:id see. They are deliberately stable across runs so
 // the same Server can re-discover an already-provisioned helper after
-// a restart — though current code does not yet exercise that path
-// (helper state is in-memory only).
+// a restart. If those IDs are already occupied by unrelated/edited nodes,
+// provisioning selects fresh IDs; discovery verifies the executable shape.
 const (
 	setContextHelperFlowID     = "mcp_ctx_helper_tab"
 	setContextHelperFlowLabel  = "__mcp_context_helper__"
@@ -142,8 +145,8 @@ func (s *Server) injectWithProvisioningRetry(ctx context.Context, injectID strin
 }
 
 // ensureSetContextHelper returns the lazily-provisioned set_context
-// helper, provisioning it on the first call. It is a no-op after the
-// first successful provision.
+// helper, verifying it against the runtime on every call. It provisions a
+// complete replacement only when no supported, unmodified helper is found.
 //
 // Locking contract (issue #310): the caller MUST hold
 // Server.ctxHelperMu for the entire critical section that includes
@@ -153,10 +156,8 @@ func (s *Server) injectWithProvisioningRetry(ctx context.Context, injectID strin
 //     (h.flowID, h.injectID, h.functionID) happen under the same
 //     mutex acquisition, so a reader can never observe a partially-
 //     populated helper;
-//   - the "at most one provisioning" property is enforced: only the
-//     first goroutine to acquire the lock passes the
-//     `!provisioned` check, the rest re-check under the lock and
-//     skip the slow path;
+//   - concurrent callers on this Server discover the first caller's complete
+//     deployment instead of creating duplicate tabs;
 //   - a restore_backup cannot nil s.ctxHelper out from under an
 //     in-flight set_context, so no caller can use a helper that the
 //     restore has invalidated.
@@ -165,6 +166,15 @@ func (s *Server) injectWithProvisioningRetry(ctx context.Context, injectID strin
 // performed the provisioning work; it gates the post-provisioning
 // retry on a 404 (issue #158).
 func (s *Server) ensureSetContextHelper(ctx context.Context) (*setContextHelper, bool, error) {
+	return s.ensureContextHelperTarget(ctx, "global", "")
+}
+
+// contextTargetError keeps validation results distinct from provisioning failures.
+type contextTargetError string
+
+func (e contextTargetError) Error() string { return string(e) }
+
+func (s *Server) ensureContextHelperTarget(ctx context.Context, scope, id string) (*setContextHelper, bool, error) {
 	if s.readOnly {
 		// Defensive: the tool is withheld in read-only mode, so this
 		// should never be reached. Surface a clear error rather than
@@ -172,113 +182,82 @@ func (s *Server) ensureSetContextHelper(ctx context.Context) (*setContextHelper,
 		return nil, false, fmt.Errorf("set_context is not available in read-only mode")
 	}
 
-	// Fast path: a previous caller already provisioned. The helper
-	// is immutable past this point, so reading its fields off the
-	// pointer is safe without re-locking.
-	if s.ctxHelper != nil && s.ctxHelper.provisioned() {
-		return s.ctxHelper, false, nil
+	// Re-read the runtime, even when cached: set_flows, deletion, an editor,
+	// or another MCP process can replace the helper without notifying us.
+	if denied := s.deniedHelperNodeType(); denied != "" {
+		return nil, false, &nodered.DeniedNodeError{NodeType: denied}
 	}
-
-	// Slow path: install the placeholder, then provision. A failed
-	// provision rolls the placeholder back so the next call retries
-	// from scratch rather than seeing a "provisioned" helper that
-	// has no flow on the runtime.
-	s.ctxHelper = &setContextHelper{}
-	if err := s.provisionSetContextHelper(ctx); err != nil {
-		s.ctxHelper = nil
+	raw, err := s.nrClient.ListFlows(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("discovering helper: %w", err)
+	}
+	helper, used, err := discoverContextHelper(raw)
+	if err != nil {
 		return nil, false, err
 	}
-	return s.ctxHelper, true, nil
+	if helper != nil {
+		if message := validateContextTarget(scope, id, helper); message != "" {
+			return nil, false, contextTargetError(message)
+		}
+		// Preserve identity for existing readers under ctxHelperMu.
+		if s.ctxHelper == nil || *s.ctxHelper != *helper {
+			s.ctxHelper = helper
+		}
+		return s.ctxHelper, false, nil
+	}
+	// Reject a foreign explicit target before creating any configuration.
+	if message := validateContextTarget(scope, id, newContextHelper("", "", "", used)); message != "" {
+		return nil, false, contextTargetError(message)
+	}
+	s.ctxHelper = nil
+	helper, err = s.provisionSetContextHelper(ctx, used)
+	if err != nil {
+		return nil, false, err
+	}
+	s.ctxHelper = helper
+	return helper, true, nil
 }
 
-// provisionSetContextHelper performs the one-time install: create the
-// flow tab, add the inject (with no wires yet), add the function, then
-// wire them. Each step goes through the public Client methods so the
-// existing guardrails (wire validation, snapshot-backup, write-mutex)
-// apply — same guarantees a user gets when they click the editor.
-//
-// Wiring order matters: AddNode validates the new node's wires against
-// the existing flow, so an inject wired to a not-yet-added function
-// fails the check. The function is added first (no upstream wire), then
-// the inject (no wires at all), then ConnectNodes establishes the
-// inject→function wire on a flow that contains both endpoints.
-//
-// Runtime id policy: Node-RED's POST /flow IGNORES the id we send
-// and assigns one of its own (e.g. d23de851e7ed4098). The
-// deterministic ids (setContextHelperFlowID, etc.) are used as the
-// *node* ids and as a hint for the tab's `z` field, but the
-// surviving flow id is read back from CreateFlow's response. The
-// "no further discovery" property still holds: as long as the
-// Server is up, s.ctxHelper is the source of truth, and the
-// runtime ids never change.
-func (s *Server) provisionSetContextHelper(ctx context.Context) error {
-	// The helper installs a function and an inject node. A custom
-	// denylist may name either type, and the helper must respect it:
-	// the check happens before anything is deployed, so a refused
-	// provisioning leaves no half-built tab behind.
-	//
-	// The refusal is the same typed one every other write path raises,
-	// so the MCP layer renders it with the canonical wording.
-	if denied := s.deniedHelperNodeType(); denied != "" {
-		return &nodered.DeniedNodeError{NodeType: denied}
+// provisionSetContextHelper deploys a complete tab in one guarded operation.
+// A rejected deployment cannot leave a half-built tab. If the response is lost,
+// a later explicit call discovers the completed helper instead of replaying it.
+func (s *Server) provisionSetContextHelper(ctx context.Context, used map[string]bool) (*setContextHelper, error) {
+	functionID, injectID := setContextHelperFunctionID, setContextHelperInjectID
+	if used[functionID] || used[injectID] {
+		// Node IDs are globally scoped. Never reuse an unrelated/edited node.
+		for {
+			suffix := make([]byte, 8)
+			if _, err := rand.Read(suffix); err != nil {
+				return nil, fmt.Errorf("generating helper IDs: %w", err)
+			}
+			functionID = fmt.Sprintf("mcp_ctx_fn_%x", suffix)
+			injectID = fmt.Sprintf("mcp_ctx_inj_%x", suffix)
+			if !used[functionID] && !used[injectID] {
+				break
+			}
+		}
 	}
-
-	// 1. The flow tab. The id is included in the request body, but
-	// Node-RED's POST /flow reassigns it. We capture whatever id
-	// the runtime settled on from the response, because the
-	// follow-up AddNode / ConnectNodes calls need to address the
-	// tab by the runtime's id, not the one we asked for.
-	tabDoc := nodered.RawFlow([]byte(fmt.Sprintf(
-		`{"id":%q,"label":%q,"nodes":[]}`,
-		setContextHelperFlowID, setContextHelperFlowLabel,
-	)))
-	created, err := s.nrClient.CreateFlow(ctx, tabDoc)
+	tab := contextHelperDocument(functionID, injectID)
+	created, err := s.nrClient.CreateFlow(ctx, tab)
 	if err != nil {
-		return fmt.Errorf("creating helper flow tab: %w", err)
+		return nil, fmt.Errorf("creating helper flow tab: %w", err)
 	}
 	flowID, err := extractFlowID(created)
 	if err != nil {
-		return fmt.Errorf("helper flow id missing from CreateFlow response: %w", err)
+		return nil, fmt.Errorf("helper flow id missing from CreateFlow response: %w", err)
 	}
+	return newContextHelper(flowID, functionID, injectID, used), nil
+}
 
-	// 2. The function node first. It has no incoming wire so the
-	// wire-validation step in AddNode has nothing to check, and
-	// installing it before the inject means step 3's inject wires
-	// can resolve. The function's id stays at the deterministic
-	// constant — Node-RED accepts user-supplied ids for nodes.
-	functionNode := json.RawMessage(fmt.Sprintf(
-		`{"id":%q,"type":"function","z":%q,"name":%q,"func":%q,"outputs":1,"noerr":0,"initialize":"","finalize":"","libs":[],"x":320,"y":140,"wires":[]}`,
-		setContextHelperFunctionID, flowID, setContextHelperFunctionNm, setContextFunctionCode,
-	))
-	if err := s.nrClient.AddNode(ctx, flowID, functionNode); err != nil {
-		return fmt.Errorf("creating helper function: %w", err)
-	}
-
-	// 3. The inject node. props:[] is what makes it a bare trigger
-	// — no payload, no topic, just a relay that fires whatever the
-	// POST /inject/:id body carries (as long as that body has
-	// __user_inject_props__). The wires field is empty: the wire
-	// to the function is added in the next step via ConnectNodes,
-	// which goes through the same AddNode→editFlow write path
-	// (and so benefits from the same wire validation).
-	injectNode := json.RawMessage(fmt.Sprintf(
-		`{"id":%q,"type":"inject","z":%q,"name":%q,"props":[],"repeat":"","crontab":"","once":false,"onceDelay":0.1,"topic":"","payload":"","payloadType":"str","x":140,"y":140,"wires":[]}`,
-		setContextHelperInjectID, flowID, setContextHelperInjectName,
-	))
-	if err := s.nrClient.AddNode(ctx, flowID, injectNode); err != nil {
-		return fmt.Errorf("creating helper inject: %w", err)
-	}
-
-	// 4. Wire inject → function. With both endpoints in place, the
-	// wire-validation step in editFlow accepts the connection.
-	if err := s.nrClient.ConnectNodes(ctx, flowID, setContextHelperInjectID, 0, setContextHelperFunctionID); err != nil {
-		return fmt.Errorf("wiring helper: %w", err)
-	}
-
-	s.ctxHelper.flowID = flowID
-	s.ctxHelper.injectID = setContextHelperInjectID
-	s.ctxHelper.functionID = setContextHelperFunctionID
-	return nil
+// The runtime assigns the tab ID and rewrites its children's z references.
+func contextHelperDocument(functionID, injectID string) nodered.RawFlow {
+	return nodered.RawFlow(fmt.Sprintf(
+		`{"id":%q,"label":%q,"nodes":[`+
+			`{"id":%q,"type":"function","z":%q,"name":%q,"func":%q,"outputs":1,"noerr":0,"initialize":"","finalize":"","libs":[],"x":320,"y":140,"wires":[]},`+
+			`{"id":%q,"type":"inject","z":%q,"name":%q,"props":[],"repeat":"","crontab":"","once":false,"onceDelay":0.1,"topic":"","payload":"","payloadType":"str","x":140,"y":140,"wires":[[%q]]}]}`,
+		setContextHelperFlowID, setContextHelperFlowLabel,
+		functionID, setContextHelperFlowID, setContextHelperFunctionNm, setContextFunctionCode,
+		injectID, setContextHelperFlowID, setContextHelperInjectName, functionID))
 }
 
 // deniedHelperNodeType returns the node type the configured policy
