@@ -132,7 +132,7 @@ access is granted to the MCP server.
 | `get_diagnostics` | `GET /diagnostics` | read | Requires Node-RED ≥3.1 |
 | `get_flows_state` | `GET /flows/state` | read | |
 | `get_context` | `GET /context/...` | read | editor-api, no stability contract |
-| `set_context` | `POST /context/...` | write | |
+| `set_context` | `GET /flows`, `POST /flow`, `POST /inject/:id` | write | Verified persistent inject/function helper |
 | `get_debug_messages` | `/comms` WebSocket | read | Buffer of 500, reconnects |
 | `get_runtime_logs` | journal / stream | read | |
 | `list_plugins` | `GET /plugins` | read | editor-api |
@@ -142,6 +142,27 @@ access is granted to the MCP server.
 | `list_backups` | local | read | |
 | `diff_flows` | local + `GET /flows` | read | |
 | `restore_backup` | `POST /flows` | write | |
+
+## Context helper recovery
+
+`set_context` discovers its helper in `GET /flows` before every call, including
+calls after restarting the MCP process. A supported helper has one isolated
+inject/function pair with the expected function code, configuration and wiring;
+the tab label alone is not proof of identity. A valid helper is reused without
+a configuration deployment. The configured node denylist also applies to reuse.
+
+When no valid helper exists, the server creates a complete tab in one guarded
+`POST /flow`, with node IDs that do not collide with existing configuration.
+There are no intermediate empty-tab deployments. A failed or ambiguous response
+is returned without automatic replay; a later explicit call first discovers any
+helper that the runtime actually installed. Existing edited, partial or unrelated
+tabs are left untouched rather than deleted or overwritten.
+
+Deleting or replacing the helper through `delete_flow`, `set_flows`, a backup
+restore or the editor does not permanently invalidate the MCP server: the next
+call discovers a valid helper or provisions a new one. Recovery does not migrate
+old helper flow/node context; use `list_flows` to discover current IDs for those
+scopes. Global context remains owned by Node-RED, not by the helper tab.
 
 ## Resources (3)
 

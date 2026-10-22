@@ -118,6 +118,10 @@ func (s *Server) handleSetContext(ctx context.Context, req mcp.CallToolRequest) 
 		return mcp.NewToolResultError(msg), nil
 	}
 
+	if scope != "global" && id == "" {
+		return mcp.NewToolResultError(validateContextTarget(scope, id, &setContextHelper{})), nil
+	}
+
 	// The validation, the helper selection, and the inject must all
 	// run under the same lock acquisition: that is what makes a
 	// restore_backup unable to nil s.ctxHelper out from under us
@@ -126,8 +130,11 @@ func (s *Server) handleSetContext(ctx context.Context, req mcp.CallToolRequest) 
 	// inject dispatches against.
 	s.ctxHelperMu.Lock()
 	defer s.ctxHelperMu.Unlock()
-	helper, justProvisioned, err := s.ensureSetContextHelper(ctx)
+	helper, justProvisioned, err := s.ensureContextHelperTarget(ctx, scope, id)
 	if err != nil {
+		if _, validation := err.(contextTargetError); validation {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 		slog.Error("set_context: provisioning helper failed", "error", err)
 		return toolResultError(err, fmt.Sprintf("provisioning set_context helper: %v", err))
 	}
@@ -211,7 +218,7 @@ func validateContextTarget(scope, id string, helper *setContextHelper) string {
 		if id == "" {
 			return `scope "flow" requires an id; call list_flows to find the helper flow labelled "__mcp_context_helper__"`
 		}
-		if id != helper.flowID && id != setContextHelperFlowID {
+		if id != helper.flowID && !(id == setContextHelperFlowID && helper.flowAliasAllowed) {
 			return fmt.Sprintf(
 				`scope "flow" can only target the helper's own flow context, so the id must be the helper flow id (got %q); call list_flows to discover it`,
 				id,
@@ -221,7 +228,7 @@ func validateContextTarget(scope, id string, helper *setContextHelper) string {
 		if id == "" {
 			return `scope "node" requires an id; call list_flows to find the function node named "__mcp_context_helper_set__"`
 		}
-		if id != helper.functionID && id != setContextHelperFunctionID {
+		if id != helper.functionID && !(id == setContextHelperFunctionID && helper.functionAliasAllowed) {
 			return fmt.Sprintf(
 				`scope "node" can only target the helper's function node's own context, so the id must be the helper function id (got %q)`,
 				id,

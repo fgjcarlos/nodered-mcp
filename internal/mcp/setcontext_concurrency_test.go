@@ -98,6 +98,7 @@ func TestSetContextHelper_ConcurrentFirstCallersProvisionOnce(t *testing.T) {
 		case r.Method == "POST" && r.URL.Path == "/flow":
 			createFlow.Add(1)
 			<-release
+			liveFlow = mockCreatedContextTab(t, r, "runtime_helper_tab")
 			_, _ = w.Write(liveFlow)
 		case r.Method == "GET" && r.URL.Path == "/flow/runtime_helper_tab":
 			liveMu.Lock()
@@ -204,6 +205,7 @@ func TestSetContextHelper_ProvisioningFailureIsRetryable(t *testing.T) {
 				http.Error(w, "boom", http.StatusInternalServerError)
 				return
 			}
+			liveFlow = mockCreatedContextTab(t, r, "runtime_helper_tab")
 			_, _ = w.Write(liveFlow)
 		case r.Method == "GET" && r.URL.Path == "/flow/runtime_helper_tab":
 			liveMu.Lock()
@@ -360,6 +362,11 @@ func TestSetContext_RestoreCannotDeployWhileInFlightInjectHoldsLock(t *testing.T
 			var asMap map[string]any
 			if err := json.Unmarshal(body, &asMap); err == nil {
 				asMap["id"] = id
+				if nodes, ok := asMap["nodes"].([]any); ok {
+					for _, node := range nodes {
+						node.(map[string]any)["z"] = id
+					}
+				}
 				rewritten, _ := json.Marshal(asMap)
 				liveFlows[id] = rewritten
 			} else {
