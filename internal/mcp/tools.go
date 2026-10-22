@@ -660,7 +660,10 @@ func (s *Server) registerTools() {
 				"so this tool installs a small helper on the runtime on first use: a single flow tab "+
 				"named \"__mcp_context_helper__\" containing one inject node wired to one function "+
 				"node. Each call dispatches a payload to that helper. The helper is reused across "+
-				"calls; it is not re-created per invocation.\n\n"+
+				"calls and MCP process restarts after verifying its code, wiring and ownership with GET /flows. "+
+				"A missing or edited helper is replaced with a complete tab in one deployment, using "+
+				"non-colliding node IDs. Existing edited tabs are not deleted. Do not edit the helper "+
+				"concurrently through another client while set_context is running.\n\n"+
 				"Scope \"global\" is instance-wide. Scope \"flow\" writes to the helper's own "+
 				"flow context (Node-RED has no runtime API to write another tab's flow context "+
 				"from a single function node). Scope \"node\" writes to the helper's function "+

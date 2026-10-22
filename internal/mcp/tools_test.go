@@ -707,6 +707,7 @@ func TestSetContext_HappyPathAndHelperReuse(t *testing.T) {
 			}
 			// Echo the body so the post-CreateFlow response has a
 			// valid nested shape.
+			ingestPUT(body)
 			_, _ = w.Write(body)
 		case r.Method == "GET" && r.URL.Path == "/flow/mcp_ctx_helper_tab":
 			// GetFlow, called by AddNode (read-modify-write) and
@@ -766,14 +767,9 @@ func TestSetContext_HappyPathAndHelperReuse(t *testing.T) {
 	if postInj != 2 {
 		t.Errorf("expected 2 inject dispatches, got %d", postInj)
 	}
-	// AddNode and ConnectNodes each deploy exactly once. We provision
-	// 2 nodes (inject + function) and 1 wire, so 3 POST /flows calls
-	// total — the magic number, not a coincidence. If it changes the
-	// test still catches it; the "exactly 3" assertion is the
-	// anti-regression for the helper being created in one shot
-	// rather than incrementally.
-	if putFlow != 3 {
-		t.Errorf("expected 3 POST /flows calls (2 add_node + 1 connect_nodes), got %d", putFlow)
+	// Provisioning is a single complete-tab deployment, not three edits.
+	if putFlow != 0 {
+		t.Errorf("expected no incremental POST /flows calls, got %d", putFlow)
 	}
 	// Bodies must carry the value the caller asked for, not the
 	// value from the first call. Two separate dispatches with two
@@ -834,6 +830,7 @@ func TestSetContext_RetriesOnFirstCall404(t *testing.T) {
 			_, _ = w.Write(mockFlowSnapshot(r, []byte(`{"id":"other","label":"Other"}`), refreshSnapshot()))
 		case r.Method == "POST" && r.URL.Path == "/flow":
 			body, _ := io.ReadAll(r.Body)
+			ingestPUT(body)
 			_, _ = w.Write(body)
 		case r.Method == "GET" && r.URL.Path == "/flow/mcp_ctx_helper_tab":
 			_, _ = w.Write(refreshSnapshot())
@@ -936,6 +933,7 @@ func TestSetContext_NoRetryWhenHelperAlreadyProvisioned(t *testing.T) {
 			_, _ = w.Write(mockFlowSnapshot(r, []byte(`{"id":"other","label":"Other"}`), refreshSnapshot()))
 		case r.Method == "POST" && r.URL.Path == "/flow":
 			body, _ := io.ReadAll(r.Body)
+			ingestPUT(body)
 			_, _ = w.Write(body)
 		case r.Method == "GET" && r.URL.Path == "/flow/mcp_ctx_helper_tab":
 			_, _ = w.Write(refreshSnapshot())
@@ -1206,6 +1204,10 @@ func TestSetContext_RequiresIdForFlow(t *testing.T) {
 func TestSetContext_FlowScopeRejectsForeignId(t *testing.T) {
 	var serverCalled bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && r.URL.Path == "/flows" {
+			_, _ = w.Write(mockContextSnapshot(r, "runtime_helper_tab"))
+			return
+		}
 		serverCalled = true
 	}))
 	t.Cleanup(srv.Close)
@@ -1243,13 +1245,17 @@ func TestSetContext_FlowScopeRejectsForeignId(t *testing.T) {
 		t.Errorf("error should echo the bad id back, got %q", tc.Text)
 	}
 	if serverCalled {
-		t.Error("server must not be called for a foreign flow id")
+		t.Error("runtime must not be mutated for a foreign flow id")
 	}
 }
 
 func TestSetContext_AcceptsRealRuntimeId(t *testing.T) {
 	var injects int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && r.URL.Path == "/flows" {
+			_, _ = w.Write(mockContextSnapshot(r, "d23de851e7ed4098"))
+			return
+		}
 		if r.Method != "POST" || r.URL.Path != "/inject/"+setContextHelperInjectID {
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 			return
