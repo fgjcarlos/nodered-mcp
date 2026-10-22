@@ -164,6 +164,11 @@ call discovers a valid helper or provisions a new one. Recovery does not migrate
 old helper flow/node context; use `list_flows` to discover current IDs for those
 scopes. Global context remains owned by Node-RED, not by the helper tab.
 
+Writes from this MCP server are serialized with helper verification and inject
+dispatch. Independent editor sessions, other MCP processes and external Admin API
+clients do not share that lock: avoid concurrent helper edits/provisioning from
+those clients. This is not a distributed transaction or a cross-process singleton.
+
 ## Resources (3)
 
 | URI | Description |

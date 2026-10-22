@@ -243,6 +243,10 @@ the complete tab in one backup-protected deployment. Node-RED assigns the tab ID
 node IDs are selected without collisions. If a response is lost, a later explicit
 call discovers the completed helper rather than blindly replaying the write.
 
+The server holds `ctxHelperMu` across discovery, provisioning and inject dispatch.
+Other registered write tools use the same mutex, with the existing client write
+lock acquired second. `restore_backup` retains its handler-level locking and
+cache invalidation. External clients do not share these process-local locks.
 Edited or partial helpers are preserved, not treated as trusted executable code.
 See [Context helper recovery](tools.md#context-helper-recovery) for operator limits.
 

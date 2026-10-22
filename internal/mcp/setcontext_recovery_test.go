@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -258,6 +259,84 @@ func mockCreatedContextTab(t *testing.T, r *http.Request, id string) []byte {
 func mockContextSnapshot(r *http.Request, id string) []byte {
 	tab := strings.ReplaceAll(string(contextHelperDocument(setContextHelperFunctionID, setContextHelperInjectID)), setContextHelperFlowID, id)
 	return mockFlowSnapshot(r, []byte(tab))
+}
+
+// Configuration writes through MCP cannot overtake a verified in-flight inject.
+func TestSetContextRecoveryConcurrentWrites(t *testing.T) {
+	for _, name := range []string{"delete_flow", "set_flows"} {
+		t.Run(name, func(t *testing.T) {
+			rt := &helperRuntime{}
+			armed, release, mutated := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasPrefix(r.URL.Path, "/inject/") {
+					close(armed)
+					<-release
+				}
+				if r.Method == "DELETE" || (r.Method == "POST" && r.URL.Path == "/flows") {
+					close(mutated)
+				}
+				rt.serve(w, r)
+			}))
+			defer srv.Close()
+			defer once.Do(func() { close(release) })
+			s := newTestServerAt(t, srv.URL, t.TempDir())
+			call := func(tool string, args map[string]any) error {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				result, err := callHelperTool(ctx, s, tool, args)
+				if err != nil {
+					return err
+				}
+				if result.IsError {
+					return fmt.Errorf("%s: %+v", tool, result)
+				}
+				return nil
+			}
+
+			setDone, writeDone := make(chan error, 1), make(chan error, 1)
+			go func() {
+				setDone <- call("set_context", map[string]any{"scope": "global", "key": "audit", "value": "42"})
+			}()
+			select {
+			case <-armed:
+			case <-time.After(5 * time.Second):
+				t.Fatal("inject not reached")
+			}
+			args := map[string]any{"id": "runtime-1"}
+			if name == "set_flows" {
+				args = map[string]any{"flows": `[{"id":"replacement","type":"tab","label":"Replacement"}]`}
+			}
+			go func() { writeDone <- call(name, args) }()
+			select {
+			case <-mutated:
+				once.Do(func() { close(release) })
+				t.Fatal("configuration changed during inject")
+			case <-time.After(100 * time.Millisecond):
+			}
+			once.Do(func() { close(release) })
+			if err := <-setDone; err != nil {
+				t.Fatal(err)
+			}
+			if err := <-writeDone; err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-mutated:
+			default:
+				t.Fatal("write never deployed after inject")
+			}
+			rt.mu.Lock()
+			wantEntries := 0
+			if name == "set_flows" {
+				wantEntries = 1
+			}
+			if len(rt.items) != wantEntries || rt.injects != 1 {
+				t.Errorf("write effects: entries=%d injects=%d", len(rt.items), rt.injects)
+			}
+			rt.mu.Unlock()
+		})
+	}
 }
 
 func callHelperTool(ctx context.Context, s *Server, tool string, args map[string]any) (*mcp.CallToolResult, error) {

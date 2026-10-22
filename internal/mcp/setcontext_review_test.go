@@ -3,10 +3,84 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 )
+
+func TestSetContextReviewCanceledWriteWaiter(t *testing.T) {
+	for _, preCanceled := range []bool{true, false} {
+		t.Run(fmt.Sprintf("preCanceled=%v", preCanceled), func(t *testing.T) {
+			rt := &helperRuntime{}
+			armed, release := make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == "POST" && len(r.URL.Path) > 8 && r.URL.Path[:8] == "/inject/" {
+					close(armed)
+					<-release
+				}
+				rt.serve(w, r)
+			}))
+			defer h.Close()
+			defer once.Do(func() { close(release) })
+			s := newTestServerAt(t, h.URL, t.TempDir())
+			first := make(chan error, 1)
+			go func() {
+				result, err := callHelperTool(context.Background(), s, "set_context", map[string]any{"scope": "global", "key": "audit", "value": "42"})
+				if err == nil && result.IsError {
+					err = fmt.Errorf("set_context: %+v", result)
+				}
+				first <- err
+			}()
+			select {
+			case <-armed:
+			case <-time.After(time.Second):
+				t.Fatal("inject not armed")
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if preCanceled {
+				cancel()
+			}
+			done := make(chan error, 1)
+			go func() {
+				result, err := callHelperTool(ctx, s, "install_node", map[string]any{"module": "example"})
+				if err == nil && (!result.IsError || resultFirstText(result) != "waiting for context helper lock: context canceled; no action was started") {
+					err = fmt.Errorf("unexpected cancellation: %+v", result)
+				}
+				done <- err
+			}()
+			if !preCanceled {
+				select {
+				case err := <-done:
+					t.Fatalf("waiter returned before cancellation: %v", err)
+				case <-time.After(20 * time.Millisecond):
+				}
+				cancel()
+			}
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(100 * time.Millisecond):
+				t.Fatal("canceled write waited for unrelated inject lock")
+			}
+			once.Do(func() { close(release) })
+			if err := <-first; err != nil {
+				t.Fatal(err)
+			}
+			rt.mu.Lock()
+			defer rt.mu.Unlock()
+			if rt.creates != 1 || rt.injects != 1 || len(rt.items) != 3 {
+				t.Fatalf("canceled write changed state: creates=%d injects=%d entries=%d", rt.creates, rt.injects, len(rt.items))
+			}
+		})
+	}
+}
 
 func TestSetContextReviewCollisionTarget(t *testing.T) {
 	rt := &helperRuntime{items: []json.RawMessage{json.RawMessage(`{"id":"user","type":"tab","label":"User"}`), json.RawMessage(`{"id":"mcp_ctx_helper_fn","type":"function","z":"user","func":"return msg;"}`)}}
