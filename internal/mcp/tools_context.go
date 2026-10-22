@@ -122,6 +122,12 @@ func (s *Server) handleSetContext(ctx context.Context, req mcp.CallToolRequest) 
 		return mcp.NewToolResultError(validateContextTarget(scope, id, &setContextHelper{})), nil
 	}
 
+	return s.dispatchSetContext(ctx, scope, id, key, value)
+}
+
+// dispatchSetContext runs only after argument/version validation. Keep runtime
+// selection and inject dispatch together under the helper lifecycle lock.
+func (s *Server) dispatchSetContext(ctx context.Context, scope, id, key string, value any) (*mcp.CallToolResult, error) {
 	// The validation, the helper selection, and the inject must all
 	// run under the same lock acquisition: that is what makes a
 	// restore_backup unable to nil s.ctxHelper out from under us
