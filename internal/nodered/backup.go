@@ -24,7 +24,8 @@ var snapshotSeq atomic.Uint64
 
 // snapshotFlows fetches the full current flow config and writes it to a
 // timestamped file under the configured backup directory, BEFORE any mutating
-// operation. It is the safety net that makes flow writes recoverable.
+// operation. This protects flow structure only, not the separate encrypted
+// credential store or the keys/configuration needed to decrypt it.
 //
 // It is fail-closed: if the snapshot cannot be written (unreachable Node-RED,
 // unwritable dir), the caller aborts the write rather than risk an

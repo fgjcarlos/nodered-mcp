@@ -12,6 +12,18 @@ import (
 	"github.com/fgjcarlos/nodered-mcp/internal/nodered"
 )
 
+// backupRecoveryNotice is advertised before writes and repeated after restoration.
+// The Admin API snapshot cannot recover the runtime's separate secret store.
+const backupRecoveryNotice = "WARNING: backups are structural snapshots of /flows only; " +
+	"they do not include Node-RED's separate encrypted credential store or its encryption keys/configuration. " +
+	"Deleting nodes or tabs can permanently remove their credentials; restore_backup cannot recover those credentials. " +
+	"Before deleting or replacing flows, stop Node-RED and take an authorized, consistent external backup of its user directory " +
+	"including the matching flow file, encrypted credential store, settings.js and credentialSecret " +
+	"(or the generated key in .config.runtime.json and any externally supplied secret). " +
+	"For full recovery, stop Node-RED and restore that matching external backup with its original key/configuration, " +
+	"then restart; otherwise re-enter credentials in the Node-RED editor and deploy. " +
+	"A successful structural restore does not mean authentication was recovered."
+
 // handleListBackups lists saved flow snapshots.
 func (s *Server) handleListBackups(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	slog.Debug("tool: list_backups")
@@ -151,7 +163,7 @@ func (s *Server) handleRestoreBackup(ctx context.Context, req mcp.CallToolReques
 		return toolResultError(err, fmt.Sprintf("restoring: %v", err))
 	}
 	s.ctxHelper = nil
-	return mcp.NewToolResultText(fmt.Sprintf("Restored flow config from %q (current state was backed up first).", name)), nil
+	return mcp.NewToolResultText(fmt.Sprintf("Restored flow config from %q (current state was backed up first).", name) + "\n\n" + backupRecoveryNotice), nil
 }
 
 // prettyJSON indents raw JSON for display, falling back to the raw bytes if

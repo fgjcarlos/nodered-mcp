@@ -196,7 +196,8 @@ func (c *Client) updateFlowLocked(ctx context.Context, id string, flow RawFlow) 
 }
 
 // DeleteFlow removes a flow tab and all its nodes. A backup of the current
-// config is taken first (fail-closed) so the delete can be rolled back.
+// config is taken first (fail-closed) for structural recovery only. Deleted
+// credentials require an external backup with its matching encryption key.
 func (c *Client) DeleteFlow(ctx context.Context, id string) error {
 	defer c.writeGuard()()
 	if id == "" {
@@ -210,8 +211,9 @@ func (c *Client) DeleteFlow(ctx context.Context, id string) error {
 
 // RestoreFlows overwrites the ENTIRE flow config with the contents of a
 // previously saved backup (a full deployment). Because this replaces
-// everything, it snapshots the current config first — so a restore can itself
-// be undone — and only then deploys the backup.
+// everything, it snapshots the current config first for structural recovery
+// and only then deploys the backup. Neither snapshot includes the separate
+// credential store or its encryption key; deleted credentials are not recovered.
 //
 // The backup is whatever GET /flows returned when it was taken (bare array or
 // {rev,flows} envelope); we extract just the flow array and POST it as a bare

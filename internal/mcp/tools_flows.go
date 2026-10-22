@@ -323,7 +323,7 @@ func (s *Server) handleDeleteFlow(ctx context.Context, req mcp.CallToolRequest) 
 		slog.Error("delete_flow failed", "error", err, "id", id)
 		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
-	return mcp.NewToolResultText(fmt.Sprintf("Flow %q deleted (a backup was taken first).", id)), nil
+	return mcp.NewToolResultText(fmt.Sprintf("Flow %q deleted (a backup was taken first).", id) + "\n\n" + backupRecoveryNotice), nil
 }
 
 // handleValidateFlow runs the structural checks against an in-memory flow
