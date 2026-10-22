@@ -47,6 +47,43 @@ hardware commands. This policy governs automatic MCP handler replays; the
 existing `set_context` retry after an explicit provisioning-related HTTP 404
 is unchanged.
 
+## Backup recovery limits
+
+Automatic backups are **structural snapshots of `GET /flows`**, not full
+Node-RED disaster-recovery backups. `restore_backup` restores flow JSON only.
+It does not back up or recover Node-RED's separate encrypted credential store
+or the keys/configuration needed to decrypt it. The Admin API does not expose
+hidden secrets for this server to export.
+
+**Before deleting nodes or tabs, or replacing flows**, arrange authorized
+external recovery. Node-RED can remove their credentials when they are deleted;
+restoring the same node IDs from a snapshot cannot reconstruct those secrets.
+For example, restoring a deleted MQTT broker may recover the node but not its
+username/password. A successful `restore_backup` does not prove authentication
+or runtime operation has been recovered. Restoring a snapshot can itself remove
+nodes and credentials; the automatic pre-restore snapshot is structural too.
+
+### External recovery procedure
+
+1. Before the destructive operation, stop Node-RED and take a consistent,
+   authorized backup of its user directory. Include the matching flow JSON,
+   encrypted credential file (`flows_cred.json`, or the equivalent for the
+   configured flow file), `settings.js`, and `.config.runtime.json` when it
+   contains the generated encryption key. Preserve the original
+   `credentialSecret` and any externally supplied secret/configuration as well.
+   Protect this backup as sensitive material; do not send it through MCP.
+2. Restart Node-RED after the backup. For full recovery later, stop it again
+   and restore the matching external files with their original encryption
+   key/configuration, then restart. This is an operator-managed recovery,
+   **not** something `restore_backup` performs.
+3. If no matching credential backup and key exist, restore the structure,
+   re-enter the credentials in the Node-RED editor, and deploy. Check the
+   affected nodes' authentication and operation before declaring recovery done.
+
+The write tools advertise these limits before execution, and `restore_backup`
+repeats them in its successful response. No additional filesystem or secret
+access is granted to the MCP server.
+
 ## Flows
 
 | Tool | HTTP | Risk | Notes |

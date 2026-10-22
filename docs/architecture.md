@@ -243,9 +243,16 @@ a timestamp.
 
 - Directory: env `NODERED_BACKUP_DIR` (default `./backups` or OS temp).
 - Filename: `flows-<RFC3339>.json`.
-- A snapshot of the full config covers any write ("at least
-  `flows.json`").
-- Enables rollback via `list_backups` / `restore_backup` tools.
+- Snapshots cover only the flow structure returned by `GET /flows`, not
+  Node-RED's separate encrypted credential store or its keys/configuration.
+- Enables structural recovery via `list_backups` / `restore_backup`, not
+  complete rollback: deleting nodes or tabs can remove their credentials,
+  which restoring flow JSON cannot reconstruct. This also applies to nodes
+  removed by a full restore.
+- Before destructive writes, an operator must arrange an authorized external
+  backup with the matching credential store and encryption key/configuration,
+  or re-enter lost credentials afterward. See the
+  [external recovery procedure](./tools.md#external-recovery-procedure).
 - Node-RED has its own one-level `.backup`, but it is local to the
   host and the MCP speaks over HTTP — it does not help here.
 - Backup filenames are restricted to bare names: `restore_backup`

@@ -164,7 +164,11 @@ guardrails. Three are built in:
   no field loss.
 - Every mutating operation takes a backup of the full flow
   configuration first and fails closed if the snapshot cannot be
-  written.
+  written. This is structural recovery only: deleted credentials are not
+  recoverable from these snapshots. Before deleting or replacing flows,
+  arrange an authorized external backup including the encrypted credential
+  store and its original keys/configuration; see
+  [backup recovery limits and procedure](./docs/tools.md#backup-recovery-limits).
 - Wires are validated before the write reaches the runtime; dangling
   wire targets are rejected at the MCP layer.
 

@@ -167,6 +167,11 @@ en marcha exige guardarraíles. Hay tres integrados:
   fijos de Go, sin pérdida de campos.
 - Cada operación mutante hace un snapshot completo de la
   configuración antes y falla en cerrado si no puede escribirlo.
+  Solo permite recuperar la estructura: estos snapshots no recuperan las
+  credenciales borradas. Antes de borrar o reemplazar flows, prepará un backup
+  externo autorizado que incluya el almacén cifrado de credenciales y sus
+  claves/configuración originales; consultá los
+  [límites y el procedimiento de recuperación](./docs/tools.md#backup-recovery-limits).
 - Los wires se validan antes de que la escritura llegue al runtime;
   los destinos colgantes se rechazan en la capa MCP.
 
