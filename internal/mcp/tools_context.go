@@ -134,7 +134,9 @@ func (s *Server) dispatchSetContext(ctx context.Context, scope, id, key string, 
 	// (issue #310). The lock is held for the whole critical
 	// section, so the helper observed here is the same one the
 	// inject dispatches against.
-	s.ctxHelperMu.Lock()
+	if err := s.ctxHelperMu.LockContext(ctx); err != nil {
+		return mcp.NewToolResultError("waiting for context helper lock: " + err.Error() + "; no action was started"), nil
+	}
 	defer s.ctxHelperMu.Unlock()
 	helper, justProvisioned, err := s.ensureContextHelperTarget(ctx, scope, id)
 	if err != nil {

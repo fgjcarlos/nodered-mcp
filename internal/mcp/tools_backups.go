@@ -153,7 +153,9 @@ func (s *Server) handleRestoreBackup(ctx context.Context, req mcp.CallToolReques
 	// denied now, and restoring it would reintroduce the exact RCE
 	// path #81 closed. The client refuses before the snapshot and
 	// before the POST, and names the type so the operator can act.
-	s.ctxHelperMu.Lock()
+	if err := s.ctxHelperMu.LockContext(ctx); err != nil {
+		return mcp.NewToolResultError("waiting for context helper lock: " + err.Error() + "; no action was started"), nil
+	}
 	defer s.ctxHelperMu.Unlock()
 	if err := s.nrClient.RestoreFlows(ctx, content); err != nil {
 		slog.Error("restore_backup failed", "error", err, "backup", name)

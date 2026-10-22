@@ -15,7 +15,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -78,7 +77,7 @@ type Server struct {
 	// see ensureSetContextHelper for the lock-ordering contract with
 	// nodered.Client.writeMu.
 	ctxHelper   *setContextHelper
-	ctxHelperMu sync.Mutex
+	ctxHelperMu helperMutex
 
 	// denylist reports whether a given node type is forbidden by the
 	// operator-configured MCP_NODE_DENYLIST. Issue #81: defaults to a
@@ -393,6 +392,19 @@ func (s *Server) addWriteTool(tool mcp.Tool, handler server.ToolHandlerFunc) {
 		return
 	}
 	s.attachMinVersion(&tool)
+	// Configuration writes must not replace/delete a verified helper between
+	// discovery and dispatch. set_context and restore_backup already hold this
+	// mutex in their handlers; every other write uses the same lock ordering.
+	if tool.Name != "set_context" && tool.Name != "restore_backup" {
+		write := handler
+		handler = func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			if err := s.ctxHelperMu.LockContext(ctx); err != nil {
+				return mcp.NewToolResultError("waiting for context helper lock: " + err.Error() + "; no action was started"), nil
+			}
+			defer s.ctxHelperMu.Unlock()
+			return write(ctx, req)
+		}
+	}
 	s.mcpServer.AddTool(tool, s.withTimeoutAttempts(tool.Name, handler, 1))
 	s.tools = append(s.tools, tool)
 }
