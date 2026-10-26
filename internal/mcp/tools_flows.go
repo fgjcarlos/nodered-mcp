@@ -579,10 +579,12 @@ func encodePayloadArg(v any) (json.RawMessage, error) {
 func buildInjectPayloadBody(payload json.RawMessage) json.RawMessage {
 	// {"<payload fields>", "__user_inject_props__":[]}
 	var m map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &m); err != nil {
-		// payload is a JSON scalar or array: wrap it as a fresh object
-		// under "payload" so the caller's value still reaches the
-		// inject's msg.
+	if err := json.Unmarshal(payload, &m); err != nil || m == nil {
+		// payload is a JSON scalar or array — or the literal null,
+		// which decodes into a nil map without an error and would
+		// panic on the write below. It is wrapped as a fresh object
+		// under "payload" like every other non-object payload, so the
+		// caller's value still reaches the inject's msg.
 		wrapped, _ := json.Marshal(map[string]json.RawMessage{
 			"payload":               payload,
 			"__user_inject_props__": json.RawMessage(`[]`),

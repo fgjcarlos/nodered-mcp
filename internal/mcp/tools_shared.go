@@ -164,6 +164,15 @@ func nodeParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) {
 func normalizeFlowDoc(raw json.RawMessage, flowID string, fillNodes bool) (nodered.RawFlow, error) {
 	var doc map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &doc); err == nil {
+		// "null" decodes into a nil map without an error, and writing
+		// to a nil map panics. A null document is not a flow
+		// document, so it is refused here: the alternative is a panic
+		// in the fill path, or a null document handed to the runtime
+		// that answers with an opaque "Cannot read properties of
+		// null".
+		if doc == nil {
+			return nil, fmt.Errorf("flow document is null; expected a JSON object or a flow array")
+		}
 		_, hasNodes := doc["nodes"]
 		_, hasConfigs := doc["configs"]
 		if hasNodes || hasConfigs || !looksLikeFlatArrayElement(doc) {

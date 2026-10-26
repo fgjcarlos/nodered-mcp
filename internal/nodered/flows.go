@@ -87,7 +87,9 @@ func synthesizeFlowFromFlat(flat RawFlow, id string) (RawFlow, bool) {
 		return nil, false
 	}
 	var tab map[string]json.RawMessage
-	if err := json.Unmarshal(tabRaw[0], &tab); err != nil {
+	if err := json.Unmarshal(tabRaw[0], &tab); err != nil || tab == nil {
+		// "null" decodes into a nil map without an error, and the
+		// writes below would panic on it.
 		return nil, false
 	}
 	// Drop the markers that belong to the flat shape, not the nested one.
