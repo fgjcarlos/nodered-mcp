@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -269,15 +270,190 @@ func (c *Client) UpdateSubflow(ctx context.Context, id string, subflow json.RawM
 	return c.putGlobalSubflowsLocked(ctx, all, configs)
 }
 
+// SubflowReference points at one place where a subflow definition is
+// still in use. The only thing that keeps a definition alive is an
+// instance node — a node whose type is "subflow:<id>" — because the
+// runtime resolves that type at deploy time.
+type SubflowReference struct {
+	// Owner is the id of the tab or of the subflow definition that
+	// holds the instance node.
+	Owner string
+	// OwnerKind is "tab" or "subflow": where the instance lives.
+	OwnerKind string
+	// NodeID is the id of the instance node itself.
+	NodeID string
+}
+
+// SubflowInUseError is returned when a subflow definition cannot be
+// deleted because the runtime still holds instance nodes pointing at
+// it.
+//
+// Deleting the definition anyway is the failure this error exists to
+// prevent: the instance nodes keep their "subflow:<id>" type, the
+// runtime can no longer resolve it, and the next start logs
+// "Waiting for missing types to be registered" and the affected flows
+// never deploy. The editor lets the operator do exactly that, which
+// is why the behaviour was worth closing here.
+//
+// The error carries every reference at once: an operator who has to
+// delete one instance, retry, and discover the next one has a much
+// worse time than one who is handed the full list up front.
+type SubflowInUseError struct {
+	ID   string
+	Refs []SubflowReference
+}
+
+func (e *SubflowInUseError) Error() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "subflow %q is still in use and was not deleted: %d reference(s) must be removed first", e.ID, len(e.Refs))
+	for _, ref := range e.Refs {
+		fmt.Fprintf(&b, "\n  - instance node %q in %s %q", ref.NodeID, ref.OwnerKind, ref.Owner)
+	}
+	b.WriteString("\nremove the instance nodes first, or delete them as an explicit cascading operation; the definition itself was left untouched")
+	return b.String()
+}
+
+// subflowDefinitionNodes returns the node objects nested inside a
+// subflow definition.
+//
+// A definition with no "nodes" key (or an empty one) yields an empty
+// slice. A "nodes" field that is not an array of objects is an error
+// rather than an empty slice: the references of such a definition
+// cannot be checked, and treating "cannot be checked" as "no
+// references" would silently reopen the hole this check closes.
+func subflowDefinitionNodes(def json.RawMessage) ([]map[string]json.RawMessage, error) {
+	var m struct {
+		Nodes []map[string]json.RawMessage `json:"nodes"`
+	}
+	if err := json.Unmarshal(def, &m); err != nil {
+		return nil, fmt.Errorf("subflow definition has an unreadable nodes array: %w", err)
+	}
+	return m.Nodes, nil
+}
+
+// subflowOwnerKinds maps the id of every tab and subflow definition
+// in a flat flow configuration to its kind. It is what tells an
+// instance node living in a tab apart from one living inside another
+// subflow definition — both carry the same "subflow:<id>" type.
+func subflowOwnerKinds(items []json.RawMessage) map[string]string {
+	kinds := make(map[string]string)
+	for _, item := range items {
+		var meta struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(item, &meta); err != nil {
+			continue
+		}
+		switch meta.Type {
+		case "tab":
+			kinds[meta.ID] = "tab"
+		case "subflow":
+			kinds[meta.ID] = "subflow"
+		}
+	}
+	return kinds
+}
+
+// subflowReferences finds every place the runtime still uses the
+// subflow definition id.
+//
+// Two shapes have to be covered:
+//
+//   - an instance node in a flow tab, listed in GET /flows;
+//   - an instance node nested inside another subflow's definition,
+//     which lives in the "nodes" array of that definition rather than
+//     in a tab.
+//
+// The second shape is why this cannot be answered from the global
+// envelope alone: /flow/global carries the definitions, not the tabs
+// that instantiate them.
+//
+// definitions is the set of subflow definitions the caller already
+// read for the delete itself, so the nested scan costs no extra
+// request.
+func (c *Client) subflowReferences(ctx context.Context, id string, definitions SubflowList) ([]SubflowReference, error) {
+	wantType := "subflow:" + id
+	var refs []SubflowReference
+	seen := make(map[string]bool)
+
+	add := func(ref SubflowReference) {
+		key := ref.OwnerKind + "|" + ref.Owner + "|" + ref.NodeID
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		refs = append(refs, ref)
+	}
+
+	// Instances nested inside other subflow definitions.
+	for _, def := range definitions {
+		var meta struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(def, &meta); err != nil {
+			return nil, fmt.Errorf("reading subflow definition: %w", err)
+		}
+		if meta.ID == id {
+			// The definition being deleted is not a reference to itself.
+			continue
+		}
+		nodes, err := subflowDefinitionNodes(def)
+		if err != nil {
+			return nil, err
+		}
+		for _, node := range nodes {
+			if stringField(node, "type") == wantType {
+				add(SubflowReference{Owner: meta.ID, OwnerKind: "subflow", NodeID: nodeID(node)})
+			}
+		}
+	}
+
+	// Instances in flow tabs. GET /flows carries the whole active
+	// configuration, tabs and their nodes included.
+	flat, err := c.ListFlows(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items := FlowArray(flat)
+	kinds := subflowOwnerKinds(items)
+	for _, item := range items {
+		var meta struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+			Z    string `json:"z"`
+		}
+		if err := json.Unmarshal(item, &meta); err != nil {
+			continue
+		}
+		if meta.Type != wantType {
+			continue
+		}
+		kind := kinds[meta.Z]
+		if kind == "" {
+			// An owner that is not a known tab is still an owner; the
+			// instance exists either way.
+			kind = "tab"
+		}
+		add(SubflowReference{Owner: meta.Z, OwnerKind: kind, NodeID: meta.ID})
+	}
+	return refs, nil
+}
+
 // DeleteSubflow removes a subflow definition. Fails with
 // *APIError(404) when the id is not present, matching the way
 // DeleteFlow behaves for tabs.
 //
-// Note: the runtime does not check that no instance of the subflow
-// is in use before removing the definition. The next deploy will
-// leave the instance nodes pointing at a missing subflow. We do not
-// add a "is anyone using this?" pre-check because the editor does
-// not either — the operator is expected to be aware.
+// A definition that is still in use is not deleted: when any instance
+// node of type "subflow:<id>" is left behind, the runtime can no
+// longer resolve that type and the affected flows never deploy. The
+// call fails with *SubflowInUseError, which lists every reference
+// that has to be removed first.
+//
+// The check is deliberately not a cascading delete. Removing the
+// instances along with the definition is a destructive operation the
+// operator has to ask for explicitly, not a side effect of deleting
+// a definition.
 func (c *Client) DeleteSubflow(ctx context.Context, id string) error {
 	defer c.writeGuard()()
 	if id == "" {
@@ -309,6 +485,16 @@ func (c *Client) DeleteSubflow(ctx context.Context, id string) error {
 			Path:       "/flow/global",
 			Body:       fmt.Sprintf("no subflow with id %q", id),
 		}
+	}
+	// The definition is present, but it may still be instantiated. The
+	// check runs before the backup and the write, so a refused delete
+	// leaves the runtime exactly as it was.
+	refs, err := c.subflowReferences(ctx, id, existing)
+	if err != nil {
+		return err
+	}
+	if len(refs) > 0 {
+		return &SubflowInUseError{ID: id, Refs: refs}
 	}
 	return c.putGlobalSubflowsLocked(ctx, all, configs)
 }

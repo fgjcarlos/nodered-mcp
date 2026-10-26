@@ -396,6 +396,188 @@ func TestDeleteSubflow_NotFound(t *testing.T) {
 	}
 }
 
+// TestDeleteSubflow_RefusesWhileInstanceInTab is the regression test
+// for issue #332: deleting a definition that a flow tab still
+// instances left the runtime with a node pointing at a missing type,
+// and the next deploy logged "Waiting for missing types to be
+// registered".
+//
+// The delete must be refused, with the dependency named, and nothing
+// may be written: no PUT to /flow/global, no backup.
+func TestDeleteSubflow_RefusesWhileInstanceInTab(t *testing.T) {
+	var putGlobal bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flow/global":
+			_, _ = w.Write([]byte(globalSubflowsBody))
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			// A tab holding one instance of sf_a.
+			_, _ = w.Write([]byte(`[
+				{"id":"tab1","type":"tab","label":"Home"},
+				{"id":"inst1","type":"subflow:sf_a","z":"tab1","x":140,"y":140}
+			]`))
+		case r.Method == "PUT" && r.URL.Path == "/flow/global":
+			putGlobal = true
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := clientWithBackup(t, srv.URL)
+	err := c.DeleteSubflow(context.Background(), "sf_a")
+	if err == nil {
+		t.Fatal("expected the delete to be refused while sf_a is in use, got nil")
+	}
+	var inUse *SubflowInUseError
+	if !errors.As(err, &inUse) {
+		t.Fatalf("expected *SubflowInUseError, got %T: %v", err, err)
+	}
+	if inUse.ID != "sf_a" {
+		t.Errorf("error names subflow %q, want sf_a", inUse.ID)
+	}
+	if len(inUse.Refs) != 1 {
+		t.Fatalf("expected 1 reference, got %d: %+v", len(inUse.Refs), inUse.Refs)
+	}
+	ref := inUse.Refs[0]
+	if ref.Owner != "tab1" || ref.OwnerKind != "tab" || ref.NodeID != "inst1" {
+		t.Errorf("unexpected reference: %+v", ref)
+	}
+	// The message has to name the dependency, not just refuse.
+	msg := err.Error()
+	for _, want := range []string{"sf_a", "inst1", "tab1"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error message does not mention %q: %s", want, msg)
+		}
+	}
+	if putGlobal {
+		t.Error("the definition was written despite being in use")
+	}
+}
+
+// TestDeleteSubflow_RefusesWhileInstanceNestedInSubflow covers the
+// second shape an instance can take: a node of type "subflow:<id>"
+// living inside another subflow's definition rather than in a tab.
+// Removing the definition would break the outer subflow the same way.
+func TestDeleteSubflow_RefusesWhileInstanceNestedInSubflow(t *testing.T) {
+	const globalBody = `{
+		"id":"global",
+		"subflows":[
+			{"id":"sf_a","type":"subflow","name":"A","in":[],"out":[],"env":[],"nodes":[]},
+			{"id":"sf_b","type":"subflow","name":"B","in":[],"out":[],"env":[],"nodes":[
+				{"id":"nested1","type":"subflow:sf_a","x":140,"y":140}
+			]}
+		],
+		"configs":[]
+	}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flow/global":
+			_, _ = w.Write([]byte(globalBody))
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			_, _ = w.Write([]byte(`[{"id":"tab1","type":"tab","label":"Home"}]`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := clientWithBackup(t, srv.URL)
+	err := c.DeleteSubflow(context.Background(), "sf_a")
+	if err == nil {
+		t.Fatal("expected the delete to be refused while sf_a is nested in sf_b, got nil")
+	}
+	var inUse *SubflowInUseError
+	if !errors.As(err, &inUse) {
+		t.Fatalf("expected *SubflowInUseError, got %T: %v", err, err)
+	}
+	if len(inUse.Refs) != 1 {
+		t.Fatalf("expected 1 reference, got %d: %+v", len(inUse.Refs), inUse.Refs)
+	}
+	ref := inUse.Refs[0]
+	if ref.Owner != "sf_b" || ref.OwnerKind != "subflow" || ref.NodeID != "nested1" {
+		t.Errorf("unexpected reference: %+v", ref)
+	}
+}
+
+// TestDeleteSubflow_RefusalListsEveryReference: an operator who has
+// to delete one instance, retry, and find the next one has a much
+// worse time than one handed the full list. Every reference is
+// reported at once.
+func TestDeleteSubflow_RefusalListsEveryReference(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flow/global":
+			_, _ = w.Write([]byte(globalSubflowsBody))
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			_, _ = w.Write([]byte(`[
+				{"id":"tab1","type":"tab","label":"Home"},
+				{"id":"inst1","type":"subflow:sf_a","z":"tab1","x":140,"y":140},
+				{"id":"tab2","type":"tab","label":"Other"},
+				{"id":"inst2","type":"subflow:sf_a","z":"tab2","x":140,"y":140}
+			]`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := clientWithBackup(t, srv.URL)
+	err := c.DeleteSubflow(context.Background(), "sf_a")
+	if err == nil {
+		t.Fatal("expected the delete to be refused, got nil")
+	}
+	var inUse *SubflowInUseError
+	if !errors.As(err, &inUse) {
+		t.Fatalf("expected *SubflowInUseError, got %T: %v", err, err)
+	}
+	if len(inUse.Refs) != 2 {
+		t.Fatalf("expected 2 references, got %d: %+v", len(inUse.Refs), inUse.Refs)
+	}
+	msg := err.Error()
+	for _, want := range []string{"inst1", "tab1", "inst2", "tab2"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error message does not mention %q: %s", want, msg)
+		}
+	}
+}
+
+// TestDeleteSubflow_AllowsWhenNothingInstancesIt is the other half of
+// the contract: a definition no flow instances is still deletable, and
+// the runtime keeps working. The delete must reach the runtime.
+func TestDeleteSubflow_AllowsWhenNothingInstancesIt(t *testing.T) {
+	var putGlobal bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flow/global":
+			_, _ = w.Write([]byte(globalSubflowsBody))
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			// A tab with an unrelated node and an instance of another
+			// subflow: neither is a reference to sf_a.
+			_, _ = w.Write([]byte(`[
+				{"id":"tab1","type":"tab","label":"Home"},
+				{"id":"n1","type":"inject","z":"tab1","x":140,"y":140},
+				{"id":"inst1","type":"subflow:sf_other","z":"tab1","x":140,"y":140}
+			]`))
+		case r.Method == "PUT" && r.URL.Path == "/flow/global":
+			putGlobal = true
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := clientWithBackup(t, srv.URL)
+	if err := c.DeleteSubflow(context.Background(), "sf_a"); err != nil {
+		t.Fatalf("DeleteSubflow: %v", err)
+	}
+	if !putGlobal {
+		t.Error("the definition was not written to the runtime")
+	}
+}
+
 // TestInstantiateSubflow_HappyPath: the helper reads the target
 // tab, adds an instance node of type "subflow:<id>" with the
 // supplied x/y/name, and writes the tab back. Verifies the final
@@ -654,7 +836,28 @@ func TestSubflowCRUD_EndToEnd(t *testing.T) {
 		t.Errorf("instance node not in tab: %s", tab)
 	}
 
-	// Step 4: delete the subflow and confirm the helper removes it.
+	// Step 4: deleting the subflow while the instance is live must be
+	// refused. The instance would be left pointing at a missing type,
+	// and the runtime would not deploy the affected flows.
+	err = c.DeleteSubflow(ctx, "sf_round")
+	if err == nil {
+		t.Fatal("expected the delete to be refused while the subflow is instantiated, got nil")
+	}
+	var inUse *SubflowInUseError
+	if !errors.As(err, &inUse) {
+		t.Fatalf("expected *SubflowInUseError, got %T: %v", err, err)
+	}
+	if len(inUse.Refs) != 1 {
+		t.Fatalf("expected 1 reference, got %d: %+v", len(inUse.Refs), inUse.Refs)
+	}
+	if inUse.Refs[0].NodeID != "inst_1" || inUse.Refs[0].Owner != "tab_app" {
+		t.Errorf("unexpected reference: %+v", inUse.Refs[0])
+	}
+
+	// Step 5: remove the instance, and the definition goes away.
+	if err := c.DeleteNode(ctx, "tab_app", "inst_1"); err != nil {
+		t.Fatalf("DeleteNode: %v", err)
+	}
 	if err := c.DeleteSubflow(ctx, "sf_round"); err != nil {
 		t.Fatalf("DeleteSubflow: %v", err)
 	}

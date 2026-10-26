@@ -389,11 +389,13 @@ func (s *Server) registerTools() {
 		mcp.WithDescription(
 			"Remove a subflow definition. Fails with a 404-style error if no subflow with "+
 				"the given id exists.\n\n"+
-				"Caveat: the runtime does not check that no instance of the "+
-				"subflow is in use before removing the definition. Any "+
-				"instance nodes left in flow tabs will point at a missing "+
-				"subflow after the next deploy — the same behaviour as the "+
-				"editor, where the operator is expected to be aware.\n\n"+
+				"A definition that is still in use is NOT deleted: when any instance node "+
+				"of type \"subflow:<id>\" is left behind — in a flow tab or nested inside "+
+				"another subflow definition — the runtime can no longer resolve that type "+
+				"and the affected flows never deploy. The call fails with the list of "+
+				"references to remove first; the definition is left untouched. Removing "+
+				"the instances along with the definition is a separate, explicit operation, "+
+				"not a side effect of this one.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
 				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
 		),
