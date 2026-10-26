@@ -2616,8 +2616,12 @@ func TestCreateFlow_NullDocumentIsRefusedNotPanic(t *testing.T) {
 
 // TestUpdateFlow_NullDocumentIsRefusedNotPanic is the same regression
 // on the update path, which normalizes the document with the fill
-// disabled — the shape that used to hand a null document to the
-// runtime instead of failing.
+// disabled.
+//
+// This path was never a panic: the null document reached the client,
+// which refused it in flattenFlowUpdate with "flow document must be a
+// JSON object" before any deploy. It did read GET /flows first, though,
+// so the refusal now happens before the runtime is contacted at all.
 func TestUpdateFlow_NullDocumentIsRefusedNotPanic(t *testing.T) {
 	var called bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

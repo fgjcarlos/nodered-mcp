@@ -21,19 +21,37 @@ wrote into it:
 
 All three are reachable from the tool surface: the argument is a JSON-encoded
 string, `json.Valid("null")` is true, so the value passes argument validation
-and reaches the normalization. The panic is not confined to one transport —
-the HTTP transport has a `recoverPanics` wrapper that turns it into a 500,
-while the stdio transport has no such wrapper, so the process goes down.
+and reaches the normalization.
+
+**What the panic costs, measured.** Neither transport lets the process die, and
+that is worth stating precisely:
+
+- Over HTTP, the repository's own `recoverPanics` wrapper
+  (internal/mcp/http_observe.go) turns the panic into a 500 "internal server
+  error".
+- Over stdio, mcp-go v0.58.0 recovers the panic in its tool-call worker
+  (server/stdio.go) and answers JSON-RPC `-32603` with "internal panic:
+  assignment to entry in nil map". The server survives and keeps serving.
+
+So the damage is not a crash: it is an opaque internal error where a
+validation error belongs, plus a panic and a stack trace in the log on every
+such call. The first version of this record claimed the stdio process went
+down; it does not, and the claim was measured rather than assumed.
 
 **What the update path did, measured rather than assumed.** `update_flow`
 normalizes with the fill disabled, so it never reached the write. It was
 already refused, by the revisioned-deploy guard in `flattenFlowUpdate`
-(`doc.Extra == nil` → "flow document must be a JSON object"), before any
-request reached the runtime. An independent measurement against a real
-Node-RED 5.0.8 over the stdio transport confirmed it: the pre-fix build
-answered `flow document must be a JSON object` and the runtime logged no
-deploy. The fix now refuses the same document earlier, and with a message
-that names the shape; it does not close a hole on that path.
+(`doc.Extra == nil` → "flow document must be a JSON object"). An independent
+measurement against a real Node-RED 5.0.8 over the stdio transport confirmed
+it: the pre-fix build answered `flow document must be a JSON object` and the
+runtime logged no deploy.
+
+One detail of that measurement matters: the pre-fix path did read the runtime
+before refusing. The revisioned deploy takes its base from `GET /flows`, so
+the refusal came after a read — there was no deploy, but there was a request.
+The fix now refuses the same document before the runtime is contacted at all.
+It does not close a hole on that path; it moves the refusal earlier and makes
+the message name the shape.
 
 Audit baseline: main @ 93f47b1 (audit-2026-10-19, area A06, P1).
 
@@ -60,8 +78,9 @@ Audit baseline: main @ 93f47b1 (audit-2026-10-19, area A06, P1).
 
 ## Delivery
 Forecast: roughly 60–120 authored changed lines; advisory estimate.
-Actual: 291 changed lines (60 fix, 203 tests, 28 baseline and record).
-Strategy: ask-on-risk, single commit, one PR.
+Actual: 448 changed lines (89 fix, 227 tests, 14 baseline, 118 record).
+Strategy: ask-on-risk, one PR, two commits (the fix, then the extraction the
+  complexity gate required).
 
 ## Progress
 Task document created before the first source write.
@@ -82,14 +101,20 @@ Fix, and the rule it follows:
   so the caller's value still reaches the inject's msg. A null payload is a
   scalar by that rule, and wrapping it keeps the two paths coherent: the
   inject receives `{"payload":null,…}` and fires with a null message, which
-  is what the caller asked for.
+  is what the caller asked for. Measured against a real Node-RED 5.0.8:
+  `POST /inject/:id` with `{"payload":null,"__user_inject_props__":[]}`
+  answers 200 and the message fires with a null payload. Refusing instead
+  would have been wrong: a body of `{"payload":null}` without the marker is
+  silently discarded by the runtime, and a literal null body is a 400 from
+  body-parser's strict mode.
 
-RED observed as a real panic on all three paths before the fix: `panic:
-assignment to entry in nil map`, re-derived against the pre-fix tree
-(`main` @ e7b0507) rather than against a half-reverted copy. GREEN after. The
-regressions cover the normalization helpers directly and the three tool
-boundaries (`create_flow`, `import_flow`, `update_flow`), and they assert that
-no request reaches the runtime for a refused document.
+RED observed as a real panic on the three paths before the fix — `create_flow`,
+`import_flow` and `inject_node` — with `panic: assignment to entry in nil
+map`, re-derived against the pre-fix tree (`main` @ e7b0507) rather than
+against a half-reverted copy. GREEN after. The regressions cover the
+normalization helpers directly and the tool boundaries (`create_flow`,
+`import_flow`, `update_flow`, `inject_node`), and they assert that no request
+reaches the runtime for a refused document.
 
 ### The complexity gate
 `scripts/complexity-check.sh` fails a pull request whose named functions
@@ -104,7 +129,7 @@ decode into `decodeTabElement`. `normalizeFlowDoc` is now 3 and
 `synthesizeFlowFromFlat` is back to 15, and the floor was regenerated with
 `scripts/complexity-check.sh --write` so it matches reality again.
 
-### A third site of the same class
+### The rest of the class
 A scan of the whole tree for "unmarshal into a map, then write into it" found
 one more site, one line away from the same panic:
 `synthesizeFlowFromFlat` (internal/nodered/flows.go) writes `tab["nodes"]`,
@@ -113,13 +138,26 @@ is not reachable today — only an element with `"type":"tab"` is picked, and
 that is always an object, so the map is never nil — but the guard costs a
 helper and removes the trap.
 
-Everything else that decodes into a map only *reads* from it, which is safe
-on a nil map. The `import_flow` clipboard path was found by reading the
-callers of `normalizeFlowDoc` rather than by the scan: it is the second
-reachable panic, and it is now covered by a regression of its own.
+A second pass over the tree — this time with an AST scan rather than a
+pattern — found five more places that write into a decoded map. None of them
+is a live trap, and each is listed here so the claim is not "nothing else
+writes into a decoded map" but the more useful "here is every one of them and
+here is what keeps it safe":
 
-Everything else that decodes into a map only *reads* from it, which is safe
-on a nil map.
+- `cmd/nodered-mcp/init.go` — `root[rootKey] = servers`; the root map comes
+  from `parseJSONObject`, which replaces a nil map with an empty one.
+- `internal/nodered/flows.go` — `doc.Extra["disabled"] = …`; guarded by an
+  explicit `if doc.Extra == nil`.
+- `internal/nodered/flows_update.go` — `doc.Extra["id"]` and `doc.Extra["type"]`;
+  guarded the same way.
+- `internal/nodered/edit.go` — `node["wires"] = …` in `setWires`; the node
+  always comes from a decoded object, so the map is never nil.
+- `internal/nodered/flows_update.go` — the overlay maps in `overlayFlowEntry`;
+  their entries come from `indexFlowEntries`, which rejects a null entry.
+
+The `import_flow` clipboard path was found by reading the callers of
+`normalizeFlowDoc` rather than by the scan: it is the second reachable panic,
+and it is now covered by a regression of its own.
 
 ## Next step
-Push the branch, open one PR linking #333, and merge once CI is green.
+Open one PR linking #333 and merge it once CI is green.

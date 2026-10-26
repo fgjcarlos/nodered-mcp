@@ -234,6 +234,54 @@ func TestHandleInjectNode_PrimitivePayloads(t *testing.T) {
 	}
 }
 
+// A null payload is a scalar by the same rule as a number or an array, so
+// it is wrapped rather than refused — and it must not panic on the way.
+//
+// The regression for issue #333: the payload was decoded into a map, and
+// "null" leaves that map nil, so writing the marker into it panicked.
+func TestHandleInjectNode_NullPayload(t *testing.T) {
+	var posts []capture
+	var srv *Server
+	var got *capture
+	srv, got = injectServer(t, func(w http.ResponseWriter, r *http.Request) {
+		posts = append(posts, *got)
+		if r.Method == http.MethodGet && r.URL.Path == "/flows" {
+			_, _ = w.Write([]byte(`[{"id":"t","type":"tab"},{"id":"n1","type":"inject","z":"t","wires":[],"x":1,"y":1}]`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	res, err := srv.handleInjectNode(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{
+			"id":      "n1",
+			"payload": "null",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("handleInjectNode: %v", err)
+	}
+	if res == nil || res.IsError {
+		t.Fatalf("expected a successful result, got %+v", res)
+	}
+	var post capture
+	for _, p := range posts {
+		if p.method == "POST" && p.path == "/inject/n1" {
+			post = p
+		}
+	}
+	if post.method == "" {
+		t.Fatalf("expected a POST /inject/n1, got: %+v", posts)
+	}
+	// The null has to reach the runtime as the payload, not be dropped.
+	if !strings.Contains(string(post.body), `"payload":null`) {
+		t.Errorf("the null payload did not reach the runtime: %s", post.body)
+	}
+	if !strings.Contains(string(post.body), `"__user_inject_props__"`) {
+		t.Errorf("the inject marker is missing: %s", post.body)
+	}
+}
+
 // Empty id is still refused before the wire is hit — same validation
 // behaviour callers have always relied on.
 func TestHandleInjectNode_EmptyID(t *testing.T) {

@@ -19,13 +19,22 @@
 #
 # History of deliberate bumps (most recent first):
 #
+#   2026-10-26  handleSetContext  10 -> 8  (PR #362, closes #333)
+#     Not a change to the function: the floor was stale. gocyclo already
+#     reported 8 for it on main, and the PR does not touch
+#     tools_context.go. The regeneration corrected the number. Tightening,
+#     so it cannot let a regression through.
+#
 #   2026-10-26  normalizeFlowDoc  6 -> 3  (PR #362, closes #333)
 #     The null-document guard moved into its own helper, and the object
 #     branch with it, so the function got simpler instead of more
 #     complex. Floor tightened to the real value.
 #   2026-10-26  synthesizeFlowFromFlat  16 -> 15  (PR #362, closes #333)
 #     The tab decode moved into a helper, taking the nil check with it.
-#     The function is back under the threshold of 15.
+#     The function is back at 15, which is where it was before PR #155
+#     bumped the floor to 16: that bump never granted the headroom it
+#     claimed, because the threshold check (current > 15) fires first, so
+#     a value of 16 fails the gate whatever the floor says.
 #
 #   2026-08-03  synthesizeFlowFromFlat  15 -> 16  (PR #155, closes #147)
 #     The function sat exactly at the threshold; any added branch was
