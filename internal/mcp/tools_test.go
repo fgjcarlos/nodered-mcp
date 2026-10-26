@@ -2500,3 +2500,190 @@ func TestHandleListFlows_FullDetailBelowThreshold(t *testing.T) {
 		t.Errorf("expected full JSON for small flow, got %q", tc.Text)
 	}
 }
+
+// TestNormalizeFlowDoc_RejectsNull is the regression test for issue
+// #333: `json.Unmarshal("null", &map)` returns no error and leaves the
+// map nil, so the write in the fill path panicked with "assignment to
+// entry in nil map" instead of producing a validation error.
+//
+// A null document is not a flow document, so it is refused — with and
+// without the fill, because without it the caller used to be handed a
+// null document to deploy.
+func TestNormalizeFlowDoc_RejectsNull(t *testing.T) {
+	for _, fill := range []bool{true, false} {
+		got, err := normalizeFlowDoc(json.RawMessage("null"), "", fill)
+		if err == nil {
+			t.Errorf("fill=%v: expected an error for a null flow document, got %s", fill, got)
+			continue
+		}
+		if !strings.Contains(err.Error(), "null") {
+			t.Errorf("fill=%v: error does not name the problem: %v", fill, err)
+		}
+	}
+}
+
+// TestNormalizeFlowDoc_NonObjectShapesDoNotPanic covers the rest of
+// the malformed shapes the issue lists: an array, a boolean and a
+// scalar. Each is either processed or refused, and none of them
+// panics.
+func TestNormalizeFlowDoc_NonObjectShapesDoNotPanic(t *testing.T) {
+	for _, in := range []string{"[]", "true", "42", `"a string"`} {
+		for _, fill := range []bool{true, false} {
+			got, err := normalizeFlowDoc(json.RawMessage(in), "tabA", fill)
+			if err == nil && len(got) == 0 {
+				t.Errorf("input %q fill=%v: empty document with no error", in, fill)
+			}
+		}
+	}
+}
+
+// TestBuildInjectPayloadBody_NullPayload is the other half of issue
+// #333: the same nil map reached the inject payload path, where the
+// write of "__user_inject_props__" panicked.
+//
+// A payload that is not a JSON object is wrapped under "payload" so
+// the caller's value still reaches the inject's msg. A null payload is
+// a scalar by that rule, so it is wrapped like any other.
+func TestBuildInjectPayloadBody_NullPayload(t *testing.T) {
+	got := buildInjectPayloadBody(json.RawMessage("null"))
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(got, &m); err != nil {
+		t.Fatalf("result is not a JSON object: %v (%s)", err, got)
+	}
+	if _, ok := m["__user_inject_props__"]; !ok {
+		t.Errorf("missing __user_inject_props__: %s", got)
+	}
+	if raw, ok := m["payload"]; !ok {
+		t.Errorf("the null payload was dropped instead of wrapped: %s", got)
+	} else if string(raw) != "null" {
+		t.Errorf("payload = %s, want null", raw)
+	}
+}
+
+// TestBuildInjectPayloadBody_ScalarAndArrayStillWrap is the
+// neighbouring behaviour the null case has to stay consistent with.
+func TestBuildInjectPayloadBody_ScalarAndArrayStillWrap(t *testing.T) {
+	for _, in := range []string{"null", "42", `"hello"`, "[1,2]"} {
+		got := buildInjectPayloadBody(json.RawMessage(in))
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal(got, &m); err != nil {
+			t.Fatalf("input %q: result is not a JSON object: %v (%s)", in, err, got)
+		}
+		if raw, ok := m["payload"]; !ok || string(raw) != in {
+			t.Errorf("input %q: payload = %s (present=%v), want %s", in, raw, ok, in)
+		}
+	}
+}
+
+// TestCreateFlow_NullDocumentIsRefusedNotPanic is the tool-boundary
+// regression for issue #333.
+//
+// The panic lived in the document normalization, so it was reachable
+// from every write tool that takes a flow document. Here the caller
+// passes the JSON-encoded null as a string: the argument is valid JSON,
+// so it reaches the normalization, and the answer has to be a
+// validation error — and no request may reach the runtime.
+func TestCreateFlow_NullDocumentIsRefusedNotPanic(t *testing.T) {
+	var called bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		t.Errorf("unexpected request to the runtime: %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	s := New(c, Options{Version: "test"})
+	res, err := s.handleCreateFlow(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{"flow": "null"}},
+	})
+	if err != nil {
+		t.Fatalf("handleCreateFlow returned err=%v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result, got %+v", res)
+	}
+	text := resultFirstText(res)
+	if !strings.Contains(text, "null") {
+		t.Errorf("the error should name the null document: %q", text)
+	}
+	if called {
+		t.Error("the runtime was contacted for a document that was refused")
+	}
+}
+
+// TestUpdateFlow_NullDocumentIsRefusedNotPanic is the same regression
+// on the update path, which normalizes the document with the fill
+// disabled.
+//
+// This path was never a panic: the null document reached the client,
+// which refused it in flattenFlowUpdate with "flow document must be a
+// JSON object" before any deploy. It did read GET /flows first, though,
+// so the refusal now happens before the runtime is contacted at all.
+func TestUpdateFlow_NullDocumentIsRefusedNotPanic(t *testing.T) {
+	var called bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		t.Errorf("unexpected request to the runtime: %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	s := New(c, Options{Version: "test"})
+	res, err := s.handleUpdateFlow(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{"id": "tab1", "flow": "null"}},
+	})
+	if err != nil {
+		t.Fatalf("handleUpdateFlow returned err=%v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result, got %+v", res)
+	}
+	if called {
+		t.Error("the runtime was contacted for a document that was refused")
+	}
+}
+
+// TestImportFlow_NullClipboardElementIsRefusedNotPanic is the second
+// reachable panic of issue #333.
+//
+// import_flow normalizes the clipboard element with the fill enabled,
+// exactly like create_flow does, so a clipboard holding a null element
+// reached the same nil-map write. The clipboard array itself is
+// checked for shape — one element — but the element was never checked
+// for being an object.
+func TestImportFlow_NullClipboardElementIsRefusedNotPanic(t *testing.T) {
+	var called bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		t.Errorf("unexpected request to the runtime: %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	s := New(c, Options{Version: "test"})
+	res, err := s.handleImportFlow(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{"clipboard": "[null]"}},
+	})
+	if err != nil {
+		t.Fatalf("handleImportFlow returned err=%v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result, got %+v", res)
+	}
+	text := resultFirstText(res)
+	if !strings.Contains(text, "null") {
+		t.Errorf("the error should name the null element: %q", text)
+	}
+	if called {
+		t.Error("the runtime was contacted for a clipboard that was refused")
+	}
+}

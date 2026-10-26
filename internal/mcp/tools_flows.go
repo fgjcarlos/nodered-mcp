@@ -569,6 +569,19 @@ func encodePayloadArg(v any) (json.RawMessage, error) {
 	}
 }
 
+// decodePayloadObject decodes a payload into an object map.
+//
+// ok is false when the payload is not a JSON object: a scalar, an array,
+// or the literal null — which decodes into a nil map without an error,
+// and writing to a nil map panics.
+func decodePayloadObject(payload json.RawMessage) (map[string]json.RawMessage, bool) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &m); err != nil || m == nil {
+		return nil, false
+	}
+	return m, true
+}
+
 // buildInjectPayloadBody wraps a payload into the body shape
 // Node-RED 5.x's /inject/:id handler expects. The trigger field
 // name and value are documented on Client.InjectNodeWithBody.
@@ -578,11 +591,12 @@ func encodePayloadArg(v any) (json.RawMessage, error) {
 // name and value are documented on Client.InjectNodeWithBody.
 func buildInjectPayloadBody(payload json.RawMessage) json.RawMessage {
 	// {"<payload fields>", "__user_inject_props__":[]}
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &m); err != nil {
-		// payload is a JSON scalar or array: wrap it as a fresh object
-		// under "payload" so the caller's value still reaches the
-		// inject's msg.
+	m, ok := decodePayloadObject(payload)
+	if !ok {
+		// payload is a JSON scalar or array — or the literal null,
+		// which decodes into a nil map without an error. It is wrapped
+		// as a fresh object under "payload" so the caller's value
+		// still reaches the inject's msg.
 		wrapped, _ := json.Marshal(map[string]json.RawMessage{
 			"payload":               payload,
 			"__user_inject_props__": json.RawMessage(`[]`),
