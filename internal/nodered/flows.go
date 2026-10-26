@@ -231,12 +231,44 @@ func (c *Client) DeleteFlow(ctx context.Context, id string) error {
 // The backup is whatever GET /flows returned when it was taken (bare array or
 // {rev,flows} envelope); we extract just the flow array and POST it as a bare
 // array so the stale rev never triggers a 409 conflict.
+//
+// Issue #334: the backup is validated as the effective configuration it
+// would install, before the snapshot and before the runtime is contacted.
+// A backup taken from a runtime that carried a broken reference is refused
+// here; RestoreFlowsUnchecked is the documented way to install it anyway.
 func (c *Client) RestoreFlows(ctx context.Context, backup RawFlow) error {
 	defer c.writeGuard()()
 	arr := FlowArray(backup)
 	if arr == nil {
 		return errors.New("backup does not contain a recognizable flow array")
 	}
+	if err := validateEffectiveConfig(arr); err != nil {
+		return err
+	}
+	return c.restoreFlowsLocked(ctx, arr)
+}
+
+// RestoreFlowsUnchecked restores a backup without validating its
+// references.
+//
+// It is the recovery path for a backup that no longer validates: a
+// configuration that was accepted by an older runtime, or one that was
+// edited by hand, can carry a wire that points nowhere. The caller has to
+// ask for this explicitly — nothing reaches this method by accident — and
+// the deployment still carries the usual snapshot, so the state being
+// replaced can be recovered.
+func (c *Client) RestoreFlowsUnchecked(ctx context.Context, backup RawFlow) error {
+	defer c.writeGuard()()
+	arr := FlowArray(backup)
+	if arr == nil {
+		return errors.New("backup does not contain a recognizable flow array")
+	}
+	return c.restoreFlowsLocked(ctx, arr)
+}
+
+// restoreFlowsLocked deploys a flow array as a full configuration. The
+// caller holds the write lock.
+func (c *Client) restoreFlowsLocked(ctx context.Context, arr []json.RawMessage) error {
 	// A backup taken before the policy changed can hold a type that is
 	// denied now, and restoring it would reintroduce the exact RCE path
 	// the policy closes. The check happens before the snapshot, so a
@@ -495,15 +527,15 @@ func validateFlowWires(raw RawFlow) error {
 	for _, issue := range issues {
 		switch issue.Kind {
 		case IssueDanglingWire:
-			return fmt.Errorf("node %q wires to unknown node %q", issue.NodeID, issue.Target)
+			return &FlowGuardError{Message: fmt.Sprintf("node %q wires to unknown node %q", issue.NodeID, issue.Target)}
 		case "invalid_document":
-			return errors.New(issue.Message)
+			return &FlowGuardError{Message: issue.Message}
 		case IssueInvalidWires:
 			// A node with a malformed wires field would be written to the
 			// runtime and then break every subsequent edit through the MCP.
 			// Refuse the write up front, echoing the node id and the
 			// actual JSON shape so the operator can fix it.
-			return errors.New(issue.Message)
+			return &FlowGuardError{Message: issue.Message}
 		}
 	}
 	return nil
@@ -531,7 +563,7 @@ func validateZRefsInFlow(flow RawFlow, tabID string) error {
 		if doc.exists(z) {
 			continue
 		}
-		return errors.New(badZMessage(nodeID(node), z))
+		return &FlowGuardError{Message: badZMessage(nodeID(node), z)}
 	}
 	return nil
 }

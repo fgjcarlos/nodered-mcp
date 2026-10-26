@@ -19,6 +19,21 @@
 #
 # History of deliberate bumps (most recent first):
 #
+#   2026-10-26  new floors for the #334 guards  (PR #363, closes #334)
+#     The gate only checks the functions named here, so the guards this
+#     PR adds were not covered by it. Their floors are added with the
+#     values gocyclo reports for them:
+#
+#       ValidateEffectiveConfig   internal/nodered/validate_deploy.go   3
+#       effectiveConfigIssues      internal/nodered/validate_deploy.go   3
+#       ownerDocument              internal/nodered/validate_deploy.go  10
+#       orphanNodeIssues           internal/nodered/validate_deploy.go   8
+#       missingSubflowIssues       internal/nodered/validate_deploy.go   6
+#       duplicateIDIssues          internal/nodered/validate_deploy.go   5
+#       restoreFlowsLocked         internal/nodered/flows.go             4
+#
+#     These are new entries, not bumps: no existing floor moves.
+#
 #   2026-10-26  handleSetContext  10 -> 8  (PR #362, closes #333)
 #     Not a change to the function: the floor was stale. gocyclo already
 #     reported 8 for it on main, and the PR does not touch
@@ -56,3 +71,10 @@ handleGetRuntimeLogs    internal/mcp/tools_runtime.go    14
 ValidateFlow    internal/nodered/validate.go    10
 synthesizeFlowFromFlat    internal/nodered/flows.go    15
 handleSetContext    internal/mcp/tools_context.go    8
+ValidateEffectiveConfig    internal/nodered/validate_deploy.go    3
+effectiveConfigIssues    internal/nodered/validate_deploy.go    3
+ownerDocument    internal/nodered/validate_deploy.go    10
+orphanNodeIssues    internal/nodered/validate_deploy.go    8
+missingSubflowIssues    internal/nodered/validate_deploy.go    6
+duplicateIDIssues    internal/nodered/validate_deploy.go    5
+restoreFlowsLocked    internal/nodered/flows.go    4

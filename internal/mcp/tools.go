@@ -350,6 +350,9 @@ func (s *Server) registerTools() {
 				"describing the internal logic. Fails with a clear error if a "+
 				"subflow with the same id already exists; use update_subflow to "+
 				"change an existing one.\n\n"+
+				"The definition is validated with the same rules a tab is: a wire inside "+
+				"the subflow that names a node which is not in it, and a node whose z "+
+				"names another tab, are refused before the runtime is contacted.\n\n"+
 				"WARNING: this tool can deploy any node type, including exec/system "+
 				"nodes that execute shell commands on the Node-RED host. The MCP "+
 				"server blocks a configurable set of node types (MCP_NODE_DENYLIST, "+
@@ -370,6 +373,9 @@ func (s *Server) registerTools() {
 				"current set, swaps the named entry, and writes the lot back. "+
 				"Fails with a 404-style error if no subflow with the given id "+
 				"exists; use create_subflow for new ones.\n\n"+
+				"The definition is validated with the same rules a tab is: a wire inside "+
+				"the subflow that names a node which is not in it, and a node whose z "+
+				"names another tab, are refused before the runtime is contacted.\n\n"+
 				"WARNING: this tool can deploy any node type, including exec/system "+
 				"nodes that execute shell commands on the Node-RED host. The MCP "+
 				"server blocks a configurable set of node types (MCP_NODE_DENYLIST, "+
@@ -569,10 +575,18 @@ func (s *Server) registerTools() {
 				"available snapshots; pass the backup filename or \"latest\" for the most recent.\n\n"+
 				"A backup taken before the denylist changed can hold a now-blocked node "+
 				"type; the restore is refused in that case (MCP_NODE_DENYLIST, default: "+
-				"exec,system); see SECURITY.md.\n\n"+backupRecoveryNotice,
+				"exec,system); see SECURITY.md.\n\n"+
+				"The backup is also validated as the configuration it would install: a "+
+				"backup whose references no longer resolve (a wire that points nowhere, "+
+				"a node that belongs to no tab, an instance of a subflow whose definition "+
+				"is missing) is refused before the runtime is contacted. Pass force=true "+
+				"to install such a backup anyway — that is the recovery path for a "+
+				"configuration that was valid on an older runtime.\n\n"+backupRecoveryNotice,
 		),
 		mcp.WithString("backup", mcp.Required(),
 			mcp.Description("Backup filename (from list_backups), or \"latest\".")),
+		mcp.WithBoolean("force",
+			mcp.Description("Set to true to restore the backup without validating its references. Use it only for a backup that no longer validates and that you know is worth restoring.")),
 	)
 	s.addWriteTool(restoreBackup, s.handleRestoreBackup)
 
@@ -783,6 +797,10 @@ func (s *Server) registerTools() {
 				"nodes that execute shell commands on the Node-RED host. The MCP "+
 				"server blocks a configurable set of node types (MCP_NODE_DENYLIST, "+
 				"default: exec,system); see SECURITY.md.\n\n"+
+				"The configuration is validated before it is deployed: a wire that points "+
+				"nowhere, a node whose z names no tab, two entries that share an id, and "+
+				"an instance of a subflow whose definition is missing are all refused, "+
+				"and nothing is sent to the runtime.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
 				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
 		),

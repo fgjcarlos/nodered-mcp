@@ -54,6 +54,26 @@ const (
 	IssueBadZ FlowIssueKind = "bad_z"
 )
 
+// FlowGuardError is a refusal by the client-side guard of a flow
+// document: the runtime was never contacted.
+//
+// The message is the one the write path has always produced, so the
+// operator-facing text does not change. The type is what lets the MCP
+// layer say that the write was stopped before anything was sent, and it
+// is what the subflow write path returns (issue #334) so a subflow
+// definition is refused by the same rules as a tab.
+type FlowGuardError struct {
+	Message string
+}
+
+// Error returns the guard's message.
+func (e *FlowGuardError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.Message
+}
+
 // FlowIssue describes one structural problem in a flow document. NodeID is the
 // id of the offending node when one exists; "" for a document-level issue.
 // Target is set on IssueDanglingWire to the unresolved wire target id, so

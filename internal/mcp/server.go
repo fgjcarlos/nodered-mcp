@@ -496,6 +496,9 @@ func toolResultError(err error, message string) (*mcp.CallToolResult, error) {
 	if nodeType, denied := deniedNodeType(err); denied {
 		return mcp.NewToolResultError(deniedNodeMessage(nodeType)), nil
 	}
+	if res, refused := flowGuardResult(err); refused {
+		return res, nil
+	}
 	res := mcp.NewToolResultError(message)
 	if isTransportError(err) {
 		return res, &toolTransportError{message: message, cause: err}

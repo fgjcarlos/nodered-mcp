@@ -188,10 +188,21 @@ func (c *Client) CreateSubflow(ctx context.Context, subflow json.RawMessage) (Ra
 	if err := c.deniedNodeType(prepared); err != nil {
 		return nil, err
 	}
+	// Issue #334: a subflow definition is a flow document too, so it
+	// shares the guard the tab write path applies. Its inner nodes have
+	// their own wires, and a wire that names a node which is not in the
+	// definition never delivers; a node whose z names another tab is
+	// filed there by the runtime, and the subflow comes out empty.
 	var newID string
 	_ = json.Unmarshal(prepared, &struct {
 		ID *string `json:"id"`
 	}{ID: &newID})
+	if err := validateFlowWires(RawFlow(prepared)); err != nil {
+		return nil, err
+	}
+	if err := validateZRefsInFlow(RawFlow(prepared), newID); err != nil {
+		return nil, err
+	}
 
 	existing, configs, err := c.fetchGlobalSubflows(ctx)
 	if err != nil {
@@ -233,6 +244,16 @@ func (c *Client) UpdateSubflow(ctx context.Context, id string, subflow json.RawM
 	// other document: a forbidden type nested inside it is refused before
 	// the global configuration is read.
 	if err := c.deniedNodeType(prepared); err != nil {
+		return err
+	}
+	// Issue #334: the definition shares the guard the tab write path
+	// applies — the same wires rule and the same owner rule — so a
+	// subflow cannot be written with a topology the tab path would
+	// refuse.
+	if err := validateFlowWires(RawFlow(prepared)); err != nil {
+		return err
+	}
+	if err := validateZRefsInFlow(RawFlow(prepared), id); err != nil {
 		return err
 	}
 	// Force the id in the body to match the path argument. The editor

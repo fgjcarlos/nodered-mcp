@@ -129,6 +129,50 @@ the definition is left untouched. The instances are removed with
 definition with `update_subflow` (an instance nested in another
 subflow); `delete_subflow` never removes them for you.
 
+### What a deployment validates
+
+A deployment installs a whole configuration, so it is checked as one
+before anything is sent to the runtime. The check is local: nothing
+reaches Node-RED, and no backup is taken, when the configuration is
+refused.
+
+The rules are the ones the runtime applies to the same array, and each
+of them is a reference that does not resolve:
+
+- **a wire that names no node in the same tab (or the same subflow)** —
+  the runtime resolves wire targets inside their owner, so the message
+  is dropped and the wire is dead;
+- **a node whose `z` names neither a tab nor a subflow definition** —
+  the runtime invents a tab for it, and the node runs outside the flow
+  that was deployed;
+- **two entries with the same id** — the runtime keys every node by its
+  id, so the last entry wins and the earlier one disappears without a
+  word;
+- **an instance of a subflow whose definition is not in the
+  configuration** — the runtime installs a node type it cannot resolve,
+  logs `Waiting for missing types to be registered` and leaves the
+  flows stopped.
+
+Two topologies are deliberately left alone, because the runtime owns
+them: **link nodes** (the runtime recomputes the wires of a `link out`
+node from its `links` array, and a `link in` may point at a `link out`
+in another tab — that is what a link is for) and **subflow instances**
+(an instance is an ordinary node of its tab, and its wires are checked
+against that tab like any other node's).
+
+`set_flows` applies these rules to the array it is given, and
+`restore_backup` applies them to the backup it is about to install. A
+backup that no longer validates — one taken from a runtime that carried
+a broken reference, or one edited by hand — is refused with the list
+of problems; `restore_backup` with `force=true` installs it anyway,
+and the result says that it was installed unvalidated. That is the
+recovery path, and it has to be asked for explicitly.
+
+`create_subflow` and `update_subflow` share the guard the tab write
+path has always applied: a wire inside the definition that names a
+node which is not in it, and a node whose `z` names another tab, are
+refused before the runtime is contacted.
+
 ## Palette
 
 | Tool | HTTP | Risk | Notes |

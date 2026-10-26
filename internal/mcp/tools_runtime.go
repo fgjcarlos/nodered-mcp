@@ -574,6 +574,12 @@ func (s *Server) handleSetFlows(ctx context.Context, req mcp.CallToolRequest) (*
 
 	if err := s.nrClient.SetFlows(ctx, flows); err != nil {
 		slog.Error("set_flows failed", "error", err)
+		if res, refused := configValidationResult(err,
+			"Fix the references and deploy again. A configuration whose wires point "+
+				"nowhere, whose nodes belong to no tab, or that instances a subflow "+
+				"without a definition is refused before the runtime is contacted."); refused {
+			return res, nil
+		}
 		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
 	return mcp.NewToolResultText("Flows deployed (a backup was taken first)."), nil

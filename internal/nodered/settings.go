@@ -103,6 +103,15 @@ func (c *Client) SetFlows(ctx context.Context, flows []json.RawMessage) error {
 	if !hasTab {
 		return errors.New(`flows: array must contain at least one element with type "tab"; received only non-tab entries`)
 	}
+	// Issue #334: a full deployment replaces the whole configuration, so
+	// the references of the configuration are checked before anything is
+	// snapshotted and before the runtime is contacted. A wire that names
+	// a node which is not in the same tab, a node whose z names no tab at
+	// all, and an instance of a subflow whose definition is missing are
+	// all refused here instead of being installed.
+	if err := validateEffectiveConfig(flows); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(ctx, settingsStateTimeout)
 	defer cancel()
 
