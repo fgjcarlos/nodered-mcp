@@ -162,29 +162,63 @@ func nodeParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) {
 // a flat array, the tab id to match is taken from flowID (when supplied);
 // a nested payload is accepted as-is.
 func normalizeFlowDoc(raw json.RawMessage, flowID string, fillNodes bool) (nodered.RawFlow, error) {
-	var doc map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &doc); err == nil {
-		// "null" decodes into a nil map without an error, and writing
-		// to a nil map panics. A null document is not a flow
-		// document, so it is refused here: the alternative is a panic
-		// in the fill path, or a null document handed to the runtime
-		// that answers with an opaque "Cannot read properties of
-		// null".
-		if doc == nil {
-			return nil, fmt.Errorf("flow document is null; expected a JSON object or a flow array")
-		}
-		_, hasNodes := doc["nodes"]
-		_, hasConfigs := doc["configs"]
-		if hasNodes || hasConfigs || !looksLikeFlatArrayElement(doc) {
-			coalesceNullFields(doc, fillNodes, hasNodes, hasConfigs)
-			out, err := json.Marshal(doc)
-			if err != nil {
-				return nil, fmt.Errorf("re-encoding flow document: %w", err)
-			}
-			return nodered.RawFlow(out), nil
-		}
+	out, ok, err := normalizeFlowObject(raw, fillNodes)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		return out, nil
 	}
 	return normalizeFlatFlowArray(raw, flowID, fillNodes)
+}
+
+// normalizeFlowObject normalizes a nested tab document. ok is false when
+// raw is not a JSON object at all — an array or a scalar — in which case
+// the flat-array shape applies and the caller handles it.
+//
+// The object branch lives in its own function so that normalizeFlowDoc
+// keeps its complexity, and so that the null case is caught once, in
+// decodeFlowDocument.
+func normalizeFlowObject(raw json.RawMessage, fillNodes bool) (nodered.RawFlow, bool, error) {
+	doc, err := decodeFlowDocument(raw)
+	if err != nil {
+		return nil, false, err
+	}
+	if doc == nil {
+		return nil, false, nil
+	}
+	_, hasNodes := doc["nodes"]
+	_, hasConfigs := doc["configs"]
+	if !hasNodes && !hasConfigs && looksLikeFlatArrayElement(doc) {
+		// A flat-array element: the caller picks the tab out of it.
+		return nil, false, nil
+	}
+	coalesceNullFields(doc, fillNodes, hasNodes, hasConfigs)
+	out, err := json.Marshal(doc)
+	if err != nil {
+		return nil, false, fmt.Errorf("re-encoding flow document: %w", err)
+	}
+	return nodered.RawFlow(out), true, nil
+}
+
+// decodeFlowDocument decodes a flow document into an object map.
+//
+// A JSON null decodes into a nil map **without an error**, and writing to
+// a nil map panics — so a null document is refused here, with the message
+// the operator needs, instead of reaching the fill path.
+//
+// A value that is not a JSON object at all (an array, a scalar) is not an
+// error: it is the flat-array shape, and the map comes back nil so the
+// caller can hand it on.
+func decodeFlowDocument(raw json.RawMessage) (map[string]json.RawMessage, error) {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, nil
+	}
+	if doc == nil {
+		return nil, fmt.Errorf("flow document is null; expected a JSON object or a flow array")
+	}
+	return doc, nil
 }
 
 // coalesceNullFields fills absent or null `nodes`/`configs` arrays on a

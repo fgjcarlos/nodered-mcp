@@ -19,6 +19,14 @@
 #
 # History of deliberate bumps (most recent first):
 #
+#   2026-10-26  normalizeFlowDoc  6 -> 3  (PR #362, closes #333)
+#     The null-document guard moved into its own helper, and the object
+#     branch with it, so the function got simpler instead of more
+#     complex. Floor tightened to the real value.
+#   2026-10-26  synthesizeFlowFromFlat  16 -> 15  (PR #362, closes #333)
+#     The tab decode moved into a helper, taking the nil check with it.
+#     The function is back under the threshold of 15.
+#
 #   2026-08-03  synthesizeFlowFromFlat  15 -> 16  (PR #155, closes #147)
 #     The function sat exactly at the threshold; any added branch was
 #     a one-keystroke CI failure. Bumped by 1 to give headroom for the
@@ -34,8 +42,8 @@
 # That updates the per-function values in-place and exits 0; nothing
 # else changes. The threshold check still runs.
 
-normalizeFlowDoc    internal/mcp/tools_shared.go    6
+normalizeFlowDoc    internal/mcp/tools_shared.go    3
 handleGetRuntimeLogs    internal/mcp/tools_runtime.go    14
 ValidateFlow    internal/nodered/validate.go    10
-synthesizeFlowFromFlat    internal/nodered/flows.go    16
-handleSetContext    internal/mcp/tools_context.go    10
+synthesizeFlowFromFlat    internal/nodered/flows.go    15
+handleSetContext    internal/mcp/tools_context.go    8

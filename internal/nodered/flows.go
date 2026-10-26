@@ -86,10 +86,8 @@ func synthesizeFlowFromFlat(flat RawFlow, id string) (RawFlow, bool) {
 	if len(tabRaw) == 0 {
 		return nil, false
 	}
-	var tab map[string]json.RawMessage
-	if err := json.Unmarshal(tabRaw[0], &tab); err != nil || tab == nil {
-		// "null" decodes into a nil map without an error, and the
-		// writes below would panic on it.
+	tab, ok := decodeTabElement(tabRaw[0])
+	if !ok {
 		return nil, false
 	}
 	// Drop the markers that belong to the flat shape, not the nested one.
@@ -116,6 +114,19 @@ func synthesizeFlowFromFlat(flat RawFlow, id string) (RawFlow, bool) {
 		return nil, false
 	}
 	return RawFlow(out), true
+}
+
+// decodeTabElement decodes the tab element of a flat flow array.
+//
+// ok is false when the element cannot be decoded into an object. The
+// literal null is included: it decodes into a nil map without an error,
+// and the writes in synthesizeFlowFromFlat would panic on it.
+func decodeTabElement(raw json.RawMessage) (map[string]json.RawMessage, bool) {
+	var tab map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &tab); err != nil || tab == nil {
+		return nil, false
+	}
+	return tab, true
 }
 
 // hasCanvasCoords reports whether the raw node carries x and y coordinates.

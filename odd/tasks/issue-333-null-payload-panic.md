@@ -8,22 +8,32 @@ nil map`. The rule has to be coherent across the two surfaces that take JSON:
 a flow document is refused, an inject payload is wrapped.
 
 ## Problem and evidence
-Two write paths decoded a caller-supplied JSON value into a map and then wrote
-into it:
+Three write paths decoded a caller-supplied JSON value into a map and then
+wrote into it:
 
 - `normalizeFlowDoc` (internal/mcp/tools_shared.go) → `coalesceNullFields` →
-  `doc["nodes"] = …`. With the fill enabled, a `"null"` document panicked
-  there. With the fill disabled — the update path — it did not panic but
-  handed a `null` document to the runtime, which answers with an opaque
-  "Cannot read properties of null".
+  `doc["nodes"] = …`. The fill is enabled on two tool paths, and a `"null"`
+  document panicked on both of them: `create_flow` and `import_flow` (the
+  latter through a clipboard whose single element is null).
 - `buildInjectPayloadBody` (internal/mcp/tools_flows.go) →
-  `m["__user_inject_props__"] = …`. A `"null"` payload panicked there.
+  `m["__user_inject_props__"] = …`. A `"null"` payload panicked there, on
+  `inject_node`.
 
-Both are reachable from the tool surface: the argument is a JSON-encoded
+All three are reachable from the tool surface: the argument is a JSON-encoded
 string, `json.Valid("null")` is true, so the value passes argument validation
 and reaches the normalization. The panic is not confined to one transport —
 the HTTP transport has a `recoverPanics` wrapper that turns it into a 500,
 while the stdio transport has no such wrapper, so the process goes down.
+
+**What the update path did, measured rather than assumed.** `update_flow`
+normalizes with the fill disabled, so it never reached the write. It was
+already refused, by the revisioned-deploy guard in `flattenFlowUpdate`
+(`doc.Extra == nil` → "flow document must be a JSON object"), before any
+request reached the runtime. An independent measurement against a real
+Node-RED 5.0.8 over the stdio transport confirmed it: the pre-fix build
+answered `flow document must be a JSON object` and the runtime logged no
+deploy. The fix now refuses the same document earlier, and with a message
+that names the shape; it does not close a hole on that path.
 
 Audit baseline: main @ 93f47b1 (audit-2026-10-19, area A06, P1).
 
@@ -50,7 +60,7 @@ Audit baseline: main @ 93f47b1 (audit-2026-10-19, area A06, P1).
 
 ## Delivery
 Forecast: roughly 60–120 authored changed lines; advisory estimate.
-Actual: 262 changed lines (23 fix, 144 tests, 95 record).
+Actual: 291 changed lines (60 fix, 203 tests, 28 baseline and record).
 Strategy: ask-on-risk, single commit, one PR.
 
 ## Progress
@@ -74,10 +84,25 @@ Fix, and the rule it follows:
   inject receives `{"payload":null,…}` and fires with a null message, which
   is what the caller asked for.
 
-RED observed as a real panic on both paths before the fix: `panic: assignment
-to entry in nil map`. GREEN after. The regressions cover the normalization
-helpers directly and both tool boundaries (`create_flow`, `update_flow`), and
-they assert that no request reaches the runtime for a refused document.
+RED observed as a real panic on all three paths before the fix: `panic:
+assignment to entry in nil map`, re-derived against the pre-fix tree
+(`main` @ e7b0507) rather than against a half-reverted copy. GREEN after. The
+regressions cover the normalization helpers directly and the three tool
+boundaries (`create_flow`, `import_flow`, `update_flow`), and they assert that
+no request reaches the runtime for a refused document.
+
+### The complexity gate
+`scripts/complexity-check.sh` fails a pull request whose named functions
+exceed the threshold of 15 **or** go up against their baseline, and the
+baseline file is not to be bumped as a side effect of a refactor. The first
+version of this fix added a branch to `normalizeFlowDoc` (6 → 7) and one to
+`synthesizeFlowFromFlat` (15 → 16, over the threshold), so CI was red on the
+complexity check. Both were resolved by extraction, which is the pattern the
+repository already uses for this: the null check moved into
+`decodeFlowDocument`, the object branch into `normalizeFlowObject`, the tab
+decode into `decodeTabElement`. `normalizeFlowDoc` is now 3 and
+`synthesizeFlowFromFlat` is back to 15, and the floor was regenerated with
+`scripts/complexity-check.sh --write` so it matches reality again.
 
 ### A third site of the same class
 A scan of the whole tree for "unmarshal into a map, then write into it" found
@@ -85,8 +110,13 @@ one more site, one line away from the same panic:
 `synthesizeFlowFromFlat` (internal/nodered/flows.go) writes `tab["nodes"]`,
 `tab["configs"]` and `tab["id"]` into a map decoded from the tab element. It
 is not reachable today — only an element with `"type":"tab"` is picked, and
-that is always an object, so the map is never nil — but the guard costs one
-line and removes the trap.
+that is always an object, so the map is never nil — but the guard costs a
+helper and removes the trap.
+
+Everything else that decodes into a map only *reads* from it, which is safe
+on a nil map. The `import_flow` clipboard path was found by reading the
+callers of `normalizeFlowDoc` rather than by the scan: it is the second
+reachable panic, and it is now covered by a regression of its own.
 
 Everything else that decodes into a map only *reads* from it, which is safe
 on a nil map.

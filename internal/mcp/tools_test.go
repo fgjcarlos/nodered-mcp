@@ -2644,3 +2644,42 @@ func TestUpdateFlow_NullDocumentIsRefusedNotPanic(t *testing.T) {
 		t.Error("the runtime was contacted for a document that was refused")
 	}
 }
+
+// TestImportFlow_NullClipboardElementIsRefusedNotPanic is the second
+// reachable panic of issue #333.
+//
+// import_flow normalizes the clipboard element with the fill enabled,
+// exactly like create_flow does, so a clipboard holding a null element
+// reached the same nil-map write. The clipboard array itself is
+// checked for shape — one element — but the element was never checked
+// for being an object.
+func TestImportFlow_NullClipboardElementIsRefusedNotPanic(t *testing.T) {
+	var called bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		t.Errorf("unexpected request to the runtime: %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	s := New(c, Options{Version: "test"})
+	res, err := s.handleImportFlow(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{"clipboard": "[null]"}},
+	})
+	if err != nil {
+		t.Fatalf("handleImportFlow returned err=%v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected an error result, got %+v", res)
+	}
+	text := resultFirstText(res)
+	if !strings.Contains(text, "null") {
+		t.Errorf("the error should name the null element: %q", text)
+	}
+	if called {
+		t.Error("the runtime was contacted for a clipboard that was refused")
+	}
+}
