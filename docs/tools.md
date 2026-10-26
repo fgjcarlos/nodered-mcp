@@ -92,9 +92,9 @@ access is granted to the MCP server.
 | `search_flows` | `GET /flows` | read | |
 | `get_flow` | `GET /flow/:id` | read | |
 | `create_flow` | `POST /flow` | write | |
-| `update_flow` | `PUT /flow/:id` | write | Full rewrite; prefer the granular tools |
+| `update_flow` | `PUT /flow/:id` | write | Full rewrite; prefer the granular tools; the written tab is judged in the context of the whole configuration |
 | `delete_flow` | `DELETE /flow/:id` | write | |
-| `set_flows` | `POST /flows` | write | Full deploy, most destructive |
+| `set_flows` | `POST /flows` | write | Full deploy, most destructive; the configuration is validated first (`force=true` skips that) |
 | `add_node` | `PUT /flow/:id` | write | |
 | `update_node` | `PUT /flow/:id` | write | Merges properties |
 | `delete_node` | `PUT /flow/:id` | write | Cleans incoming wires |
@@ -107,8 +107,8 @@ access is granted to the MCP server.
 | `import_flow` | `POST /flow` | write | |
 | `list_subflows` | `GET /flow/global` | read | |
 | `get_subflow` | `GET /flow/global` | read | |
-| `create_subflow` | `PUT /flow/global` | write | |
-| `update_subflow` | `PUT /flow/global` | write | |
+| `create_subflow` | `PUT /flow/global` | write | The definition's topology is validated first |
+| `update_subflow` | `PUT /flow/global` | write | The definition's topology is validated first |
 | `delete_subflow` | `PUT /flow/global` | write | Refuses while the definition is still instantiated |
 | `instantiate_subflow` | `PUT /flow/:id` | write | |
 
@@ -128,6 +128,78 @@ the definition is left untouched. The instances are removed with
 `delete_node` (an instance in a flow tab) or by rewriting the enclosing
 definition with `update_subflow` (an instance nested in another
 subflow); `delete_subflow` never removes them for you.
+
+### What a deployment validates
+
+A deployment installs a whole configuration, so it is checked as one
+before anything is sent to the runtime. The check is local: nothing
+reaches Node-RED, and no backup is taken, when the configuration is
+refused.
+
+The rules are the ones the runtime applies to the same array — with one
+exception, called out below — and each of them is a reference that does
+not resolve:
+
+- **a wire that names no node in the same tab (or the same subflow)** —
+  this is the repository's rule, shared with the per-tab write path,
+  and it is stricter than the runtime: the runtime does resolve a wire
+  across tabs (it falls back to the global node lookup), so such a wire
+  delivers. The editor never creates one, and both write paths refuse
+  it, so the configuration an operator installs and the configuration
+  they can then edit are judged by the same rule;
+- **a node whose `z` names neither a tab nor a subflow definition** —
+  the runtime invents a tab for it, and the node runs outside the flow
+  that was deployed;
+- **two entries with the same id** — the runtime keys every node by its
+  id, so the last entry wins and the earlier one disappears without a
+  word;
+- **an instance of a subflow whose definition is not in the
+  configuration** — the runtime installs a node type it cannot resolve,
+  logs `Waiting for missing types to be registered` and leaves the
+  flows stopped.
+
+Two topologies are deliberately left alone, because the runtime owns
+them: **link nodes** (the runtime recomputes the wires of a `link out`
+node from its `links` array, and a `link in` may point at a `link out`
+in another tab — that is what a link is for) and **subflow instances**
+(an instance is an ordinary node of its tab, and its wires are checked
+against that tab like any other node's).
+
+`set_flows` applies these rules to the array it is given, and
+`restore_backup` applies them to the backup it is about to install. A
+backup that no longer validates — one taken from a runtime that carried
+a broken reference, or one edited by hand — is refused with the list
+of problems; `restore_backup` with `force=true` installs it anyway,
+and the result says that it was installed unvalidated. That is the
+recovery path, and it has to be asked for explicitly.
+
+`set_flows` has the same escape hatch (`force=true`), for the same
+reason: the rules are the repository's, and one of them is stricter
+than the runtime. The node-type policy and the rule that a deployment
+must leave at least one tab are **not** skipped by it — they are not
+about the references of the configuration but about what a deployment
+may do to the runtime.
+
+`update_flow` writes a single tab, and it is judged in the context of
+the whole configuration: the entries of the tab it writes are the
+caller's, and the rules that need the whole configuration (an instance
+of a subflow whose definition is not there) are applied to them. The
+rest of the configuration is the runtime's own state, and a problem
+there is not the caller's to answer for — refusing it would make the
+runtime impossible to repair.
+
+`create_subflow` and `update_subflow` share the guard the tab write
+path has always applied: a wire inside the definition that names a
+node which is not in it, and a node whose `z` names another tab, are
+refused before the runtime is contacted. A subflow definition is also
+judged by its ports: the runtime resolves the ports of a subflow
+against the definition's own members, so an `in` port that names a
+node which is not there makes the runtime throw when it starts an
+instance of that subflow, and an `out` port that names one logs
+`Unknown node referenced inside subflow` and the output never fires.
+The one legal reference that is not a member is the definition's own
+id on an `out` port — that is how a subflow wires its input straight
+to its output.
 
 ## Palette
 
@@ -158,7 +230,7 @@ subflow); `delete_subflow` never removes them for you.
 | `set_flows_state` | `POST /flows/state` | write | |
 | `list_backups` | local | read | |
 | `diff_flows` | local + `GET /flows` | read | |
-| `restore_backup` | `POST /flows` | write | |
+| `restore_backup` | `POST /flows` | write | The backup is validated first; `force=true` skips that |
 
 ## Context helper recovery
 

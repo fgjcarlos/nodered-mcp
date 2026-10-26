@@ -54,6 +54,26 @@ const (
 	IssueBadZ FlowIssueKind = "bad_z"
 )
 
+// FlowGuardError is a refusal by the client-side guard of a flow
+// document: the runtime was never contacted.
+//
+// The message is the one the write path has always produced, so the
+// operator-facing text does not change. The type is what lets the MCP
+// layer say that the write was stopped before anything was sent, and it
+// is what the subflow write path returns (issue #334) so a subflow
+// definition is refused by the same rules as a tab.
+type FlowGuardError struct {
+	Message string
+}
+
+// Error returns the guard's message.
+func (e *FlowGuardError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.Message
+}
+
 // FlowIssue describes one structural problem in a flow document. NodeID is the
 // id of the offending node when one exists; "" for a document-level issue.
 // Target is set on IssueDanglingWire to the unresolved wire target id, so
@@ -120,6 +140,7 @@ func ValidateFlow(flow RawFlow) []FlowIssue {
 		ids[id] = true
 	}
 	issues = append(issues, validateWires(doc.Nodes, doc.Configs, ids)...)
+	issues = append(issues, validateLinkShapes(doc.Nodes, doc.Configs)...)
 
 	if issues == nil {
 		issues = []FlowIssue{}
@@ -211,6 +232,42 @@ func validateWires(nodes, configs []map[string]json.RawMessage, ids map[string]b
 					}
 				}
 			}
+		}
+	}
+	return issues
+}
+
+// validateLinkShapes reports the link nodes whose "links" field is not an
+// array. The runtime iterates that field with forEach when it parses the
+// configuration (@node-red/runtime/lib/flows/util.js, parseConfig), so a
+// truthy value that is not an array stops the deploy with a TypeError —
+// "n.links.forEach is not a function" — and the runtime answers the
+// deployment with a 400.
+//
+// The runtime tests the field for truthiness, so a null (or any other
+// falsy value) leaves the node alone and is not an issue.
+func validateLinkShapes(nodes, configs []map[string]json.RawMessage) []FlowIssue {
+	var issues []FlowIssue
+	for _, collection := range [][]map[string]json.RawMessage{nodes, configs} {
+		for _, node := range collection {
+			typ := stringField(node, "type")
+			if typ != "link in" && typ != "link out" {
+				continue
+			}
+			raw, ok := node["links"]
+			if !ok || !jsTruthy(raw) {
+				continue
+			}
+			var arr []json.RawMessage
+			if err := json.Unmarshal(raw, &arr); err == nil {
+				continue
+			}
+			id := nodeID(node)
+			issues = append(issues, FlowIssue{
+				Kind:    IssueInvalidLinks,
+				NodeID:  id,
+				Message: fmt.Sprintf("node %q is a link node whose links field is not an array; the runtime iterates that field when it parses the configuration, and the deployment stops with \"n.links.forEach is not a function\"", id),
+			})
 		}
 	}
 	return issues

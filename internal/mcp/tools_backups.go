@@ -109,6 +109,12 @@ func (s *Server) handleRestoreBackup(ctx context.Context, req mcp.CallToolReques
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	// Issue #334: a backup is validated as the configuration it would
+	// install, and a backup whose references no longer resolve is refused
+	// before the runtime is contacted. The force argument is the explicit,
+	// documented way to install such a backup anyway — nothing reaches
+	// the unchecked path by accident.
+	force := req.GetBool("force", false)
 
 	// "latest" resolves to the most recent backup.
 	if name == "latest" {
@@ -157,15 +163,28 @@ func (s *Server) handleRestoreBackup(ctx context.Context, req mcp.CallToolReques
 		return mcp.NewToolResultError("waiting for context helper lock: " + err.Error() + "; no action was started"), nil
 	}
 	defer s.ctxHelperMu.Unlock()
-	if err := s.nrClient.RestoreFlows(ctx, content); err != nil {
+	restore := s.nrClient.RestoreFlows
+	if force {
+		restore = s.nrClient.RestoreFlowsUnchecked
+	}
+	if err := restore(ctx, content); err != nil {
 		slog.Error("restore_backup failed", "error", err, "backup", name)
 		if t, denied := deniedNodeType(err); denied {
 			return mcp.NewToolResultError(deniedBackupMessage(name, t)), nil
 		}
+		if res, refused := configValidationResult(err,
+			"Fix the references and restore again, or pass force=true to install this "+
+				"backup without validating its references."); refused {
+			return res, nil
+		}
 		return toolResultError(err, fmt.Sprintf("restoring: %v", err))
 	}
 	s.ctxHelper = nil
-	return mcp.NewToolResultText(fmt.Sprintf("Restored flow config from %q (current state was backed up first).", name) + "\n\n" + backupRecoveryNotice), nil
+	notice := ""
+	if force {
+		notice = "\n\nThe backup was restored WITHOUT validating its references, as force=true asked."
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("Restored flow config from %q (current state was backed up first).", name) + notice + "\n\n" + backupRecoveryNotice), nil
 }
 
 // prettyJSON indents raw JSON for display, falling back to the raw bytes if

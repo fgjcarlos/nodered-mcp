@@ -79,6 +79,30 @@ func (c *Client) SetFlowsState(ctx context.Context, state string) error {
 // the change can be rolled back, and the {rev,...} envelope (if any) is
 // stripped so the deploy never carries a stale rev.
 func (c *Client) SetFlows(ctx context.Context, flows []json.RawMessage) error {
+	return c.setFlows(ctx, flows, true)
+}
+
+// SetFlowsUnchecked deploys the configuration without validating its
+// references.
+//
+// It is the recovery path for a configuration the guard refuses: the
+// rules the guard applies are the repository's, and one of them (a wire
+// that leaves the tab that owns it) is stricter than the runtime, which
+// does resolve such a wire across tabs. An operator who wants that
+// configuration installed has to ask for it explicitly — nothing reaches
+// this method by accident — and the deployment still carries the usual
+// snapshot, so the state being replaced can be recovered.
+//
+// The node-type policy and the tab rule are not skipped: they are not
+// about the references of the configuration but about what a deployment
+// may do to the runtime.
+func (c *Client) SetFlowsUnchecked(ctx context.Context, flows []json.RawMessage) error {
+	return c.setFlows(ctx, flows, false)
+}
+
+// setFlows deploys a flow array as a full configuration. When validate is
+// false the references of the configuration are not checked.
+func (c *Client) setFlows(ctx context.Context, flows []json.RawMessage, validate bool) error {
 	defer c.writeGuard()()
 	if len(flows) == 0 {
 		return errors.New("flows: at least one element is required")
@@ -93,15 +117,24 @@ func (c *Client) SetFlows(ctx context.Context, flows []json.RawMessage) error {
 	// leaving the runtime with no tabs and a node that has nowhere to
 	// live. Reject the input before taking a backup or contacting the
 	// runtime so the user's existing tab structure is preserved.
-	hasTab := false
-	for _, f := range flows {
-		if bytes.Contains(bytes.ToLower(f), []byte(`"type":"tab"`)) {
-			hasTab = true
-			break
-		}
+	//
+	// The entries are read, not searched for: the first version of this
+	// check looked for the bytes `"type":"tab"`, which refused a payload
+	// whose JSON was formatted with a space after the colon — and the
+	// refusal named the configuration rather than the formatting.
+	if !hasTabEntry(flows) {
+		return &FlowGuardError{Message: `flows: array must contain at least one element with type "tab"; received only non-tab entries`}
 	}
-	if !hasTab {
-		return errors.New(`flows: array must contain at least one element with type "tab"; received only non-tab entries`)
+	// Issue #334: a full deployment replaces the whole configuration, so
+	// the references of the configuration are checked before anything is
+	// snapshotted and before the runtime is contacted. A wire that names
+	// a node which is not in the same tab, a node whose z names no tab at
+	// all, and an instance of a subflow whose definition is missing are
+	// all refused here instead of being installed.
+	if validate {
+		if err := validateEffectiveConfig(flows); err != nil {
+			return err
+		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, settingsStateTimeout)
 	defer cancel()
@@ -116,6 +149,19 @@ func (c *Client) SetFlows(ctx context.Context, flows []json.RawMessage) error {
 	return c.do(ctx, "POST", "/flows", json.RawMessage(body), nil, func(r *http.Request) {
 		r.Header.Set("Node-RED-Deployment-Type", "full")
 	})
+}
+
+// hasTabEntry reports whether the array carries an entry of type "tab".
+func hasTabEntry(flows []json.RawMessage) bool {
+	for _, f := range flows {
+		var meta struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(f, &meta); err == nil && meta.Type == "tab" {
+			return true
+		}
+	}
+	return false
 }
 
 // SearchResult is one hit from the public npm registry search.

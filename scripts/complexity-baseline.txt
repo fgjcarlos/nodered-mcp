@@ -19,6 +19,74 @@
 #
 # History of deliberate bumps (most recent first):
 #
+#   2026-10-26  new floors for the #334 guards  (PR #363, closes #334)
+#     The gate only checks the functions named here, so the guards this
+#     PR adds were not covered by it. Their floors are added with the
+#     values gocyclo reports for them:
+#
+#       ValidateEffectiveConfig    internal/nodered/validate_deploy.go   3
+#       effectiveConfigIssues      internal/nodered/validate_deploy.go   1
+#       ownerRuleIssues            internal/nodered/validate_deploy.go   4
+#       ownerDocument              internal/nodered/validate_deploy.go  10
+#       orphanNodeIssues           internal/nodered/validate_deploy.go   8
+#       missingSubflowIssues       internal/nodered/validate_deploy.go   6
+#       duplicateIDIssues          internal/nodered/validate_deploy.go   5
+#       restoreFlowsLocked         internal/nodered/flows.go             4
+#       flatSubflowPortIssues      internal/nodered/validate_deploy.go   7
+#       subflowDefinitionPortIssues internal/nodered/validate_deploy.go  7
+#       portTargetIssues           internal/nodered/validate_deploy.go   9
+#
+#     These are new entries, not bumps: no existing floor moves.
+#     effectiveConfigIssues is 1 because the per-owner rules were
+#     extracted into ownerRuleIssues when the subflow port rules joined
+#     it — the extraction the gate asks for, not a floor moved to make
+#     a regression fit.
+#
+#   2026-10-26  the #334 floors follow the refactor  (PR #363, closes #334)
+#     An independent review of the branch measured the validation at
+#     4.7s for a ten-thousand-entry configuration: the per-owner rules
+#     rescanned the whole array once per owner. The configuration is now
+#     read once into an index, and the same measurement is 256ms.
+#
+#     The floors follow the refactor. The entries whose functions the
+#     index replaced are gone, and the new ones are added:
+#
+#       newConfigIndex              internal/nodered/validate_deploy.go   8
+#       ownerDocument               internal/nodered/validate_deploy.go   8
+#       orphanNodeIssues            internal/nodered/validate_deploy.go   5
+#       ownerlessNodeIssue         internal/nodered/validate_deploy.go   6
+#       validateLinkShapes         internal/nodered/validate.go          8
+#       validateTabEntries          internal/nodered/validate_deploy.go   8
+#       withoutLinkOutWires         internal/nodered/validate_deploy.go   8
+#       portTargetIssues            internal/nodered/validate_deploy.go   9
+#       subflowDefinitionPortIssues internal/nodered/validate_deploy.go   7
+#       duplicateIDIssues           internal/nodered/validate_deploy.go   5
+#       decodeConfigEntry           internal/nodered/validate_deploy.go   5
+#       effectiveConfigItems        internal/nodered/validate_deploy.go   5
+#       effectiveConfigIssues       internal/nodered/validate_deploy.go   3
+#       ownerRuleIssues             internal/nodered/validate_deploy.go   4
+#       missingSubflowIssues        internal/nodered/validate_deploy.go   4
+#       linksShapeIssues            internal/nodered/validate_deploy.go   4
+#       jsTruthy                    internal/nodered/validate_deploy.go   6
+#       setFlows                    internal/nodered/settings.go          8
+#       hasTabEntry                 internal/nodered/settings.go          4
+#       RestoreFlows                internal/nodered/flows.go             6
+#
+#     No existing floor moves: these are new entries.
+#
+#   2026-10-26  the second review round  (PR #363, closes #334)
+#     The second round of the adversarial review left four small
+#     findings, and the floors follow the code that answers them:
+#
+#       orphanNodeIssues            internal/nodered/validate_deploy.go   5
+#       ownerlessNodeIssue         internal/nodered/validate_deploy.go   6
+#       validateLinkShapes         internal/nodered/validate.go          8
+#
+#     orphanNodeIssues went down because the decision about a node
+#     without an owner moved into ownerlessNodeIssue — the extraction
+#     the gate asks for. The links-shape rule joined the shared engine,
+#     so the per-tab and the subflow write paths refuse it too.
+#
 #   2026-10-26  handleSetContext  10 -> 8  (PR #362, closes #333)
 #     Not a change to the function: the floor was stale. gocyclo already
 #     reported 8 for it on main, and the PR does not touch
@@ -56,3 +124,25 @@ handleGetRuntimeLogs    internal/mcp/tools_runtime.go    14
 ValidateFlow    internal/nodered/validate.go    10
 synthesizeFlowFromFlat    internal/nodered/flows.go    15
 handleSetContext    internal/mcp/tools_context.go    8
+ValidateEffectiveConfig    internal/nodered/validate_deploy.go    3
+effectiveConfigIssues    internal/nodered/validate_deploy.go    3
+ownerDocument    internal/nodered/validate_deploy.go    8
+orphanNodeIssues    internal/nodered/validate_deploy.go    5
+ownerlessNodeIssue    internal/nodered/validate_deploy.go    6
+validateLinkShapes    internal/nodered/validate.go    8
+missingSubflowIssues    internal/nodered/validate_deploy.go    4
+duplicateIDIssues    internal/nodered/validate_deploy.go    5
+restoreFlowsLocked    internal/nodered/flows.go    4
+subflowDefinitionPortIssues    internal/nodered/validate_deploy.go    7
+portTargetIssues    internal/nodered/validate_deploy.go    9
+ownerRuleIssues    internal/nodered/validate_deploy.go    4
+newConfigIndex    internal/nodered/validate_deploy.go    8
+validateTabEntries    internal/nodered/validate_deploy.go    8
+withoutLinkOutWires    internal/nodered/validate_deploy.go    8
+linksShapeIssues    internal/nodered/validate_deploy.go    4
+decodeConfigEntry    internal/nodered/validate_deploy.go    5
+effectiveConfigItems    internal/nodered/validate_deploy.go    5
+jsTruthy    internal/nodered/validate_deploy.go    6
+setFlows    internal/nodered/settings.go    8
+hasTabEntry    internal/nodered/settings.go    4
+RestoreFlows    internal/nodered/flows.go    6

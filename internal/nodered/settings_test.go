@@ -154,8 +154,12 @@ func TestSetFlows_RejectsNonTabOnlyArray(t *testing.T) {
 
 // TestSetFlows_AcceptsArrayWithAtLeastOneTab pins the happy path: as
 // soon as one tab entry is present, the rest of the array may be
-// anything (orphan nodes, subflow definitions, ...) and the deploy
-// must reach the runtime.
+// anything the guard accepts (nodes of that tab, subflow definitions,
+// ...) and the deploy must reach the runtime.
+//
+// The node below belongs to the tab. A canvas node with no z at all is
+// a different shape: the runtime drops such a node, so the guard
+// refuses it (issue #334).
 func TestSetFlows_AcceptsArrayWithAtLeastOneTab(t *testing.T) {
 	dir := t.TempDir()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -175,7 +179,7 @@ func TestSetFlows_AcceptsArrayWithAtLeastOneTab(t *testing.T) {
 		t.Fatal(err)
 	}
 	flows := []json.RawMessage{
-		json.RawMessage(`{"id":"orphan","type":"inject","name":"o","topic":"t","payload":"p","payloadType":"str","repeat":"","crontab":"","once":false,"onceDelay":0.1,"x":140,"y":140,"wires":[]}`),
+		json.RawMessage(`{"id":"orphan","type":"inject","z":"tabA","name":"o","topic":"t","payload":"p","payloadType":"str","repeat":"","crontab":"","once":false,"onceDelay":0.1,"x":140,"y":140,"wires":[]}`),
 		json.RawMessage(`{"id":"tabA","type":"tab","label":"X","nodes":[]}`),
 	}
 	if err := c.SetFlows(context.Background(), flows); err != nil {

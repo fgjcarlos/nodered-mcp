@@ -572,11 +572,30 @@ func (s *Server) handleSetFlows(ctx context.Context, req mcp.CallToolRequest) (*
 	}
 	slog.Debug("tool: set_flows")
 
-	if err := s.nrClient.SetFlows(ctx, flows); err != nil {
+	// Issue #334: the configuration is validated as the whole it is. The
+	// force argument is the explicit way to deploy a configuration the
+	// guard refuses — the rules are the repository's and one of them is
+	// stricter than the runtime — and nothing reaches the unchecked path
+	// by accident.
+	force := req.GetBool("force", false)
+	deploy := s.nrClient.SetFlows
+	if force {
+		deploy = s.nrClient.SetFlowsUnchecked
+	}
+	if err := deploy(ctx, flows); err != nil {
 		slog.Error("set_flows failed", "error", err)
+		if res, refused := configValidationResult(err,
+			"Fix the references and deploy again, or pass force=true to deploy this "+
+				"configuration without validating its references."); refused {
+			return res, nil
+		}
 		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
-	return mcp.NewToolResultText("Flows deployed (a backup was taken first)."), nil
+	notice := ""
+	if force {
+		notice = " The configuration was deployed WITHOUT validating its references, as force=true asked."
+	}
+	return mcp.NewToolResultText("Flows deployed (a backup was taken first)." + notice), nil
 }
 
 // handleSearchNodes queries the public npm registry for node-red-* modules.
