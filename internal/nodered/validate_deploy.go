@@ -376,7 +376,7 @@ func (ix *configIndex) ownerDocument(ownerID string) (RawFlow, bool) {
 	nodes := []json.RawMessage{}
 	configs := []json.RawMessage{}
 	for _, index := range ix.members[ownerID] {
-		item := withoutLinkOutWires(ix.raw(index))
+		item := ix.raw(index)
 		if hasCanvasCoords(item) {
 			nodes = append(nodes, item)
 			continue
@@ -728,42 +728,6 @@ func subflowInstanceType(typ string) (string, bool) {
 		return "", false
 	}
 	return id, true
-}
-
-// withoutLinkOutWires returns the node with its "wires" removed when the
-// runtime would recompute them.
-//
-// The runtime owns the wires of a "link out" node: when the node carries a
-// "links" array, parseConfig replaces its wires with the link targets
-// (@node-red/runtime/lib/flows/util.js). A wire of a link out that
-// points nowhere is a value the runtime overwrites, not a dangling wire,
-// and checking it would refuse legitimate link topologies.
-//
-// The test is the runtime's: it checks the field for truthiness, so a
-// "links" field of null (or of any other falsy value) leaves the wires
-// alone and they are checked like any other node's.
-func withoutLinkOutWires(item json.RawMessage) json.RawMessage {
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(item, &m); err != nil {
-		return item
-	}
-	typ, ok := rawString(m["type"])
-	if !ok || typ != "link out" {
-		return item
-	}
-	links, ok := m["links"]
-	if !ok || !jsTruthy(links) {
-		return item
-	}
-	if _, ok := m["wires"]; !ok {
-		return item
-	}
-	delete(m, "wires")
-	out, err := json.Marshal(m)
-	if err != nil {
-		return item
-	}
-	return out
 }
 
 // jsTruthy reports the JavaScript truthiness of a JSON value. It is how

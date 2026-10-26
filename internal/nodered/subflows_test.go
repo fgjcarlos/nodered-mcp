@@ -617,6 +617,7 @@ func TestInstantiateSubflow_HappyPath(t *testing.T) {
 		case r.Method == "GET" && r.URL.Path == "/flows":
 			// The runtime serves the subflow definition in the same
 			// flat array as the tabs, so the fixture carries it.
+			getPath = r.URL.Path
 			_, _ = w.Write(testRevisionedTabWith(t, string(flowBody), sfADefinition))
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
@@ -631,8 +632,12 @@ func TestInstantiateSubflow_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InstantiateSubflow: %v", err)
 	}
-	if getPath != "/flow/tab_x" {
-		t.Errorf("expected GET /flow/tab_x for the read step, got %q", getPath)
+	// The read step is the revisioned snapshot the deployment is built on
+	// (issue #345): the base of the edit and the revision come from the
+	// same response, so a change that lands in between is refused with a
+	// conflict instead of being overwritten.
+	if getPath != "/flows" {
+		t.Errorf("expected GET /flows for the read step, got %q", getPath)
 	}
 	if putPath != "/flows" {
 		t.Errorf("expected POST /flows for the write, got %q", putPath)

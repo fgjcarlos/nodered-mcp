@@ -124,7 +124,9 @@ func TestHandleGetFlow_MissingIDIsError(t *testing.T) {
 func TestHandleUpdateNode_PartialPatch(t *testing.T) {
 	// UpdateNode reads the nested tab, then deploys a revisioned flat config.
 	const flow = `{"id":"tab1","label":"Home","nodes":[{"id":"n1","type":"inject","z":"tab1","name":"tick","wires":[]}]}`
-	const flowsList = `{"rev":"r","flows":[{"id":"tab1","type":"tab","disabled":false}]}`
+	// The flat array is the whole configuration: the tab and the nodes
+	// that belong to it. The granular edits are built on it (issue #345).
+	const flowsList = `{"rev":"r","flows":[{"id":"tab1","type":"tab","disabled":false},{"id":"n1","type":"inject","z":"tab1","name":"tick","wires":[]}]}`
 	s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/flows":
@@ -183,7 +185,9 @@ func TestHandleUpdateNode_PropagatesUpstreamError(t *testing.T) {
 func TestHandleDeleteNode_RoundTrip(t *testing.T) {
 	// editFlow: nested GET, revisioned snapshot, then POST /flows.
 	const flow = `{"id":"tab1","label":"Home","nodes":[{"id":"n1","type":"inject","z":"tab1","name":"tick","wires":[]}]}`
-	const flowsList = `{"rev":"r","flows":[{"id":"tab1","type":"tab","disabled":false}]}`
+	// The flat array is the whole configuration: the tab and the nodes
+	// that belong to it. The granular edits are built on it (issue #345).
+	const flowsList = `{"rev":"r","flows":[{"id":"tab1","type":"tab","disabled":false},{"id":"n1","type":"inject","z":"tab1","name":"tick","wires":[]}]}`
 	s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/flows":

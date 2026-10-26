@@ -200,6 +200,13 @@ func validateWires(nodes, configs []map[string]json.RawMessage, ids map[string]b
 			if !ok {
 				continue
 			}
+			// The runtime owns the wires of a link out that carries a
+			// "links" array: it recomputes them from the links, so what
+			// the file carries is a value the runtime overwrites, not a
+			// dangling wire.
+			if linkOutOwnsWires(node) {
+				continue
+			}
 			wires, err := decodeWires(node)
 			if err != nil {
 				// decodeWires refused the shape (e.g. wires is a JSON
@@ -235,6 +242,31 @@ func validateWires(nodes, configs []map[string]json.RawMessage, ids map[string]b
 		}
 	}
 	return issues
+}
+
+// linkOutOwnsWires reports whether the runtime recomputes the wires of this
+// node.
+//
+// The runtime owns the wires of a "link out" node: when the node carries a
+// "links" array, parseConfig replaces its wires with the link targets
+// (@node-red/runtime/lib/flows/util.js). A wire of a link out that points
+// nowhere is a value the runtime overwrites, not a dangling wire, and
+// checking it would refuse legitimate link topologies.
+//
+// The test is the runtime's: it checks the field for truthiness, so a
+// "links" field of null (or of any other falsy value) leaves the wires
+// alone and they are checked like any other node's.
+func linkOutOwnsWires(node map[string]json.RawMessage) bool {
+	typ, ok := rawString(node["type"])
+	if !ok || typ != "link out" {
+		return false
+	}
+	links, ok := node["links"]
+	if !ok || !jsTruthy(links) {
+		return false
+	}
+	_, hasWires := node["wires"]
+	return hasWires
 }
 
 // validateLinkShapes reports the link nodes whose "links" field is not an
