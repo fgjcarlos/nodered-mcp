@@ -259,3 +259,97 @@ func TestCreateSubflow_RefusesDefinitionWithDanglingPort(t *testing.T) {
 		t.Errorf("expected the error to name the missing node: %v", err)
 	}
 }
+
+// The escape hatch of set_flows: a configuration the guard refuses can
+// be deployed on purpose, and the client says so.
+func TestSetFlowsUnchecked_DeploysAConfigurationThatDoesNotValidate(t *testing.T) {
+	var posted bool
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			_, _ = w.Write([]byte(`[{"id":"cur","type":"tab","label":"Current"}]`))
+		case r.Method == "POST" && r.URL.Path == "/flows":
+			posted = true
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	})
+	flows := mustFlowArray(t, `[
+	  {"id":"t1","type":"tab","label":"Home"},
+	  {"id":"n1","type":"inject","z":"t1","x":140,"y":140,"wires":[["ghost"]]}
+	]`)
+	if err := c.SetFlowsUnchecked(context.Background(), flows); err != nil {
+		t.Fatalf("SetFlowsUnchecked: %v", err)
+	}
+	if !posted {
+		t.Error("the configuration was not deployed")
+	}
+}
+
+// The node-type policy is not skipped by the escape hatch: a denied
+// type is a security refusal, not a reference problem.
+func TestSetFlowsUnchecked_StillRefusesADeniedNodeType(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("the runtime was contacted: %s %s", r.Method, r.URL.Path)
+	})
+	c.SetNodePolicy(func(nodeType string) bool { return nodeType != "exec" })
+	flows := mustFlowArray(t, `[
+	  {"id":"t1","type":"tab","label":"Home"},
+	  {"id":"e1","type":"exec","z":"t1","x":140,"y":140,"wires":[]}
+	]`)
+	if err := c.SetFlowsUnchecked(context.Background(), flows); err == nil {
+		t.Fatal("expected SetFlowsUnchecked to refuse a denied node type, got nil")
+	}
+}
+
+// A backup with no tab at all would leave the runtime with no tabs, so
+// the restore refuses it the same way a deployment does.
+func TestRestoreFlows_RefusesABackupWithNoTab(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("the runtime was contacted for a backup that was refused: %s %s", r.Method, r.URL.Path)
+	})
+	err := c.RestoreFlows(context.Background(), RawFlow(`[
+	  {"id":"n1","type":"inject","z":"t1","x":140,"y":140,"wires":[]}
+	]`))
+	if err == nil {
+		t.Fatal("expected RestoreFlows to refuse a backup with no tab, got nil")
+	}
+	if !strings.Contains(err.Error(), "tab") {
+		t.Errorf("expected the error to name the missing tab: %v", err)
+	}
+}
+
+// An empty backup would empty the runtime.
+func TestRestoreFlows_RefusesAnEmptyBackup(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("the runtime was contacted for a backup that was refused: %s %s", r.Method, r.URL.Path)
+	})
+	if err := c.RestoreFlows(context.Background(), RawFlow(`[]`)); err == nil {
+		t.Fatal("expected RestoreFlows to refuse an empty backup, got nil")
+	}
+}
+
+// A write of a single tab is judged in the context of the whole
+// configuration: an instance of a subflow whose definition is not there
+// would leave the runtime with a node type it cannot resolve.
+func TestUpdateFlow_RefusesATabWithAnInstanceWithoutDefinition(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && r.URL.Path == "/flows" {
+			_, _ = w.Write([]byte(`{"rev":"r","flows":[{"id":"t1","type":"tab","label":"Home"}]}`))
+			return
+		}
+		t.Errorf("the runtime was contacted for a tab that was refused: %s %s", r.Method, r.URL.Path)
+	})
+	tab := RawFlow(`{
+	  "id":"t1","label":"Home",
+	  "nodes":[{"id":"inst","type":"subflow:ghost","z":"t1","x":140,"y":140,"wires":[]}]
+	}`)
+	err := c.UpdateFlow(context.Background(), "t1", tab)
+	if err == nil {
+		t.Fatal("expected UpdateFlow to refuse an instance without a definition, got nil")
+	}
+	if !strings.Contains(err.Error(), "ghost") {
+		t.Errorf("expected the error to name the missing subflow: %v", err)
+	}
+}

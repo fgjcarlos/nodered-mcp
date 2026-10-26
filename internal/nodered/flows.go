@@ -242,6 +242,25 @@ func (c *Client) RestoreFlows(ctx context.Context, backup RawFlow) error {
 	if arr == nil {
 		return errors.New("backup does not contain a recognizable flow array")
 	}
+	// A backup taken before the policy changed can hold a type that is
+	// denied now, and restoring it would reintroduce the exact RCE path
+	// the policy closes. The check happens before the snapshot, so a
+	// rejected restore costs zero runtime requests — and before the
+	// other rules, because a node type that is denied is a more urgent
+	// thing to say than a wire that points nowhere.
+	if err := c.deniedNodeTypeInFlows(arr); err != nil {
+		return err
+	}
+	// Issue #334: the backup is judged as the configuration it would
+	// install, with the same rules a full deployment is judged by — a
+	// backup that carries no tab at all would leave the runtime with no
+	// tabs, exactly as a tab-less deployment would.
+	if len(arr) == 0 {
+		return errors.New("backup does not contain any flow entry")
+	}
+	if !hasTabEntry(arr) {
+		return errors.New(`backup must contain at least one element with type "tab"; received only non-tab entries`)
+	}
 	if err := validateEffectiveConfig(arr); err != nil {
 		return err
 	}
@@ -263,19 +282,17 @@ func (c *Client) RestoreFlowsUnchecked(ctx context.Context, backup RawFlow) erro
 	if arr == nil {
 		return errors.New("backup does not contain a recognizable flow array")
 	}
+	// The node-type policy is not skipped by the unchecked path: it is a
+	// security policy, not a rule about the references of the backup.
+	if err := c.deniedNodeTypeInFlows(arr); err != nil {
+		return err
+	}
 	return c.restoreFlowsLocked(ctx, arr)
 }
 
 // restoreFlowsLocked deploys a flow array as a full configuration. The
 // caller holds the write lock.
 func (c *Client) restoreFlowsLocked(ctx context.Context, arr []json.RawMessage) error {
-	// A backup taken before the policy changed can hold a type that is
-	// denied now, and restoring it would reintroduce the exact RCE path
-	// the policy closes. The check happens before the snapshot, so a
-	// rejected restore costs zero runtime requests.
-	if err := c.deniedNodeTypeInFlows(arr); err != nil {
-		return err
-	}
 	body, err := json.Marshal(arr)
 	if err != nil {
 		return fmt.Errorf("re-encoding backup: %w", err)

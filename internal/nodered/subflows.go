@@ -249,6 +249,15 @@ func (c *Client) UpdateSubflow(ctx context.Context, id string, subflow json.RawM
 	if err := c.deniedNodeType(prepared); err != nil {
 		return err
 	}
+	// Force the id in the body to match the path argument. The editor
+	// does the same: the id is a path component, not a body field.
+	//
+	// The check comes before the guard below: a body whose id does not
+	// match the path id is a typo, and the guard would report it as a
+	// topology problem instead.
+	if !idMatchesBody(prepared, id) {
+		return fmt.Errorf("subflow id in body does not match the path id %q", id)
+	}
 	// Issue #334: the definition shares the guard the tab write path
 	// applies — the same wires rule and the same owner rule — so a
 	// subflow cannot be written with a topology the tab path would
@@ -261,11 +270,6 @@ func (c *Client) UpdateSubflow(ctx context.Context, id string, subflow json.RawM
 	}
 	if err := validateSubflowPorts(prepared); err != nil {
 		return err
-	}
-	// Force the id in the body to match the path argument. The editor
-	// does the same: the id is a path component, not a body field.
-	if !idMatchesBody(prepared, id) {
-		return fmt.Errorf("subflow id in body does not match the path id %q", id)
 	}
 
 	existing, configs, err := c.fetchGlobalSubflows(ctx)

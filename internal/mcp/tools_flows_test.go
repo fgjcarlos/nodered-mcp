@@ -436,7 +436,9 @@ func TestHandleInstantiateSubflow_RoundTrip(t *testing.T) {
 	// new instance via editFlow (nested GET + revisioned POST /flows).
 	const globalEnvelope = `{"subflows":[{"id":"sf1","name":"Helper"}],"configs":[]}`
 	const flow = `{"id":"tab1","type":"tab","nodes":[]}`
-	const flowsList = `{"rev":"r","flows":[{"id":"tab1","type":"tab","disabled":false}]}`
+	// The runtime serves the subflow definition in the same flat array
+	// as the tabs, so the fixture carries it.
+	const flowsList = `{"rev":"r","flows":[{"id":"tab1","type":"tab","disabled":false},{"id":"sf1","type":"subflow","name":"Helper","in":[],"out":[]}]}`
 	s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/flows":
@@ -467,7 +469,9 @@ func TestHandleInstantiateSubflow_ParamsOptional(t *testing.T) {
 	// must not require it. Same /flow/global + /flow/{id} + /flows trio.
 	const globalEnvelope = `{"subflows":[{"id":"sf1","name":"Helper"}],"configs":[]}`
 	const flow = `{"id":"tab1","type":"tab","nodes":[]}`
-	const flowsList = `{"rev":"r","flows":[{"id":"tab1","type":"tab","disabled":false}]}`
+	// The runtime serves the subflow definition in the same flat array
+	// as the tabs, so the fixture carries it.
+	const flowsList = `{"rev":"r","flows":[{"id":"tab1","type":"tab","disabled":false},{"id":"sf1","type":"subflow","name":"Helper","in":[],"out":[]}]}`
 	s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/flows":

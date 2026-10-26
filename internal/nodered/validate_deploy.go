@@ -3,6 +3,7 @@ package nodered
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -22,9 +23,16 @@ import (
 // The rules below are the ones a full deployment can break, and each of
 // them is a reference that does not resolve:
 //
-//   - a wire that names a node outside the owner (the tab or the subflow)
-//     never delivers: the runtime resolves wire targets inside the owner,
-//     so the message is dropped;
+//   - a wire that names no node of the owner it belongs to. This is the
+//     repository's rule, shared with the tab write path, and it is a rule
+//     rather than a fact about the runtime: the runtime does resolve a
+//     wire across tabs (Flow.getNode falls back to the parent and the
+//     global lookup scans every active flow), so such a wire delivers.
+//     The editor never creates one, and both write paths refuse it, so
+//     the configuration an operator installs and the configuration they
+//     can then edit are judged by the same rule. A deployment of a
+//     configuration that carries one is still possible: it is what the
+//     explicit force argument of set_flows is for.
 //   - a node whose "z" names no tab and no subflow lands in a phantom
 //     tab, so the node runs somewhere nobody asked for;
 //   - two entries with the same id: the runtime keys every node by its
@@ -39,7 +47,7 @@ import (
 // runtime owns them and they are legitimate:
 //
 //   - link nodes. The runtime recomputes the wires of a "link out" node
-//     from the "links" arrays, so a wire of a link out that points
+//     from the "links" array, so a wire of a link out that points
 //     nowhere is a value the runtime overwrites, not a dangling wire. A
 //     link in may point at a link out in another tab: that is what a
 //     link is for.
@@ -66,6 +74,11 @@ const (
 	// "in" or an "out" — whose wire names a node that is not in the
 	// definition.
 	IssueDanglingSubflowPort FlowIssueKind = "dangling_subflow_port"
+	// IssueInvalidLinks is a link node whose "links" field is not an
+	// array. The runtime iterates that field with forEach when it parses
+	// the configuration, so a truthy value that is not an array stops the
+	// deploy with a TypeError.
+	IssueInvalidLinks FlowIssueKind = "invalid_links"
 )
 
 // ConfigValidationError reports the structural issues that stopped a
@@ -133,6 +146,12 @@ func effectiveConfigItems(raw RawFlow) ([]json.RawMessage, bool) {
 	return nil, false
 }
 
+// effectiveConfigIssues runs the effective-configuration rules over the
+// flat entries of a configuration.
+func effectiveConfigIssues(items []json.RawMessage) []FlowIssue {
+	return newConfigIndex(items).issues()
+}
+
 // validateEffectiveConfig refuses a configuration whose references do not
 // resolve. The write paths call it before they snapshot anything and
 // before they contact the runtime.
@@ -144,33 +163,80 @@ func validateEffectiveConfig(items []json.RawMessage) error {
 	return &ConfigValidationError{Issues: issues}
 }
 
-// effectiveConfigIssues runs the effective-configuration rules over the
-// flat entries of a configuration.
-func effectiveConfigIssues(items []json.RawMessage) []FlowIssue {
+// validateTabEntries judges the entries of one tab in the context of the
+// whole configuration. It is what a write of a single tab needs: the
+// entries of that tab are the caller's, and the rest of the
+// configuration is the runtime's.
+//
+// The rules are the ones that need the whole configuration to judge: an
+// instance of a subflow whose definition is not there (the runtime would
+// install a node type it cannot resolve and stop), and an id that is
+// already used by another entry (the runtime keys every node by its id).
+func validateTabEntries(items []json.RawMessage, tabID string) error {
+	ix := newConfigIndex(items)
 	var issues []FlowIssue
-	owners, subflows := indexOwners(items)
-	issues = append(issues, duplicateIDIssues(items)...)
-	issues = append(issues, ownerRuleIssues(items, owners)...)
-	issues = append(issues, orphanNodeIssues(items, owners)...)
-	issues = append(issues, missingSubflowIssues(items, subflows)...)
-	return issues
-}
-
-// ownerRuleIssues runs the rules that are judged per owner — a tab or a
-// subflow definition — over every owner of the configuration.
-func ownerRuleIssues(items []json.RawMessage, owners []ownerRef) []FlowIssue {
-	var issues []FlowIssue
-	for _, owner := range owners {
-		doc, ok := ownerDocument(items, owner.id)
-		if !ok {
+	for _, entry := range ix.entries {
+		if entry.Z != tabID {
 			continue
 		}
-		issues = append(issues, ownerIssues(doc)...)
-		if owner.kind == "subflow" {
-			issues = append(issues, flatSubflowPortIssues(owner.id, items)...)
+		if entry.Type == "link in" || entry.Type == "link out" {
+			issues = append(issues, ix.linksShapeIssue(entry)...)
+		}
+		if id, ok := subflowInstanceType(entry.TypeJS); ok && !ix.subflows[id] {
+			issues = append(issues, missingSubflowIssue(entry, id))
 		}
 	}
-	return issues
+	if len(issues) == 0 {
+		return nil
+	}
+	return &ConfigValidationError{Issues: issues}
+}
+
+// configEntry is one flat entry of a configuration, read the way the
+// runtime reads it: a string field is a string, and a field of another
+// type is not that field at all.
+type configEntry struct {
+	Index   int
+	ID      string
+	HasID   bool
+	Type    string
+	HasType bool
+	// TypeJS is the type the runtime compares against, after the
+	// JavaScript String() coercion (see jsTypeString). The runtime
+	// matches a node against /^subflow:(.+)$/ with that value, so a
+	// type of ["subflow:x"] is the reference it looks like.
+	TypeJS    string
+	Z         string
+	HasZ      bool
+	ZIsString bool
+	// ZRaw is the raw "z" value, kept so a message can quote what it
+	// actually is when the value is not a string.
+	ZRaw json.RawMessage
+}
+
+// decodeConfigEntry reads the id, the type and the owner reference of one
+// flat configuration entry.
+func decodeConfigEntry(raw json.RawMessage, index int) configEntry {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return configEntry{Index: index}
+	}
+	entry := configEntry{Index: index}
+	if v, ok := m["id"]; ok {
+		entry.HasID = true
+		entry.ID, _ = rawString(v)
+	}
+	if v, ok := m["type"]; ok {
+		entry.HasType = true
+		entry.Type, _ = rawString(v)
+		entry.TypeJS, _ = jsTypeString(v)
+	}
+	if v, ok := m["z"]; ok {
+		entry.HasZ = true
+		entry.ZRaw = v
+		entry.Z, entry.ZIsString = rawString(v)
+	}
+	return entry
 }
 
 // ownerRef is a tab or a subflow definition in the configuration.
@@ -179,38 +245,98 @@ type ownerRef struct {
 	kind string
 }
 
-// indexOwners lists the tabs and the subflow definitions of the
-// configuration, in document order, together with the set of subflow
-// definition ids.
+// configIndex is a configuration read once: the owners it declares, the
+// entries by id, and the members of every owner.
 //
-// The runtime tells a tab from a subflow definition with a strict
-// comparison (n.type === 'tab'), so the type is read as a plain string
-// here too: a type that only looks like a tab after a coercion is not
-// one for the runtime either.
-func indexOwners(items []json.RawMessage) ([]ownerRef, map[string]bool) {
-	var owners []ownerRef
-	subflows := map[string]bool{}
-	for _, item := range items {
-		entry := decodeConfigEntry(item)
+// The index exists because the rules ask the same questions of the same
+// entries many times. Reading the array once and answering from the index
+// keeps the validation linear in the size of the configuration: a
+// configuration of ten thousand entries used to cost seconds.
+type configIndex struct {
+	raws     []json.RawMessage
+	entries  []configEntry
+	owners   []ownerRef
+	subflows map[string]bool
+	ids      map[string]bool
+	members  map[string][]int
+}
+
+// newConfigIndex reads a configuration once.
+func newConfigIndex(items []json.RawMessage) *configIndex {
+	ix := &configIndex{
+		subflows: map[string]bool{},
+		ids:      map[string]bool{},
+		members:  map[string][]int{},
+	}
+	for i, item := range items {
+		entry := decodeConfigEntry(item, i)
+		ix.raws = append(ix.raws, item)
+		ix.entries = append(ix.entries, entry)
+		if entry.HasID && entry.ID != "" {
+			ix.ids[entry.ID] = true
+		}
 		switch entry.Type {
-		case "tab":
-			owners = append(owners, ownerRef{id: entry.ID, kind: "tab"})
-		case "subflow":
-			owners = append(owners, ownerRef{id: entry.ID, kind: "subflow"})
-			subflows[entry.ID] = true
+		case "tab", "subflow":
+			// The runtime tells a tab from a subflow definition with a
+			// strict comparison, and it keys its own maps by id, so two
+			// owners with the same id are one owner: the duplicate is
+			// reported by the duplicate-id rule, not twice over.
+			if _, seen := ix.ownerIndex(entry.ID); !seen {
+				ix.owners = append(ix.owners, ownerRef{id: entry.ID, kind: entry.Type})
+			}
+			if entry.Type == "subflow" {
+				ix.subflows[entry.ID] = true
+			}
+			continue
+		}
+		if entry.Z != "" {
+			ix.members[entry.Z] = append(ix.members[entry.Z], entry.Index)
 		}
 	}
-	return owners, subflows
+	return ix
+}
+
+// ownerIndex returns the position of an owner in the index.
+func (ix *configIndex) ownerIndex(id string) (int, bool) {
+	for i, owner := range ix.owners {
+		if owner.id == id {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// issues runs every effective-configuration rule over the configuration.
+func (ix *configIndex) issues() []FlowIssue {
+	var issues []FlowIssue
+	issues = append(issues, ix.duplicateIDIssues()...)
+	issues = append(issues, ix.ownerRuleIssues()...)
+	issues = append(issues, ix.orphanNodeIssues()...)
+	issues = append(issues, ix.missingSubflowIssues()...)
+	issues = append(issues, ix.linksShapeIssues()...)
+	return issues
+}
+
+// linksShapeIssues reports the link nodes whose "links" field is not an
+// array.
+func (ix *configIndex) linksShapeIssues() []FlowIssue {
+	var issues []FlowIssue
+	for _, entry := range ix.entries {
+		if entry.Type != "link in" && entry.Type != "link out" {
+			continue
+		}
+		issues = append(issues, ix.linksShapeIssue(entry)...)
+	}
+	return issues
 }
 
 // duplicateIDIssues reports the entries that share an id. The runtime
 // keys every node by its id, so the last entry with an id wins and the
 // earlier ones are dropped without a word.
-func duplicateIDIssues(items []json.RawMessage) []FlowIssue {
+func (ix *configIndex) duplicateIDIssues() []FlowIssue {
 	var issues []FlowIssue
 	seen := map[string]bool{}
-	for _, item := range items {
-		entry := decodeConfigEntry(item)
+	for _, entry := range ix.entries {
 		if !entry.HasID || entry.ID == "" {
 			continue
 		}
@@ -226,111 +352,21 @@ func duplicateIDIssues(items []json.RawMessage) []FlowIssue {
 	return issues
 }
 
-// ownerIssues runs the tab-level rules over one owner's document.
-//
-// The duplicate-id rule is skipped here: the whole-configuration pass
-// reports it, and it also covers the cross-owner case a per-document
-// rule cannot see.
-func ownerIssues(doc RawFlow) []FlowIssue {
-	var out []FlowIssue
-	for _, issue := range ValidateFlow(doc) {
-		if issue.Kind == IssueDuplicateID {
-			continue
-		}
-		out = append(out, issue)
-	}
-	return out
-}
-
-// orphanNodeIssues reports the nodes whose "z" names no tab and no
-// subflow definition in the configuration. The runtime invents a tab for
-// such a node (parseConfig creates one for an unknown z), so the node
-// runs outside the flow that is being deployed.
-func orphanNodeIssues(items []json.RawMessage, owners []ownerRef) []FlowIssue {
-	known := map[string]bool{}
-	for _, owner := range owners {
-		known[owner.id] = true
-	}
+// ownerRuleIssues runs the rules that are judged per owner — a tab or a
+// subflow definition — over every owner of the configuration.
+func (ix *configIndex) ownerRuleIssues() []FlowIssue {
 	var issues []FlowIssue
-	for _, item := range items {
-		entry := decodeConfigEntry(item)
-		switch entry.Type {
-		case "tab", "subflow", "group":
-			continue
-		}
-		if !entry.HasZ {
-			// No z at all: the runtime files the node at global scope.
-			continue
-		}
-		if !entry.ZIsString {
-			issues = append(issues, orphanNodeIssue(entry, ""))
-			continue
-		}
-		if entry.Z == "" || known[entry.Z] {
-			continue
-		}
-		issues = append(issues, orphanNodeIssue(entry, entry.Z))
-	}
-	return issues
-}
-
-// orphanNodeIssue builds the issue for a node that belongs to no owner.
-func orphanNodeIssue(entry configEntry, z string) FlowIssue {
-	return FlowIssue{
-		Kind:    IssueOrphanNode,
-		NodeID:  entry.ID,
-		Target:  z,
-		Message: fmt.Sprintf("node %q references z=%q, which is neither a tab nor a subflow definition in this configuration; the runtime invents a tab for it, so the node runs outside the flow you are deploying", entry.ID, z),
-	}
-}
-
-// missingSubflowIssues reports the instances of a subflow whose
-// definition is not in the configuration. A full deployment replaces the
-// whole configuration, so such an instance would be left with a node type
-// the runtime cannot resolve — and a runtime with a missing node type
-// refuses to start the flows at all.
-func missingSubflowIssues(items []json.RawMessage, subflows map[string]bool) []FlowIssue {
-	var issues []FlowIssue
-	for _, item := range items {
-		var m map[string]json.RawMessage
-		if err := json.Unmarshal(item, &m); err != nil {
-			continue
-		}
-		raw, ok := m["type"]
+	for _, owner := range ix.owners {
+		doc, ok := ix.ownerDocument(owner.id)
 		if !ok {
 			continue
 		}
-		id, ok := subflowInstanceID(raw)
-		if !ok || subflows[id] {
-			continue
+		issues = append(issues, ownerIssues(doc)...)
+		if owner.kind == "subflow" {
+			issues = append(issues, ix.subflowPortIssues(owner.id)...)
 		}
-		entry := decodeConfigEntry(item)
-		issues = append(issues, FlowIssue{
-			Kind:    IssueMissingSubflow,
-			NodeID:  entry.ID,
-			Target:  id,
-			Message: fmt.Sprintf("node %q is an instance of subflow %q, but this configuration carries no definition for it; a full deployment would leave the runtime with a node type it cannot resolve, and it then refuses to start the flows", entry.ID, id),
-		})
 	}
 	return issues
-}
-
-// subflowInstanceID returns the subflow id a node's type refers to, the
-// way the runtime reads it: the type is coerced with the JavaScript
-// String() and matched against /^subflow:(.+)$/ (see jsTypeString).
-func subflowInstanceID(raw json.RawMessage) (string, bool) {
-	typ, ok := jsTypeString(raw)
-	if !ok {
-		return "", false
-	}
-	if !strings.HasPrefix(typ, "subflow:") {
-		return "", false
-	}
-	id := strings.TrimPrefix(typ, "subflow:")
-	if id == "" {
-		return "", false
-	}
-	return id, true
 }
 
 // ownerDocument builds the nested document of one owner — a tab or a
@@ -339,20 +375,13 @@ func subflowInstanceID(raw json.RawMessage) (string, bool) {
 // The runtime splits the entries the same way: an entry belongs to the
 // tab or the subflow its "z" names, and the entries that carry canvas
 // coordinates are the ones that run. The rest are configuration nodes.
-func ownerDocument(items []json.RawMessage, ownerID string) (RawFlow, bool) {
+func (ix *configIndex) ownerDocument(ownerID string) (RawFlow, bool) {
 	nodes := []json.RawMessage{}
 	configs := []json.RawMessage{}
-	for _, item := range items {
-		entry := decodeConfigEntry(item)
-		if entry.Z != ownerID {
-			continue
-		}
-		switch entry.Type {
-		case "tab", "subflow":
-			continue
-		}
+	for _, index := range ix.members[ownerID] {
+		item := withoutLinkOutWires(ix.raw(index))
 		if hasCanvasCoords(item) {
-			nodes = append(nodes, withoutLinkOutWires(item))
+			nodes = append(nodes, item)
 			continue
 		}
 		configs = append(configs, item)
@@ -381,57 +410,135 @@ func ownerDocument(items []json.RawMessage, ownerID string) (RawFlow, bool) {
 	return RawFlow(out), true
 }
 
-// withoutLinkOutWires returns the node with its "wires" removed when the
-// runtime would recompute them.
-//
-// The runtime owns the wires of a "link out" node: when the node carries
-// a "links" array, parseConfig replaces its wires with the link targets
-// (@node-red/runtime/lib/flows/util.js). A wire of a link out that
-// points nowhere is a value the runtime overwrites, not a dangling wire,
-// and checking it would refuse legitimate link topologies.
-func withoutLinkOutWires(item json.RawMessage) json.RawMessage {
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(item, &m); err != nil {
-		return item
-	}
-	typ, ok := rawString(m["type"])
-	if !ok || typ != "link out" {
-		return item
-	}
-	if _, ok := m["links"]; !ok {
-		return item
-	}
-	if _, ok := m["wires"]; !ok {
-		return item
-	}
-	delete(m, "wires")
-	out, err := json.Marshal(m)
-	if err != nil {
-		return item
-	}
-	return out
+// raw returns the entry at the given index.
+func (ix *configIndex) raw(index int) json.RawMessage {
+	return ix.raws[index]
 }
 
-// flatSubflowPortIssues checks the ports of a subflow definition in a
-// flat configuration, where the members of the definition are the entries
-// that name it as their owner.
-func flatSubflowPortIssues(defID string, items []json.RawMessage) []FlowIssue {
-	members := map[string]bool{}
-	var def json.RawMessage
-	for _, item := range items {
-		entry := decodeConfigEntry(item)
-		if entry.Type == "subflow" && entry.ID == defID {
-			def = item
+// orphanNodeIssues reports the nodes whose "z" names no tab and no
+// subflow definition in the configuration. The runtime invents a tab for
+// such a node (parseConfig creates one for an unknown z), so the node
+// runs outside the flow that is being deployed.
+func (ix *configIndex) orphanNodeIssues() []FlowIssue {
+	known := map[string]bool{}
+	for _, owner := range ix.owners {
+		known[owner.id] = true
+	}
+	var issues []FlowIssue
+	for _, entry := range ix.entries {
+		switch entry.Type {
+		case "tab", "subflow", "group":
 			continue
 		}
-		if entry.Z == defID && entry.ID != "" {
-			members[entry.ID] = true
+		if !entry.HasZ {
+			// No z at all: the runtime files the node at global scope.
+			continue
 		}
+		if !entry.ZIsString {
+			issues = append(issues, orphanNodeIssue(entry, entry.ZRaw))
+			continue
+		}
+		if entry.Z == "" || known[entry.Z] {
+			continue
+		}
+		issues = append(issues, orphanNodeIssue(entry, entry.ZRaw))
 	}
-	if def == nil {
+	return issues
+}
+
+// orphanNodeIssue builds the issue for a node that belongs to no owner.
+func orphanNodeIssue(entry configEntry, z json.RawMessage) FlowIssue {
+	return FlowIssue{
+		Kind:    IssueOrphanNode,
+		NodeID:  entry.ID,
+		Target:  entry.Z,
+		Message: fmt.Sprintf("node %q references z=%s, which is neither a tab nor a subflow definition in this configuration; the runtime invents a tab for it, so the node runs outside the flow you are deploying", entry.ID, jsonValueText(z)),
+	}
+}
+
+// missingSubflowIssues reports the instances of a subflow whose
+// definition is not in the configuration. A full deployment replaces the
+// whole configuration, so such an instance would be left with a node type
+// the runtime cannot resolve — and a runtime with a missing node type
+// refuses to start the flows at all.
+func (ix *configIndex) missingSubflowIssues() []FlowIssue {
+	var issues []FlowIssue
+	for _, entry := range ix.entries {
+		id, ok := subflowInstanceType(entry.TypeJS)
+		if !ok || ix.subflows[id] {
+			continue
+		}
+		issues = append(issues, missingSubflowIssue(entry, id))
+	}
+	return issues
+}
+
+// missingSubflowIssue builds the issue for an instance whose definition
+// is not in the configuration.
+func missingSubflowIssue(entry configEntry, id string) FlowIssue {
+	return FlowIssue{
+		Kind:    IssueMissingSubflow,
+		NodeID:  entry.ID,
+		Target:  id,
+		Message: fmt.Sprintf("node %q is an instance of subflow %q, but this configuration carries no definition for it; a full deployment would leave the runtime with a node type it cannot resolve, and it then refuses to start the flows", entry.ID, id),
+	}
+}
+
+// linksShapeIssue reports a link node whose "links" field is not an
+// array. The runtime iterates that field with forEach when it parses the
+// configuration, so a truthy value that is not an array stops the deploy
+// with a TypeError.
+func (ix *configIndex) linksShapeIssue(entry configEntry) []FlowIssue {
+	raw, ok := ix.field(entry.Index, "links")
+	if !ok {
 		return nil
 	}
-	return subflowPortIssues(defID, members, def)
+	if !jsTruthy(raw) {
+		// The runtime tests the field for truthiness, so a null or an
+		// empty string leaves the node alone.
+		return nil
+	}
+	var arr []json.RawMessage
+	if err := json.Unmarshal(raw, &arr); err == nil {
+		return nil
+	}
+	return []FlowIssue{{
+		Kind:    IssueInvalidLinks,
+		NodeID:  entry.ID,
+		Message: fmt.Sprintf("node %q is a link node whose links field is not an array; the runtime iterates that field when it parses the configuration and the deploy stops with a TypeError", entry.ID),
+	}}
+}
+
+// field returns a raw field of the entry at the given index.
+func (ix *configIndex) field(index int, name string) (json.RawMessage, bool) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(ix.raws[index], &m); err != nil {
+		return nil, false
+	}
+	v, ok := m[name]
+	return v, ok
+}
+
+// subflowPortIssues checks the ports of a subflow definition, whose
+// members are the entries that name it as their owner.
+func (ix *configIndex) subflowPortIssues(defID string) []FlowIssue {
+	members := map[string]bool{}
+	for _, index := range ix.members[defID] {
+		if id := ix.entries[index].ID; id != "" {
+			members[id] = true
+		}
+	}
+	return subflowPortIssues(defID, members, ix.ownerRaw(defID))
+}
+
+// ownerRaw returns the entry that declares the owner.
+func (ix *configIndex) ownerRaw(ownerID string) json.RawMessage {
+	for _, entry := range ix.entries {
+		if (entry.Type == "tab" || entry.Type == "subflow") && entry.ID == ownerID {
+			return ix.raw(entry.Index)
+		}
+	}
+	return nil
 }
 
 // subflowDefinitionPortIssues checks the ports of a nested subflow
@@ -527,6 +634,29 @@ func portTargetIssues(defID string, members map[string]bool, ports []json.RawMes
 	return issues
 }
 
+// danglingSubflowPortIssue builds the issue for a port wire that names
+// a node which is not in the definition.
+func danglingSubflowPortIssue(defID, kind, target string) FlowIssue {
+	what := "an \"in\" port"
+	symptom := "the runtime throws when it starts an instance of this subflow"
+	if kind == "out" {
+		what = "an \"out\" port"
+		symptom = "the runtime logs \"Unknown node referenced inside subflow\" and the output never fires"
+	}
+	if target == "" {
+		return FlowIssue{
+			Kind:    IssueDanglingSubflowPort,
+			Target:  defID,
+			Message: fmt.Sprintf("subflow %q has %s whose wire names no node; %s, and the deployment that installed it had already answered with success", defID, what, symptom),
+		}
+	}
+	return FlowIssue{
+		Kind:    IssueDanglingSubflowPort,
+		Target:  target,
+		Message: fmt.Sprintf("subflow %q has %s wired to %q, which is not a node of that subflow; %s, and the deployment that installed it had already answered with success", defID, what, target, symptom),
+	}
+}
+
 // validateSubflowPorts refuses a subflow definition whose ports name a
 // node that is not in it. The write path uses it: the runtime throws when
 // it starts an instance of such a subflow, and the write that installed it
@@ -543,59 +673,103 @@ func validateSubflowPorts(def json.RawMessage) error {
 	return &FlowGuardError{Message: strings.Join(messages, "; ")}
 }
 
-// danglingSubflowPortIssue builds the issue for a port wire that names
-// a node which is not in the definition.
-func danglingSubflowPortIssue(defID, kind, target string) FlowIssue {
-	what := "an \"in\" port"
-	if kind == "out" {
-		what = "an \"out\" port"
-	}
-	if target == "" {
-		return FlowIssue{
-			Kind:    IssueDanglingSubflowPort,
-			Target:  defID,
-			Message: fmt.Sprintf("subflow %q has %s whose wire names no node; the runtime throws when it starts an instance of this subflow, and the deployment that installed it had already answered with success", defID, what),
+// ownerIssues runs the tab-level rules over one owner's document.
+//
+// The duplicate-id rule is skipped here: the whole-configuration pass
+// reports it, and it also covers the cross-owner case a per-document
+// rule cannot see.
+func ownerIssues(doc RawFlow) []FlowIssue {
+	var out []FlowIssue
+	for _, issue := range ValidateFlow(doc) {
+		if issue.Kind == IssueDuplicateID {
+			continue
 		}
+		out = append(out, issue)
 	}
-	return FlowIssue{
-		Kind:    IssueDanglingSubflowPort,
-		Target:  target,
-		Message: fmt.Sprintf("subflow %q has %s wired to %q, which is not a node of that subflow; the runtime throws when it starts an instance of this subflow, and the deployment that installed it had already answered with success", defID, what, target),
-	}
+	return out
 }
 
-// configEntry is one flat entry of a configuration, read the way the
-// runtime reads it: a string field is a string, and a field of another
-// type is not that field at all.
-type configEntry struct {
-	ID        string
-	HasID     bool
-	Type      string
-	HasType   bool
-	Z         string
-	HasZ      bool
-	ZIsString bool
+// subflowInstanceType returns the subflow id a node's type refers to, the
+// way the runtime reads it: the type is coerced with the JavaScript
+// String() and matched against /^subflow:(.+)$/ (see jsTypeString).
+func subflowInstanceType(typ string) (string, bool) {
+	if !strings.HasPrefix(typ, "subflow:") {
+		return "", false
+	}
+	id := strings.TrimPrefix(typ, "subflow:")
+	if id == "" {
+		return "", false
+	}
+	return id, true
 }
 
-// decodeConfigEntry reads the id, the type and the owner reference of one
-// flat configuration entry.
-func decodeConfigEntry(raw json.RawMessage) configEntry {
+// withoutLinkOutWires returns the node with its "wires" removed when the
+// runtime would recompute them.
+//
+// The runtime owns the wires of a "link out" node: when the node carries a
+// "links" array, parseConfig replaces its wires with the link targets
+// (@node-red/runtime/lib/flows/util.js). A wire of a link out that
+// points nowhere is a value the runtime overwrites, not a dangling wire,
+// and checking it would refuse legitimate link topologies.
+//
+// The test is the runtime's: it checks the field for truthiness, so a
+// "links" field of null (or of any other falsy value) leaves the wires
+// alone and they are checked like any other node's.
+func withoutLinkOutWires(item json.RawMessage) json.RawMessage {
 	var m map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return configEntry{}
+	if err := json.Unmarshal(item, &m); err != nil {
+		return item
 	}
-	entry := configEntry{}
-	if v, ok := m["id"]; ok {
-		entry.HasID = true
-		entry.ID, _ = rawString(v)
+	typ, ok := rawString(m["type"])
+	if !ok || typ != "link out" {
+		return item
 	}
-	if v, ok := m["type"]; ok {
-		entry.HasType = true
-		entry.Type, _ = rawString(v)
+	links, ok := m["links"]
+	if !ok || !jsTruthy(links) {
+		return item
 	}
-	if v, ok := m["z"]; ok {
-		entry.HasZ = true
-		entry.Z, entry.ZIsString = rawString(v)
+	if _, ok := m["wires"]; !ok {
+		return item
 	}
-	return entry
+	delete(m, "wires")
+	out, err := json.Marshal(m)
+	if err != nil {
+		return item
+	}
+	return out
+}
+
+// jsTruthy reports the JavaScript truthiness of a JSON value. It is how
+// the runtime tests the "links" field of a link node: an empty array is
+// truthy, a null is not.
+func jsTruthy(raw json.RawMessage) bool {
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return false
+	}
+	switch t := v.(type) {
+	case nil:
+		return false
+	case bool:
+		return t
+	case float64:
+		return t != 0
+	case string:
+		return t != ""
+	default:
+		return true
+	}
+}
+
+// jsonValueText renders a raw JSON value for a message: a string is
+// quoted, anything else is shown as it is.
+func jsonValueText(raw json.RawMessage) string {
+	if s, ok := rawString(raw); ok {
+		return strconv.Quote(s)
+	}
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return "null"
+	}
+	return trimmed
 }

@@ -115,6 +115,28 @@ func testRevisionedTab(t *testing.T, nested string) []byte {
 	return body
 }
 
+// testRevisionedTabWith returns the v2 /flows body of a tab document plus
+// extra entries. The runtime serves the subflow definitions in the same
+// flat array as the tabs and their nodes, so a fixture that models a
+// runtime with a subflow has to carry its definition.
+func testRevisionedTabWith(t *testing.T, nested string, extra ...json.RawMessage) []byte {
+	t.Helper()
+	body := testRevisionedTab(t, nested)
+	var envelope struct {
+		Rev   string            `json:"rev"`
+		Flows []json.RawMessage `json:"flows"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	envelope.Flows = append(envelope.Flows, extra...)
+	out, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
 // testNestedDeployment lets the fake runtime serve a subsequent nested GET.
 func testNestedDeployment(t *testing.T, body []byte, id string) []byte {
 	t.Helper()

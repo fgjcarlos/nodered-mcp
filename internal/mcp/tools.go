@@ -800,12 +800,17 @@ func (s *Server) registerTools() {
 				"The configuration is validated before it is deployed: a wire that points "+
 				"nowhere, a node whose z names no tab, two entries that share an id, and "+
 				"an instance of a subflow whose definition is missing are all refused, "+
-				"and nothing is sent to the runtime.\n\n"+
+				"and nothing is sent to the runtime. Pass force=true to deploy a "+
+				"configuration the guard refuses anyway — the rules are the repository's "+
+				"and one of them (a wire that leaves the tab that owns it) is stricter "+
+				"than the runtime, which does resolve such a wire across tabs.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
 				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
 		),
 		mcp.WithString("flows", mcp.Required(),
 			mcp.Description("A JSON array of flow objects (the same shape returned by list_flows).")),
+		mcp.WithBoolean("force",
+			mcp.Description("Set to true to deploy the configuration without validating its references. Use it only for a configuration that the guard refuses and that you know is worth deploying.")),
 	)
 	s.addWriteTool(setFlows, s.handleSetFlows)
 

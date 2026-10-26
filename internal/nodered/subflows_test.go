@@ -30,6 +30,10 @@ const globalSubflowsBody = `{
 // subflows defined yet.
 const emptyGlobalSubflowsBody = `{"id":"global"}`
 
+// sfADefinition is the subflow definition the runtime serves in the same
+// flat array as the tabs and their nodes (GET /flows).
+var sfADefinition = json.RawMessage(`{"id":"sf_a","type":"subflow","name":"A","in":[],"out":[]}`)
+
 // TestListSubflows_Success covers the happy path: a global envelope
 // with one subflow, and the helper extracts it as a one-element
 // slice without dropping fields.
@@ -611,7 +615,9 @@ func TestInstantiateSubflow_HappyPath(t *testing.T) {
 			putBody, _ = io.ReadAll(r.Body)
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == "GET" && r.URL.Path == "/flows":
-			_, _ = w.Write(testRevisionedTab(t, string(flowBody)))
+			// The runtime serves the subflow definition in the same
+			// flat array as the tabs, so the fixture carries it.
+			_, _ = w.Write(testRevisionedTabWith(t, string(flowBody), sfADefinition))
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
@@ -667,7 +673,7 @@ func TestInstantiateSubflow_NoParams(t *testing.T) {
 			putBody, _ = io.ReadAll(r.Body)
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == "GET" && r.URL.Path == "/flows":
-			_, _ = w.Write(testRevisionedTab(t, `{"id":"tab_x","label":"X","nodes":[]}`))
+			_, _ = w.Write(testRevisionedTabWith(t, `{"id":"tab_x","label":"X","nodes":[]}`, sfADefinition))
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
@@ -760,7 +766,10 @@ func TestSubflowCRUD_EndToEnd(t *testing.T) {
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flows":
 			// Revisioned deployment base and backup.
-			_, _ = w.Write(testRevisionedTab(t, string(refreshTab())))
+			// The runtime serves the subflow definition in the same
+			// flat array as the tabs, so the fixture carries it.
+			_, _ = w.Write(testRevisionedTabWith(t, string(refreshTab()),
+				json.RawMessage(`{"id":"sf_round","type":"subflow","name":"Round-trip","in":[],"out":[]}`)))
 		case r.Method == "GET" && r.URL.Path == "/flow/global":
 			// Initial state: no subflows. After CreateSubflow, the
 			// next GET sees the new one because the mock reads

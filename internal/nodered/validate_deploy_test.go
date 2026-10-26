@@ -259,7 +259,7 @@ func TestConfigValidationError_NamesEveryIssue(t *testing.T) {
 	  {"id":"n1","type":"inject","z":"t1","x":140,"y":140,"wires":[["ghost"]]},
 	  {"id":"inst","type":"subflow:sf_a","z":"t1","x":300,"y":140,"wires":[]}
 	]`
-	issues := effectiveConfigIssues(mustFlowArray(t, cfg))
+	issues := newConfigIndex(mustFlowArray(t, cfg)).issues()
 	err := &ConfigValidationError{Issues: issues}
 	msg := err.Error()
 	if !strings.Contains(msg, "ghost") {
@@ -377,5 +377,83 @@ func TestValidateEffectiveConfig_SubflowPortsInNestedShape(t *testing.T) {
 	}`
 	if issues := subflowDefinitionPortIssues(json.RawMessage(broken)); len(issues) != 1 {
 		t.Fatalf("expected one issue, got %+v", issues)
+	}
+}
+
+// A link out whose "links" field is null keeps its wires at runtime:
+// the runtime tests the field for truthiness, and null is falsy. The
+// guard has to test it the same way, or it would leave a dangling wire
+// standing in the one shape where the runtime keeps it.
+func TestValidateEffectiveConfig_LinkOutWithNullLinksKeepsItsWires(t *testing.T) {
+	const cfg = `[
+	  {"id":"t1","type":"tab","label":"Home"},
+	  {"id":"lo","type":"link out","z":"t1","x":140,"y":140,"links":null,"wires":[["ghost"]]}
+	]`
+	issues := ValidateEffectiveConfig(RawFlow(cfg))
+	if len(issues) != 1 || issues[0].Kind != IssueDanglingWire {
+		t.Fatalf("expected one dangling wire, got %+v", issues)
+	}
+}
+
+// A link out with an empty links array is the editor's shape: the
+// runtime rewires it, so its wires are not the caller's business.
+func TestValidateEffectiveConfig_LinkOutWithEmptyLinksIsNotChecked(t *testing.T) {
+	const cfg = `[
+	  {"id":"t1","type":"tab","label":"Home"},
+	  {"id":"lo","type":"link out","z":"t1","x":140,"y":140,"links":[],"wires":[["ghost"]]}
+	]`
+	issues := ValidateEffectiveConfig(RawFlow(cfg))
+	if len(issues) != 0 {
+		t.Fatalf("expected no issues, got %d: %+v", len(issues), issues)
+	}
+}
+
+// The runtime iterates the links field with forEach when it parses the
+// configuration, so a truthy value that is not an array stops the deploy
+// with a TypeError.
+func TestValidateEffectiveConfig_LinkNodeWithANonArrayLinksField(t *testing.T) {
+	const cfg = `[
+	  {"id":"t1","type":"tab","label":"Home"},
+	  {"id":"lo","type":"link out","z":"t1","x":140,"y":140,"links":"nope","wires":[[]]}
+	]`
+	issues := ValidateEffectiveConfig(RawFlow(cfg))
+	if len(issues) != 1 || issues[0].Kind != IssueInvalidLinks {
+		t.Fatalf("expected one invalid_links issue, got %+v", issues)
+	}
+}
+
+// Two owners with the same id are one owner: the problem is reported
+// once, not twice.
+func TestValidateEffectiveConfig_DuplicateOwnerIsReportedOnce(t *testing.T) {
+	const cfg = `[
+	  {"id":"t1","type":"tab","label":"One"},
+	  {"id":"t1","type":"tab","label":"Two"},
+	  {"id":"n1","type":"inject","z":"t1","x":140,"y":140,"wires":[["ghost"]]}
+	]`
+	issues := ValidateEffectiveConfig(RawFlow(cfg))
+	dangling := 0
+	for _, issue := range issues {
+		if issue.Kind == IssueDanglingWire {
+			dangling++
+		}
+	}
+	if dangling != 1 {
+		t.Fatalf("expected the dangling wire once, got %d: %+v", dangling, issues)
+	}
+}
+
+// A node whose z is not a string names no owner: the message has to
+// quote what the value actually is, because an empty z is legal.
+func TestValidateEffectiveConfig_OrphanNodeWithANonStringZ(t *testing.T) {
+	const cfg = `[
+	  {"id":"t1","type":"tab","label":"Home"},
+	  {"id":"n1","type":"inject","z":123,"x":140,"y":140,"wires":[]}
+	]`
+	issues := ValidateEffectiveConfig(RawFlow(cfg))
+	if len(issues) != 1 || issues[0].Kind != IssueOrphanNode {
+		t.Fatalf("expected one orphan_node issue, got %+v", issues)
+	}
+	if !strings.Contains(issues[0].Message, "123") {
+		t.Errorf("expected the message to quote the value, got: %s", issues[0].Message)
 	}
 }

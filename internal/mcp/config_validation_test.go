@@ -194,3 +194,68 @@ func serverWithBackupDir(t *testing.T, backupDir string, h http.HandlerFunc) *Se
 	}
 	return New(c, Options{Version: "test"})
 }
+
+// The escape hatch of set_flows: a configuration the guard refuses can
+// be deployed on purpose.
+func TestHandleSetFlows_ForceDeploysAConfigurationThatDoesNotValidate(t *testing.T) {
+	var posted bool
+	s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/flows":
+			_, _ = io.WriteString(w, `[{"id":"cur","type":"tab","label":"Current"}]`)
+		case r.Method == http.MethodPost && r.URL.Path == "/flows":
+			posted = true
+			_, _ = io.WriteString(w, `{}`)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	})
+	res, err := call(t, s.handleSetFlows, map[string]any{
+		"flows": `[
+		  {"id":"t1","type":"tab","label":"Home"},
+		  {"id":"n1","type":"inject","z":"t1","x":140,"y":140,"wires":[["ghost"]]}
+		]`,
+		"force": true,
+	})
+	if err != nil {
+		t.Fatalf("handleSetFlows returned err=%v", err)
+	}
+	if res.IsError {
+		t.Fatalf("expected a successful result, got %+v", res.Content)
+	}
+	if !posted {
+		t.Error("the configuration was not deployed")
+	}
+	if text := resultFirstText(res); !strings.Contains(text, "WITHOUT validating") {
+		t.Errorf("expected the result to say the configuration was deployed unvalidated: %s", text)
+	}
+}
+
+// A restore of a backup with no tab at all would leave the runtime with
+// no tabs, so it is refused the same way a deployment is.
+func TestHandleRestoreBackup_RefusesABackupWithNoTab(t *testing.T) {
+	backupDir := t.TempDir()
+	name := "flows-20260101-000000.000000000-000001.json"
+	doc := `[{"id":"n1","type":"inject","z":"t1","x":140,"y":140,"wires":[]}]`
+	if err := os.WriteFile(filepath.Join(backupDir, name), []byte(doc), 0o600); err != nil {
+		t.Fatalf("write backup: %v", err)
+	}
+	var seen []string
+	s := serverWithBackupDir(t, backupDir, func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.Path)
+		http.Error(w, "the runtime must not be contacted", http.StatusBadRequest)
+	})
+	res, err := call(t, s.handleRestoreBackup, map[string]any{"backup": name})
+	if err != nil {
+		t.Fatalf("handleRestoreBackup returned err=%v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected an error result, got %+v", res.Content)
+	}
+	if !strings.Contains(resultFirstText(res), "tab") {
+		t.Errorf("expected the error to name the missing tab: %s", resultFirstText(res))
+	}
+	if len(seen) != 0 {
+		t.Errorf("a refused restore must not contact the runtime, got %v", seen)
+	}
+}

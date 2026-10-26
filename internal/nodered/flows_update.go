@@ -34,6 +34,15 @@ func (c *Client) deployFlowUpdate(ctx context.Context, id string, flow RawFlow) 
 	if err := validateDeployedTab(next, id, flow); err != nil {
 		return err
 	}
+	// Issue #334: this deploy posts the whole array, so the rules that
+	// need the whole configuration are applied to it as well — but only
+	// to the entries of the tab being written. The rest of the
+	// configuration is the runtime's own state, and a problem there is
+	// not the caller's to answer for: refusing it would make the tab
+	// impossible to repair.
+	if err := validateTabEntries(next, id); err != nil {
+		return err
+	}
 	if _, err := c.saveFlowSnapshot(raw); err != nil {
 		return err
 	}
