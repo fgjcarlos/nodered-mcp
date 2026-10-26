@@ -101,9 +101,20 @@ instance:
   type of every node in the flat configuration, so a definition is in use when
   *any* flat item carries that type.
 
-Both shapes are therefore covered by two witnesses: the flat `/flows` scan,
-which sees every instance, and the definition scan, which sees the nested ones
-and can name their owner.
+- Tabs and subflow definitions live in **separate id maps** inside the runtime
+  (`flow.flows` and `flow.subflows`), so the same id can name both, and the
+  owner of a node is resolved **tab-first** (`flow.flows[n.z] ||
+  flow.subflows[n.z]`).
+- The runtime coerces the type with `String()` before matching it. The
+  coercion matters: `String(["subflow:x"])` is `"subflow:x"`, so an
+  **array-typed** node is a real reference to a subflow.
+- The member list in `/flow/global` is the membership the runtime itself
+  resolved, which is what makes it the right list to answer "is this node
+  inside this definition".
+
+Both instance shapes are covered by two witnesses: the flat `/flows` scan,
+which sees every node, and the definition scan, which knows which nodes belong
+to which definition. Neither is trusted on its own.
 
 ### Findings from the adversarial pass, and what changed because of them
 The first implementation was rejected by that pass. The findings that changed
@@ -115,9 +126,10 @@ the code:
    through — reproduced live, with the runtime logging `Waiting for missing
    types to be registered`. The scan now decodes each field on its own
    (`decodeFlowItem`) and an unreadable field is *unknown*, not absent. A
-   non-string `type` cannot match the runtime's own pattern and is not an
-   instance; a non-string `id` or `z` on an item whose type does match is an
-   instance, and the delete is refused.
+   non-string `id` or `z` on an item whose type does match is an instance,
+   and the delete is refused. The type is compared the way the runtime
+   compares it — coerced with `String()` — because an array-typed node is a
+   real reference (see the second round below).
 2. **The definition scan read only `nodes`.** It now reads `configs` as well.
 3. **A malformed unrelated definition blocked every delete.** The error now
    names both the definition that cannot be read and the one that was asked
@@ -144,5 +156,36 @@ the code:
    indeterminate outcome, which is the wrong advice for a refusal that changed
    nothing.
 
+### Second round: findings against the first round of fixes
+The first round of fixes was reviewed again and rejected: it had closed the
+original findings but introduced two new ones, both reproduced live.
+
+9. **The self-instance exclusion was too broad.** It skipped any instance whose
+   owner id equalled the definition's id. Tabs and subflow definitions live in
+   separate id maps and the owner resolves tab-first, so an instance whose
+   owner is that id may belong to a *tab* that happens to share the id — and
+   skipping it dropped a real reference. The exclusion is now by node id,
+   using the member list of the definition being deleted as read from
+   `/flow/global`, which is the membership the runtime itself resolved. The
+   owner kind is resolved tab-first now, instead of depending on the order of
+   the flat array.
+10. **"A non-string type cannot be an instance" was wrong.** The runtime
+    matches with `RegExp.prototype.exec`, which coerces its argument with
+    `String()`, and `String(["subflow:x"])` is `"subflow:x"`. An array-typed
+    node is a real reference, in a tab and nested in a definition alike. The
+    guard now coerces the type the way JavaScript does (`jsTypeString`) and
+    compares the coerced value.
+11. **A `/flows` body this client cannot read still failed open.** The
+    reference scan now extracts the flow array strictly (`subflowFlowItems`)
+    and refuses the delete when the body carries no readable flow list: an
+    unreadable configuration is not a configuration without instances.
+12. **The wording of an unrecognised owner was ungrammatical**, and an
+    instance with an unreadable id was reported as an empty name. Both read
+    properly now.
+
+The two rounds together are the reason the record says "runtime proof: local
+httptest fixtures plus a real Node-RED 5.0.8": every shape the runtime can
+produce was exercised against a real runtime, not reasoned about from the data
+model.
 ## Next step
 Push the branch, open one PR linking #332, and merge once CI is green.

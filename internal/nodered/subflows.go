@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -303,18 +305,22 @@ type SubflowReference struct {
 
 // describe renders the reference as one operator-readable line.
 func (r SubflowReference) describe() string {
+	node := fmt.Sprintf("instance node %q", r.NodeID)
+	if r.NodeID == "" {
+		node = "an instance node with an unreadable id"
+	}
 	switch r.OwnerKind {
 	case SubflowOwnerTab:
-		return fmt.Sprintf("instance node %q in tab %q", r.NodeID, r.Owner)
+		return fmt.Sprintf("%s in tab %q", node, r.Owner)
 	case SubflowOwnerSubflow:
-		return fmt.Sprintf("instance node %q in subflow %q", r.NodeID, r.Owner)
+		return fmt.Sprintf("%s in subflow %q", node, r.Owner)
 	case SubflowOwnerGlobal:
-		return fmt.Sprintf("instance node %q in the global configuration", r.NodeID)
+		return fmt.Sprintf("%s in the global configuration", node)
 	default:
 		if r.Owner == "" {
-			return fmt.Sprintf("instance node %q in an unknown owner", r.NodeID)
+			return fmt.Sprintf("%s in an owner that cannot be named", node)
 		}
-		return fmt.Sprintf("instance node %q in an unknown owner %q", r.NodeID, r.Owner)
+		return fmt.Sprintf("%s in an unrecognised owner %q", node, r.Owner)
 	}
 }
 
@@ -385,7 +391,7 @@ func decodeFlowItem(raw json.RawMessage) flowItem {
 		it.ID, it.IDOK = rawString(v)
 	}
 	if v, ok := m["type"]; ok {
-		it.Type, it.TypeOK = rawString(v)
+		it.Type, it.TypeOK = jsTypeString(v)
 	}
 	if v, ok := m["z"]; ok {
 		it.ZPresent = true
@@ -402,6 +408,98 @@ func rawString(raw json.RawMessage) (string, bool) {
 		return "", false
 	}
 	return s, true
+}
+
+// jsTypeString returns the string the Node-RED runtime compares against
+// /^subflow:(.+)$/ for a node's "type" field.
+//
+// The runtime does not require the type to be a string: it coerces the
+// value with String() before matching, and String(["subflow:x"]) is
+// "subflow:x". A one-element array type therefore IS a reference to a
+// subflow, and treating a non-string type as "not an instance" would
+// leave the guard fail-open for that shape.
+//
+// The coercion follows JavaScript's rules for the JSON value types:
+// null is "null", booleans are "true" and "false", an array is its
+// elements joined with "," (with null and undefined as empty strings),
+// and an object is "[object Object]".
+//
+// ok is false when the value cannot be coerced at all. The caller then
+// treats the node as a possible reference: "cannot be checked" is not
+// "no references".
+func jsTypeString(raw json.RawMessage) (string, bool) {
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return "", false
+	}
+	return jsString(v), true
+}
+
+// jsString reproduces JavaScript's String() for the JSON value types.
+func jsString(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return "null"
+	case bool:
+		if t {
+			return "true"
+		}
+		return "false"
+	case string:
+		return t
+	case float64:
+		return jsNumber(t)
+	case []any:
+		parts := make([]string, len(t))
+		for i, e := range t {
+			if e == nil {
+				// Array.prototype.join maps null and undefined to
+				// the empty string.
+				continue
+			}
+			parts[i] = jsString(e)
+		}
+		return strings.Join(parts, ",")
+	case map[string]any:
+		return "[object Object]"
+	}
+	return ""
+}
+
+// jsNumber formats a JSON number the way JavaScript prints it.
+func jsNumber(f float64) string {
+	if f == math.Trunc(f) && math.Abs(f) < 1e21 {
+		return strconv.FormatFloat(f, 'f', -1, 64)
+	}
+	return strconv.FormatFloat(f, 'g', -1, 64)
+}
+
+// subflowFlowItems extracts the flow array from a /flows body.
+//
+// It is deliberately stricter than FlowArray: the reference scan has to
+// fail closed, and FlowArray answers "no items" for a body it does not
+// recognise — an unreadable configuration would then look like a
+// configuration without instances, which is the one answer the guard
+// must never give.
+func subflowFlowItems(raw json.RawMessage) ([]json.RawMessage, error) {
+	var arr []json.RawMessage
+	if err := json.Unmarshal(raw, &arr); err == nil {
+		if arr == nil {
+			// "null" decodes into a nil slice without an error.
+			return nil, errors.New("the flow configuration is null")
+		}
+		return arr, nil
+	}
+	var env struct {
+		Flows []json.RawMessage `json:"flows"`
+	}
+	if err := json.Unmarshal(raw, &env); err == nil {
+		if env.Flows == nil {
+			return nil, errors.New("the flow configuration carries no flows array")
+		}
+		return env.Flows, nil
+	}
+	return nil, errors.New("the flow configuration is neither a JSON array nor a flows envelope")
 }
 
 // subflowDefinitionMembers returns the member objects of a subflow
@@ -434,19 +532,28 @@ func subflowDefinitionMembers(def json.RawMessage) ([]map[string]json.RawMessage
 // in a flat flow configuration to its kind. It is what tells an
 // instance node living in a tab apart from one living inside another
 // subflow definition — both carry the same "subflow:<id>" type.
+//
+// Tabs and subflow definitions live in separate id maps inside the
+// runtime (flow.flows and flow.subflows), so the same id can name both.
+// The runtime resolves the owner of a node tab-first
+// (flow.flows[n.z] || flow.subflows[n.z]), so a tab shadows a subflow
+// definition with the same id. Tabs are therefore recorded last, and
+// the answer does not depend on the order of the flat array.
 func subflowOwnerKinds(items []json.RawMessage) map[string]string {
 	kinds := make(map[string]string)
 	for _, item := range items {
 		it := decodeFlowItem(item)
-		if !it.IDOK {
+		if !it.IDOK || it.Type != "subflow" {
 			continue
 		}
-		switch it.Type {
-		case "tab":
-			kinds[it.ID] = SubflowOwnerTab
-		case "subflow":
-			kinds[it.ID] = SubflowOwnerSubflow
+		kinds[it.ID] = SubflowOwnerSubflow
+	}
+	for _, item := range items {
+		it := decodeFlowItem(item)
+		if !it.IDOK || it.Type != "tab" {
+			continue
 		}
+		kinds[it.ID] = SubflowOwnerTab
 	}
 	return kinds
 }
@@ -488,14 +595,23 @@ func (c *Client) subflowReferences(ctx context.Context, id string, definitions S
 		refs = append(refs, ref)
 	}
 
+	// The members of the definition being deleted. An instance inside
+	// it goes away with the definition, and the runtime does not
+	// report a missing type for it — so those node ids are excluded
+	// from the flat scan below.
+	//
+	// The exclusion is by node id, not by owner. Tabs and subflow
+	// definitions live in separate id maps inside the runtime, so a tab
+	// can carry the same id as the definition: an instance whose owner
+	// is that id may belong to the tab, and skipping it would drop a
+	// real reference. The member list read from /flow/global is the
+	// membership the runtime itself resolved, so it is the one list
+	// that answers "is this node inside the definition".
+	selfMembers := make(map[string]bool)
+
 	// Instances nested inside other subflow definitions.
 	for _, def := range definitions {
 		defItem := decodeFlowItem(def)
-		if defItem.ID == id {
-			// The definition being deleted is not a reference to
-			// itself: an instance inside it goes away with it.
-			continue
-		}
 		members, err := subflowDefinitionMembers(def)
 		if err != nil {
 			// Name the definition that cannot be read, and the one
@@ -503,8 +619,18 @@ func (c *Client) subflowReferences(ctx context.Context, id string, definitions S
 			// tell which definition to repair.
 			return nil, fmt.Errorf("subflow definition %q cannot be checked for references to %q: %w", defItem.ID, id, err)
 		}
+		if defItem.ID == id {
+			// The definition being deleted is not a reference to
+			// itself.
+			for _, member := range members {
+				if memberID := nodeID(member); memberID != "" {
+					selfMembers[memberID] = true
+				}
+			}
+			continue
+		}
 		for _, member := range members {
-			if stringField(member, "type") != wantType {
+			if !memberIsInstance(member, wantType) {
 				continue
 			}
 			add(SubflowReference{
@@ -521,21 +647,23 @@ func (c *Client) subflowReferences(ctx context.Context, id string, definitions S
 	if err != nil {
 		return nil, err
 	}
-	items := FlowArray(flat)
+	items, err := subflowFlowItems(flat)
+	if err != nil {
+		return nil, fmt.Errorf("the flow configuration could not be read: %w", err)
+	}
 	kinds := subflowOwnerKinds(items)
 	for _, item := range items {
 		it := decodeFlowItem(item)
 		if !it.TypeOK {
-			// The runtime matches a missing type against a node's
-			// type with /^subflow:(.+)$/; a type that is not a
-			// string cannot match it, so this node is not an
-			// instance of anything.
-			continue
+			// The type could not be read at all, so the node cannot
+			// be classified. "Cannot be checked" is not "no
+			// references": the delete is refused.
+			return nil, fmt.Errorf("a node in the flow configuration has an unreadable type, so its references to %q could not be checked", id)
 		}
 		if it.Type != wantType {
 			continue
 		}
-		if it.Z == id {
+		if it.IDOK && selfMembers[it.ID] {
 			// The instance lives inside the definition being
 			// deleted. It goes away with it, and the runtime does
 			// not report a missing type for it.
@@ -560,6 +688,25 @@ func (c *Client) subflowReferences(ctx context.Context, id string, definitions S
 		add(SubflowReference{Owner: owner, OwnerKind: kind, NodeID: it.ID})
 	}
 	return refs, nil
+}
+
+// memberIsInstance reports whether a member of a subflow definition is
+// an instance of the given subflow.
+//
+// The type is compared the way the runtime compares it: coerced with
+// String() and matched against /^subflow:(.+)$/. A member whose type
+// cannot be read is treated as an instance — "cannot be checked" is not
+// "no references".
+func memberIsInstance(member map[string]json.RawMessage, wantType string) bool {
+	raw, ok := member["type"]
+	if !ok {
+		return false
+	}
+	coerced, ok := jsTypeString(raw)
+	if !ok {
+		return true
+	}
+	return coerced == wantType
 }
 
 // DeleteSubflow removes a subflow definition. Fails with

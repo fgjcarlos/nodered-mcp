@@ -1157,3 +1157,179 @@ func TestDeleteSubflow_ReportsOwnerlessInstanceAsGlobal(t *testing.T) {
 		t.Errorf("error message does not name the global configuration: %s", err.Error())
 	}
 }
+
+// TestDeleteSubflow_RefusesWhenTabSharesTheDefinitionID: tabs and
+// subflow definitions live in separate id maps inside the runtime, so
+// a tab can carry the same id as a definition. The owner of a node is
+// resolved tab-first, so an instance whose owner is that id may belong
+// to the tab — and skipping it by owner id would drop a real
+// reference and let the definition be deleted under a live instance.
+func TestDeleteSubflow_RefusesWhenTabSharesTheDefinitionID(t *testing.T) {
+	const globalBody = `{
+		"id":"global",
+		"subflows":[
+			{"id":"DUP","type":"subflow","name":"Dup","in":[],"out":[],"env":[],"nodes":[],"configs":[]}
+		],
+		"configs":[]
+	}`
+	var putGlobal bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flow/global":
+			_, _ = w.Write([]byte(globalBody))
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			// A tab and a subflow definition sharing the id "DUP",
+			// with an instance of subflow:DUP in the tab.
+			_, _ = w.Write([]byte(`[
+				{"id":"DUP","type":"tab","label":"Home"},
+				{"id":"i1","type":"subflow:DUP","z":"DUP","x":140,"y":140},
+				{"id":"DUP","type":"subflow","name":"Dup"}
+			]`))
+		case r.Method == "PUT" && r.URL.Path == "/flow/global":
+			putGlobal = true
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := clientWithBackup(t, srv.URL)
+	err := c.DeleteSubflow(context.Background(), "DUP")
+	if err == nil {
+		t.Fatal("expected the delete to be refused while the tab still instances it, got nil")
+	}
+	var inUse *SubflowInUseError
+	if !errors.As(err, &inUse) {
+		t.Fatalf("expected *SubflowInUseError, got %T: %v", err, err)
+	}
+	if len(inUse.Refs) != 1 {
+		t.Fatalf("expected 1 reference, got %d: %+v", len(inUse.Refs), inUse.Refs)
+	}
+	ref := inUse.Refs[0]
+	if ref.NodeID != "i1" || ref.Owner != "DUP" {
+		t.Errorf("unexpected reference: %+v", ref)
+	}
+	// The runtime resolves the owner tab-first, so the tab is the owner.
+	if ref.OwnerKind != SubflowOwnerTab {
+		t.Errorf("owner kind = %q, want %q", ref.OwnerKind, SubflowOwnerTab)
+	}
+	if putGlobal {
+		t.Error("the definition was written despite being in use")
+	}
+}
+
+// TestDeleteSubflow_RefusesWhenInstanceTypeIsAnArray: the runtime
+// matches a missing type against /^subflow:(.+)$/ after coercing the
+// type with String(), and String(["subflow:x"]) is "subflow:x". An
+// array-typed instance is therefore a real reference.
+func TestDeleteSubflow_RefusesWhenInstanceTypeIsAnArray(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flow/global":
+			_, _ = w.Write([]byte(globalSubflowsBody))
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			_, _ = w.Write([]byte(`[
+				{"id":"tab1","type":"tab","label":"Home"},
+				{"id":"i1","type":["subflow:sf_a"],"z":"tab1","x":140,"y":140}
+			]`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := clientWithBackup(t, srv.URL)
+	err := c.DeleteSubflow(context.Background(), "sf_a")
+	if err == nil {
+		t.Fatal("expected the delete to be refused for an array-typed instance, got nil")
+	}
+	var inUse *SubflowInUseError
+	if !errors.As(err, &inUse) {
+		t.Fatalf("expected *SubflowInUseError, got %T: %v", err, err)
+	}
+	if len(inUse.Refs) != 1 {
+		t.Fatalf("expected 1 reference, got %d: %+v", len(inUse.Refs), inUse.Refs)
+	}
+	if inUse.Refs[0].NodeID != "i1" {
+		t.Errorf("unexpected reference: %+v", inUse.Refs[0])
+	}
+}
+
+// TestDeleteSubflow_RefusesWhenNestedInstanceTypeIsAnArray: the same
+// coercion applies to an instance nested in another subflow
+// definition.
+func TestDeleteSubflow_RefusesWhenNestedInstanceTypeIsAnArray(t *testing.T) {
+	const globalBody = `{
+		"id":"global",
+		"subflows":[
+			{"id":"sf_a","type":"subflow","name":"A","in":[],"out":[],"env":[],"nodes":[],"configs":[]},
+			{"id":"sf_b","type":"subflow","name":"B","in":[],"out":[],"env":[],"nodes":[
+				{"id":"n1","type":["subflow:sf_a"],"z":"sf_b","x":140,"y":140}
+			],"configs":[]}
+		],
+		"configs":[]
+	}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flow/global":
+			_, _ = w.Write([]byte(globalBody))
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			_, _ = w.Write([]byte(`[{"id":"tab1","type":"tab","label":"Home"}]`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := clientWithBackup(t, srv.URL)
+	err := c.DeleteSubflow(context.Background(), "sf_a")
+	if err == nil {
+		t.Fatal("expected the delete to be refused for an array-typed nested instance, got nil")
+	}
+	var inUse *SubflowInUseError
+	if !errors.As(err, &inUse) {
+		t.Fatalf("expected *SubflowInUseError, got %T: %v", err, err)
+	}
+	if len(inUse.Refs) != 1 {
+		t.Fatalf("expected 1 reference, got %d: %+v", len(inUse.Refs), inUse.Refs)
+	}
+	if inUse.Refs[0].NodeID != "n1" || inUse.Refs[0].Owner != "sf_b" {
+		t.Errorf("unexpected reference: %+v", inUse.Refs[0])
+	}
+}
+
+// TestDeleteSubflow_FailsClosedOnUnreadableFlowConfiguration: a
+// /flows body this client cannot read is not a configuration without
+// instances. The delete is refused instead of going through on a
+// configuration nobody checked.
+func TestDeleteSubflow_FailsClosedOnUnreadableFlowConfiguration(t *testing.T) {
+	var putGlobal bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flow/global":
+			_, _ = w.Write([]byte(globalSubflowsBody))
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			// A revisioned envelope with no flows array.
+			_, _ = w.Write([]byte(`{"rev":"abc123"}`))
+		case r.Method == "PUT" && r.URL.Path == "/flow/global":
+			putGlobal = true
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := clientWithBackup(t, srv.URL)
+	err := c.DeleteSubflow(context.Background(), "sf_a")
+	if err == nil {
+		t.Fatal("expected the delete to be refused on an unreadable flow configuration, got nil")
+	}
+	if !strings.Contains(err.Error(), "flow configuration") {
+		t.Errorf("error message does not name the unreadable configuration: %s", err.Error())
+	}
+	if putGlobal {
+		t.Error("the definition was written despite the configuration not being readable")
+	}
+}
