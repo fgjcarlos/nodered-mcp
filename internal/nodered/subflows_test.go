@@ -1333,3 +1333,127 @@ func TestDeleteSubflow_FailsClosedOnUnreadableFlowConfiguration(t *testing.T) {
 		t.Error("the definition was written despite the configuration not being readable")
 	}
 }
+
+// TestJSNumberMatchesJavaScript pins the number rendering against
+// JavaScript's own Number::toString.
+//
+// The runtime coerces a node's type with String() before matching it
+// against /^subflow:(.+)$/, and a number can reach that comparison
+// inside an array type. Go's own formatting disagrees with JavaScript
+// on small magnitudes ("1e-07" against "1e-7") and on negative zero,
+// and that difference is enough for the guard to miss a reference.
+//
+// The expected values are the ones JavaScript produces — the table was
+// generated with node, not reasoned about.
+func TestJSNumberMatchesJavaScript(t *testing.T) {
+	cases := []struct {
+		json string
+		want string
+	}{
+		{"0", "0"},
+		{"-0", "0"},
+		{"0", "0"},
+		{"1", "1"},
+		{"-1", "-1"},
+		{"123", "123"},
+		{"123.45", "123.45"},
+		{"0.1", "0.1"},
+		{"0.2", "0.2"},
+		{"0.3", "0.3"},
+		{"0.3333333333333333", "0.3333333333333333"},
+		{"1e+21", "1e+21"},
+		{"1e-7", "1e-7"},
+		{"0.000001", "0.000001"},
+		{"0.00001", "0.00001"},
+		{"1e-16", "1e-16"},
+		{"1.5e-7", "1.5e-7"},
+		{"123456789012345680000", "123456789012345680000"},
+		{"5e-324", "5e-324"},
+		{"1.7976931348623157e+308", "1.7976931348623157e+308"},
+		{"1e-21", "1e-21"},
+		{"0.000001", "0.000001"},
+		{"1e-7", "1e-7"},
+		{"-1e-7", "-1e-7"},
+		{"1.2345678e-9", "1.2345678e-9"},
+		{"2.5e-10", "2.5e-10"},
+		{"1e+100", "1e+100"},
+		{"1e-100", "1e-100"},
+		{"999999999999999900000", "999999999999999900000"},
+		{"1e-323", "1e-323"},
+		{"3.14159265358979", "3.14159265358979"},
+		{"10000000000000000", "10000000000000000"},
+		{"1000000000000000", "1000000000000000"},
+		{"1234567890123456800", "1234567890123456800"},
+		{"0.001", "0.001"},
+		{"0.5", "0.5"},
+		{"2.5", "2.5"},
+		{"1e+22", "1e+22"},
+		{"1.5e+22", "1.5e+22"},
+		{"1e-10", "1e-10"},
+		{"6.02e+23", "6.02e+23"},
+		{"0.00001", "0.00001"},
+		{"100", "100"},
+		{"100", "100"},
+	}
+	for _, c := range cases {
+		var f float64
+		if err := json.Unmarshal([]byte(c.json), &f); err != nil {
+			t.Fatalf("decoding %q: %v", c.json, err)
+		}
+		if got := jsNumber(f); got != c.want {
+			t.Errorf("jsNumber(%s) = %q, want %q", c.json, got, c.want)
+		}
+	}
+}
+
+// TestDeleteSubflow_RefusesWhenInstanceTypeArrayHoldsANumber: a number
+// inside an array type changes the coerced text, and the runtime
+// resolves the instance against the id that text carries. Go's own
+// number formatting disagrees with JavaScript's on small magnitudes
+// ("1e-07" against "1e-7"), which is enough to make the guard miss the
+// reference — so the rendering has to match JavaScript's exactly.
+//
+// The id here carries a comma on purpose: an array type joins with
+// commas, so a number can only reach the comparison through an id that
+// contains one.
+func TestDeleteSubflow_RefusesWhenInstanceTypeArrayHoldsANumber(t *testing.T) {
+	const globalBody = `{
+		"id":"global",
+		"subflows":[
+			{"id":"X,1e-7","type":"subflow","name":"Comma","in":[],"out":[],"env":[],"nodes":[],"configs":[]}
+		],
+		"configs":[]
+	}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flow/global":
+			_, _ = w.Write([]byte(globalBody))
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			// String(["subflow:X",1e-7]) is "subflow:X,1e-7" in
+			// JavaScript, and that names the definition above.
+			_, _ = w.Write([]byte(`[
+				{"id":"tab1","type":"tab","label":"Home"},
+				{"id":"i1","type":["subflow:X",1e-7],"z":"tab1","x":140,"y":140}
+			]`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := clientWithBackup(t, srv.URL)
+	err := c.DeleteSubflow(context.Background(), "X,1e-7")
+	if err == nil {
+		t.Fatal("expected the delete to be refused for an array-typed instance holding a number, got nil")
+	}
+	var inUse *SubflowInUseError
+	if !errors.As(err, &inUse) {
+		t.Fatalf("expected *SubflowInUseError, got %T: %v", err, err)
+	}
+	if len(inUse.Refs) != 1 {
+		t.Fatalf("expected 1 reference, got %d: %+v", len(inUse.Refs), inUse.Refs)
+	}
+	if inUse.Refs[0].NodeID != "i1" {
+		t.Errorf("unexpected reference: %+v", inUse.Refs[0])
+	}
+}

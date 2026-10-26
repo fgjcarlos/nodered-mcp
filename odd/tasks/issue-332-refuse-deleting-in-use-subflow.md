@@ -183,6 +183,29 @@ original findings but introduced two new ones, both reproduced live.
     instance with an unreadable id was reported as an empty name. Both read
     properly now.
 
+### Third round: the number rendering
+The second round was reviewed once more and rejected for one item: the
+JavaScript number emulation.
+
+13. **The number rendering was not JavaScript's.** `jsNumber` used Go's own
+    formatting, which says "1e-07" where JavaScript says "1e-7", and "0" for
+    negative zero where JavaScript also says "0" but Go's shortest form does
+    not. A number can reach the comparison inside an array type, and the
+    array joins with commas, so the id has to carry one for the difference
+    to matter — a reachable shape through `create_subflow` (caller-chosen id)
+    and `set_flows`, and reproduced live. `jsNumber` now implements the
+    ECMAScript `Number::toString` algorithm: the shortest round-tripping
+    digits, rendered as a plain decimal or in exponential form depending on
+    where the decimal point falls.
+
+    The rendering was then checked differentially against node — the runtime
+    is V8 — over 3963 JSON-representable numbers and 4000 random JSON
+    structures: every one agrees with `String()`. The only difference found
+    was `Infinity`, which JSON cannot represent and a flow file therefore
+    cannot carry. The number table is pinned in
+    `TestJSNumberMatchesJavaScript`; the shape that motivated the fix is
+    pinned in `TestDeleteSubflow_RefusesWhenInstanceTypeArrayHoldsANumber`.
+
 The two rounds together are the reason the record says "runtime proof: local
 httptest fixtures plus a real Node-RED 5.0.8": every shape the runtime can
 produce was exercised against a real runtime, not reasoned about from the data

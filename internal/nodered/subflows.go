@@ -466,12 +466,62 @@ func jsString(v any) string {
 	return ""
 }
 
-// jsNumber formats a JSON number the way JavaScript prints it.
+// jsNumber formats a JSON number the way JavaScript's Number::toString
+// does.
+//
+// The runtime compares a node's type against /^subflow:(.+)$/ after
+// coercing it with String(), and a number can reach that comparison
+// inside an array type. The rendering therefore has to match
+// JavaScript's exactly: Go's own formatting says "1e-07" where
+// JavaScript says "1e-7", and that difference is enough for the guard
+// to miss a reference.
+//
+// The algorithm is the one in the ECMAScript specification: take the
+// shortest decimal digits that round-trip, then render them as a plain
+// decimal or in exponential form depending on where the decimal point
+// falls.
 func jsNumber(f float64) string {
-	if f == math.Trunc(f) && math.Abs(f) < 1e21 {
-		return strconv.FormatFloat(f, 'f', -1, 64)
+	if f == 0 {
+		// String(-0) is "0" in JavaScript.
+		return "0"
 	}
-	return strconv.FormatFloat(f, 'g', -1, 64)
+	if f < 0 {
+		return "-" + jsNumber(-f)
+	}
+	if math.IsInf(f, 1) {
+		return "Infinity"
+	}
+	// The shortest round-tripping digits, in the form "d.ddde±XX".
+	sci := strconv.FormatFloat(f, 'e', -1, 64)
+	mantissa, expPart, _ := strings.Cut(sci, "e")
+	exp, err := strconv.Atoi(expPart)
+	if err != nil {
+		return sci
+	}
+	digits := strings.Replace(mantissa, ".", "", 1)
+	k := len(digits)
+	// n is where the decimal point falls relative to the digits: the
+	// value is digits × 10^(n-k).
+	n := exp + 1
+	switch {
+	case k <= n && n <= 21:
+		return digits + strings.Repeat("0", n-k)
+	case 0 < n && n <= 21:
+		return digits[:n] + "." + digits[n:]
+	case -6 < n && n <= 0:
+		return "0." + strings.Repeat("0", -n) + digits
+	default:
+		exponent := n - 1
+		sign := "+"
+		if exponent < 0 {
+			sign = "-"
+			exponent = -exponent
+		}
+		if k == 1 {
+			return digits + "e" + sign + strconv.Itoa(exponent)
+		}
+		return digits[:1] + "." + digits[1:] + "e" + sign + strconv.Itoa(exponent)
+	}
 }
 
 // subflowFlowItems extracts the flow array from a /flows body.
