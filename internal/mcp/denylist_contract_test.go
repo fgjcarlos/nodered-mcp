@@ -120,7 +120,8 @@ func TestIssue329_PatchedNodeMembersAreRefused(t *testing.T) {
 	for _, key := range []string{"nodes", "configs", "subflows"} {
 		t.Run(key, func(t *testing.T) {
 			srv, seen := issue329Runtime(t, map[string]string{
-				"GET /flow/tabA": `{"id":"tabA","label":"A","nodes":[{"id":"n1","type":"inject","z":"tabA","x":140,"y":140,"wires":[]}]}`,
+				"GET /flows": issue329FlatConfig(`{"id":"tabA","type":"tab","label":"A"}`,
+					`{"id":"n1","type":"inject","z":"tabA","x":140,"y":140,"wires":[]}`),
 			})
 			s := issue329Server(t, srv, "exec")
 
@@ -156,7 +157,7 @@ func TestIssue329_WiringTouchesForbiddenNodeIsRefused(t *testing.T) {
 	other := `{"id":"n2","type":"debug","z":"tabA","x":240,"y":140,"wires":[]}`
 
 	srv, seen := issue329Runtime(t, map[string]string{
-		"GET /flow/tabA": `{"id":"tabA","label":"A","nodes":[` + exec + `,` + other + `]}`,
+		"GET /flows": issue329FlatConfig(`{"id":"tabA","type":"tab","label":"A"}`, exec, other),
 	})
 	s := issue329Server(t, srv, "exec")
 

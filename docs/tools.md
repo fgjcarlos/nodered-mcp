@@ -47,6 +47,22 @@ hardware commands. This policy governs automatic MCP handler replays; the
 existing `set_context` retry after an explicit provisioning-related HTTP 404
 is unchanged.
 
+### Concurrent edits
+
+The granular tools (`add_node`, `update_node`, `delete_node`,
+`connect_nodes`, `disable_flow`, `enable_flow`, `instantiate_subflow`) read the
+whole configuration once, with the revision that goes with it, and deploy that
+same revision. The tab the edit patches is therefore the tab the deployment
+carries, and three things follow:
+
+- a change another editor made to a property the edit does not touch survives
+  the edit — the edit is applied on top of the current state, not on top of an
+  older copy of it;
+- a deployment that lands after the snapshot is refused by the runtime with a
+  **409**, and the edit is not replayed on top of it;
+- a conflict is a conflict: the tool reports it instead of overwriting the
+  other editor's work. Read the flow again before retrying.
+
 ## Backup recovery limits
 
 Automatic backups are **structural snapshots of `GET /flows`**, not full
@@ -92,16 +108,16 @@ access is granted to the MCP server.
 | `search_flows` | `GET /flows` | read | |
 | `get_flow` | `GET /flow/:id` | read | |
 | `create_flow` | `POST /flow` | write | |
-| `update_flow` | `PUT /flow/:id` | write | Full rewrite; prefer the granular tools; the written tab is judged in the context of the whole configuration |
+| `update_flow` | `GET /flows` + `POST /flows` | write | Full rewrite; prefer the granular tools; the written tab is judged in the context of the whole configuration |
 | `delete_flow` | `DELETE /flow/:id` | write | |
 | `set_flows` | `POST /flows` | write | Full deploy, most destructive; the configuration is validated first (`force=true` skips that) |
-| `add_node` | `PUT /flow/:id` | write | |
-| `update_node` | `PUT /flow/:id` | write | Merges properties |
-| `delete_node` | `PUT /flow/:id` | write | Cleans incoming wires |
-| `connect_nodes` | `PUT /flow/:id` | write | |
+| `add_node` | `GET /flows` + `POST /flows` | write | |
+| `update_node` | `GET /flows` + `POST /flows` | write | Merges properties |
+| `delete_node` | `GET /flows` + `POST /flows` | write | Cleans incoming wires |
+| `connect_nodes` | `GET /flows` + `POST /flows` | write | |
 | `validate_flow` | local | read | Dry-run structural check |
-| `disable_flow` | `PUT /flow/:id` | write | |
-| `enable_flow` | `PUT /flow/:id` | write | |
+| `disable_flow` | `GET /flows` + `POST /flows` | write | |
+| `enable_flow` | `GET /flows` + `POST /flows` | write | |
 | `inject_node` | `POST /inject/:id` | action | Excluded from `--read-only`; optional payload |
 | `export_flow` | `GET /flow/:id` | read | |
 | `import_flow` | `POST /flow` | write | |
@@ -110,7 +126,7 @@ access is granted to the MCP server.
 | `create_subflow` | `PUT /flow/global` | write | The definition's topology is validated first |
 | `update_subflow` | `PUT /flow/global` | write | The definition's topology is validated first |
 | `delete_subflow` | `PUT /flow/global` | write | Refuses while the definition is still instantiated |
-| `instantiate_subflow` | `PUT /flow/:id` | write | |
+| `instantiate_subflow` | `GET /flows` + `POST /flows` | write | |
 
 ### Deleting a subflow definition
 

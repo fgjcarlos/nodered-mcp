@@ -44,7 +44,7 @@ func TestIssue329_UpdateNodeTypeChangeIsRefused(t *testing.T) {
 // tab) but nothing is deployed.
 func TestIssue329_UpdateNodeFinalTypeIsJudged(t *testing.T) {
 	srv, seen := issue329Runtime(t, map[string]string{
-		"GET /flow/tabA": `{"id":"tabA","label":"A","nodes":[` + issue329ExecNode + `]}`,
+		"GET /flows": issue329FlatConfig(`{"id":"tabA","type":"tab","label":"A"}`, issue329ExecNode),
 	})
 	s := issue329Server(t, srv, "exec")
 
