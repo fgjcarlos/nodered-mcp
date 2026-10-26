@@ -109,8 +109,25 @@ access is granted to the MCP server.
 | `get_subflow` | `GET /flow/global` | read | |
 | `create_subflow` | `PUT /flow/global` | write | |
 | `update_subflow` | `PUT /flow/global` | write | |
-| `delete_subflow` | `PUT /flow/global` | write | |
+| `delete_subflow` | `PUT /flow/global` | write | Refuses while the definition is still instantiated |
 | `instantiate_subflow` | `PUT /flow/:id` | write | |
+
+### Deleting a subflow definition
+
+`delete_subflow` refuses to delete a definition that is still
+instantiated. An instance node — a node of type `subflow:<id>`, in a
+flow tab or nested inside another subflow definition — is the only
+thing that keeps a definition alive, and the runtime resolves that
+type at deploy time: remove the definition anyway and the instance
+keeps pointing at a missing type, the runtime logs `Waiting for
+missing types to be registered` on the next start, and the affected
+flows never deploy.
+
+The refusal names every reference that has to be removed first, and
+the definition is left untouched. The instances are removed with
+`delete_node` (an instance in a flow tab) or by rewriting the enclosing
+definition with `update_subflow` (an instance nested in another
+subflow); `delete_subflow` never removes them for you.
 
 ## Palette
 
