@@ -24,15 +24,23 @@
 #     PR adds were not covered by it. Their floors are added with the
 #     values gocyclo reports for them:
 #
-#       ValidateEffectiveConfig   internal/nodered/validate_deploy.go   3
-#       effectiveConfigIssues      internal/nodered/validate_deploy.go   3
+#       ValidateEffectiveConfig    internal/nodered/validate_deploy.go   3
+#       effectiveConfigIssues      internal/nodered/validate_deploy.go   1
+#       ownerRuleIssues            internal/nodered/validate_deploy.go   4
 #       ownerDocument              internal/nodered/validate_deploy.go  10
 #       orphanNodeIssues           internal/nodered/validate_deploy.go   8
 #       missingSubflowIssues       internal/nodered/validate_deploy.go   6
 #       duplicateIDIssues          internal/nodered/validate_deploy.go   5
 #       restoreFlowsLocked         internal/nodered/flows.go             4
+#       flatSubflowPortIssues      internal/nodered/validate_deploy.go   7
+#       subflowDefinitionPortIssues internal/nodered/validate_deploy.go  7
+#       portTargetIssues           internal/nodered/validate_deploy.go   9
 #
 #     These are new entries, not bumps: no existing floor moves.
+#     effectiveConfigIssues is 1 because the per-owner rules were
+#     extracted into ownerRuleIssues when the subflow port rules joined
+#     it — the extraction the gate asks for, not a floor moved to make
+#     a regression fit.
 #
 #   2026-10-26  handleSetContext  10 -> 8  (PR #362, closes #333)
 #     Not a change to the function: the floor was stale. gocyclo already
@@ -72,9 +80,13 @@ ValidateFlow    internal/nodered/validate.go    10
 synthesizeFlowFromFlat    internal/nodered/flows.go    15
 handleSetContext    internal/mcp/tools_context.go    8
 ValidateEffectiveConfig    internal/nodered/validate_deploy.go    3
-effectiveConfigIssues    internal/nodered/validate_deploy.go    3
+effectiveConfigIssues    internal/nodered/validate_deploy.go    1
 ownerDocument    internal/nodered/validate_deploy.go    10
 orphanNodeIssues    internal/nodered/validate_deploy.go    8
 missingSubflowIssues    internal/nodered/validate_deploy.go    6
 duplicateIDIssues    internal/nodered/validate_deploy.go    5
 restoreFlowsLocked    internal/nodered/flows.go    4
+flatSubflowPortIssues    internal/nodered/validate_deploy.go    7
+subflowDefinitionPortIssues    internal/nodered/validate_deploy.go    7
+portTargetIssues    internal/nodered/validate_deploy.go    9
+ownerRuleIssues    internal/nodered/validate_deploy.go    4

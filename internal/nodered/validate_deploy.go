@@ -62,6 +62,10 @@ const (
 	// subflow definition in the configuration. The runtime invents a
 	// phantom tab for such a node.
 	IssueOrphanNode FlowIssueKind = "orphan_node"
+	// IssueDanglingSubflowPort is a port of a subflow definition — an
+	// "in" or an "out" — whose wire names a node that is not in the
+	// definition.
+	IssueDanglingSubflowPort FlowIssueKind = "dangling_subflow_port"
 )
 
 // ConfigValidationError reports the structural issues that stopped a
@@ -146,15 +150,26 @@ func effectiveConfigIssues(items []json.RawMessage) []FlowIssue {
 	var issues []FlowIssue
 	owners, subflows := indexOwners(items)
 	issues = append(issues, duplicateIDIssues(items)...)
+	issues = append(issues, ownerRuleIssues(items, owners)...)
+	issues = append(issues, orphanNodeIssues(items, owners)...)
+	issues = append(issues, missingSubflowIssues(items, subflows)...)
+	return issues
+}
+
+// ownerRuleIssues runs the rules that are judged per owner — a tab or a
+// subflow definition — over every owner of the configuration.
+func ownerRuleIssues(items []json.RawMessage, owners []ownerRef) []FlowIssue {
+	var issues []FlowIssue
 	for _, owner := range owners {
 		doc, ok := ownerDocument(items, owner.id)
 		if !ok {
 			continue
 		}
 		issues = append(issues, ownerIssues(doc)...)
+		if owner.kind == "subflow" {
+			issues = append(issues, flatSubflowPortIssues(owner.id, items)...)
+		}
 	}
-	issues = append(issues, orphanNodeIssues(items, owners)...)
-	issues = append(issues, missingSubflowIssues(items, subflows)...)
 	return issues
 }
 
@@ -395,6 +410,158 @@ func withoutLinkOutWires(item json.RawMessage) json.RawMessage {
 		return item
 	}
 	return out
+}
+
+// flatSubflowPortIssues checks the ports of a subflow definition in a
+// flat configuration, where the members of the definition are the entries
+// that name it as their owner.
+func flatSubflowPortIssues(defID string, items []json.RawMessage) []FlowIssue {
+	members := map[string]bool{}
+	var def json.RawMessage
+	for _, item := range items {
+		entry := decodeConfigEntry(item)
+		if entry.Type == "subflow" && entry.ID == defID {
+			def = item
+			continue
+		}
+		if entry.Z == defID && entry.ID != "" {
+			members[entry.ID] = true
+		}
+	}
+	if def == nil {
+		return nil
+	}
+	return subflowPortIssues(defID, members, def)
+}
+
+// subflowDefinitionPortIssues checks the ports of a nested subflow
+// definition against its own members. The nested shape is what the
+// subflow write path carries: the definition holds its nodes, its
+// configs and its groups in arrays.
+func subflowDefinitionPortIssues(def json.RawMessage) []FlowIssue {
+	var meta struct {
+		ID     string                       `json:"id"`
+		Groups []map[string]json.RawMessage `json:"groups"`
+	}
+	if err := json.Unmarshal(def, &meta); err != nil {
+		return nil
+	}
+	members, err := subflowDefinitionMembers(def)
+	if err != nil {
+		return nil
+	}
+	ids := map[string]bool{}
+	for _, member := range members {
+		if id := nodeID(member); id != "" {
+			ids[id] = true
+		}
+	}
+	// The groups of a definition are members too: the runtime resolves
+	// the ports against the groups as well.
+	for _, group := range meta.Groups {
+		if id := nodeID(group); id != "" {
+			ids[id] = true
+		}
+	}
+	return subflowPortIssues(meta.ID, ids, def)
+}
+
+// subflowPortIssues reports the port wires of a subflow definition that
+// name a node which is not in the definition.
+//
+// The runtime resolves the ports of a subflow against the definition's own
+// members when it starts an instance: an "in" port that names a node which
+// is not there makes the start throw — "TypeError: Cannot read properties
+// of undefined (reading 'id')" in @node-red/runtime/lib/flows/Subflow.js
+// — and an "out" port that names one logs "Unknown node referenced inside
+// subflow" and the output never fires. The deployment itself answers 204
+// in both cases, so the deployment looks like it worked while the flows do
+// not start.
+//
+// The one reference that is legal and is not a member is the definition's
+// own id on an "out" port: that is how a subflow wires its input straight
+// to its output.
+func subflowPortIssues(defID string, members map[string]bool, def json.RawMessage) []FlowIssue {
+	var ports struct {
+		In  []json.RawMessage `json:"in"`
+		Out []json.RawMessage `json:"out"`
+	}
+	if err := json.Unmarshal(def, &ports); err != nil {
+		return nil
+	}
+	var issues []FlowIssue
+	issues = append(issues, portTargetIssues(defID, members, ports.In, "in")...)
+	issues = append(issues, portTargetIssues(defID, members, ports.Out, "out")...)
+	return issues
+}
+
+// portTargetIssues reports the wires of one port list that name a node
+// which is not in the definition.
+func portTargetIssues(defID string, members map[string]bool, ports []json.RawMessage, kind string) []FlowIssue {
+	var issues []FlowIssue
+	for _, port := range ports {
+		var parsed struct {
+			Wires []struct {
+				ID json.RawMessage `json:"id"`
+			} `json:"wires"`
+		}
+		if err := json.Unmarshal(port, &parsed); err != nil {
+			continue
+		}
+		for _, wire := range parsed.Wires {
+			id, ok := rawString(wire.ID)
+			if !ok || id == "" {
+				issues = append(issues, danglingSubflowPortIssue(defID, kind, ""))
+				continue
+			}
+			if members[id] {
+				continue
+			}
+			if kind == "out" && id == defID {
+				// A subflow can wire its input straight to its output.
+				continue
+			}
+			issues = append(issues, danglingSubflowPortIssue(defID, kind, id))
+		}
+	}
+	return issues
+}
+
+// validateSubflowPorts refuses a subflow definition whose ports name a
+// node that is not in it. The write path uses it: the runtime throws when
+// it starts an instance of such a subflow, and the write that installed it
+// had already answered with success.
+func validateSubflowPorts(def json.RawMessage) error {
+	issues := subflowDefinitionPortIssues(def)
+	if len(issues) == 0 {
+		return nil
+	}
+	messages := make([]string, 0, len(issues))
+	for _, issue := range issues {
+		messages = append(messages, issue.Message)
+	}
+	return &FlowGuardError{Message: strings.Join(messages, "; ")}
+}
+
+// danglingSubflowPortIssue builds the issue for a port wire that names
+// a node which is not in the definition.
+func danglingSubflowPortIssue(defID, kind, target string) FlowIssue {
+	what := "an \"in\" port"
+	if kind == "out" {
+		what = "an \"out\" port"
+	}
+	if target == "" {
+		return FlowIssue{
+			Kind:    IssueDanglingSubflowPort,
+			Target:  defID,
+			Message: fmt.Sprintf("subflow %q has %s whose wire names no node; the runtime throws when it starts an instance of this subflow, and the deployment that installed it had already answered with success", defID, what),
+		}
+	}
+	return FlowIssue{
+		Kind:    IssueDanglingSubflowPort,
+		Target:  target,
+		Message: fmt.Sprintf("subflow %q has %s wired to %q, which is not a node of that subflow; the runtime throws when it starts an instance of this subflow, and the deployment that installed it had already answered with success", defID, what, target),
+	}
 }
 
 // configEntry is one flat entry of a configuration, read the way the

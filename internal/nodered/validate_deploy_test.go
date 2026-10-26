@@ -283,3 +283,99 @@ func mustFlowArray(t *testing.T, cfg string) []json.RawMessage {
 	}
 	return items
 }
+
+// A subflow whose "in" port names a node that is not in it makes the
+// runtime throw when it starts an instance of that subflow, and the
+// deployment that installed it had already answered with success.
+func TestValidateEffectiveConfig_DanglingSubflowInPort(t *testing.T) {
+	const cfg = `[
+	  {"id":"t1","type":"tab","label":"Home"},
+	  {"id":"sf_a","type":"subflow","name":"A",
+	   "in":[{"x":40,"y":40,"wires":[{"id":"ghost","port":0}]}],
+	   "out":[{"x":160,"y":160,"wires":[{"id":"inner","port":0}]}]},
+	  {"id":"inner","type":"inject","z":"sf_a","x":140,"y":140,"wires":[[]]},
+	  {"id":"inst","type":"subflow:sf_a","z":"t1","x":300,"y":140,"wires":[[]]}
+	]`
+	issues := ValidateEffectiveConfig(RawFlow(cfg))
+	if len(issues) != 1 {
+		t.Fatalf("expected exactly 1 issue, got %d: %+v", len(issues), issues)
+	}
+	if issues[0].Kind != IssueDanglingSubflowPort {
+		t.Errorf("expected %s, got %s", IssueDanglingSubflowPort, issues[0].Kind)
+	}
+	if issues[0].Target != "ghost" {
+		t.Errorf("expected the issue to name the missing node, got %+v", issues[0])
+	}
+}
+
+// An "out" port that names a node which is not in the definition is
+// refused too: the runtime logs "Unknown node referenced inside subflow"
+// and the output never fires.
+func TestValidateEffectiveConfig_DanglingSubflowOutPort(t *testing.T) {
+	const cfg = `[
+	  {"id":"t1","type":"tab","label":"Home"},
+	  {"id":"sf_a","type":"subflow","name":"A",
+	   "in":[{"x":40,"y":40,"wires":[{"id":"inner","port":0}]}],
+	   "out":[{"x":160,"y":160,"wires":[{"id":"ghost","port":0}]}]},
+	  {"id":"inner","type":"inject","z":"sf_a","x":140,"y":140,"wires":[[]]}
+	]`
+	issues := ValidateEffectiveConfig(RawFlow(cfg))
+	if len(issues) != 1 || issues[0].Kind != IssueDanglingSubflowPort {
+		t.Fatalf("expected one dangling port, got %+v", issues)
+	}
+}
+
+// A subflow that wires its input straight to its output names its own
+// id on the "out" port. The runtime handles that case explicitly, so it
+// is legal and must not be refused.
+func TestValidateEffectiveConfig_SubflowOutputWiredToItsOwnID(t *testing.T) {
+	const cfg = `[
+	  {"id":"t1","type":"tab","label":"Home"},
+	  {"id":"sf_a","type":"subflow","name":"A",
+	   "in":[{"x":40,"y":40,"wires":[{"id":"inner","port":0}]}],
+	   "out":[{"x":160,"y":160,"wires":[{"id":"sf_a","port":0}]}]},
+	  {"id":"inner","type":"inject","z":"sf_a","x":140,"y":140,"wires":[[]]}
+	]`
+	issues := ValidateEffectiveConfig(RawFlow(cfg))
+	if len(issues) != 0 {
+		t.Fatalf("expected no issues, got %d: %+v", len(issues), issues)
+	}
+}
+
+// The same self-reference on an "in" port is not legal: the runtime
+// resolves the "in" ports against the members of the definition, and its
+// own id is not one of them, so the start throws.
+func TestValidateEffectiveConfig_SubflowInputWiredToItsOwnIDIsRefused(t *testing.T) {
+	const cfg = `[
+	  {"id":"t1","type":"tab","label":"Home"},
+	  {"id":"sf_a","type":"subflow","name":"A",
+	   "in":[{"x":40,"y":40,"wires":[{"id":"sf_a","port":0}]}],
+	   "out":[{"x":160,"y":160,"wires":[{"id":"sf_a","port":0}]}]}
+	]`
+	issues := ValidateEffectiveConfig(RawFlow(cfg))
+	if len(issues) != 1 || issues[0].Kind != IssueDanglingSubflowPort {
+		t.Fatalf("expected one dangling port, got %+v", issues)
+	}
+}
+
+// The ports of a definition whose members are nested resolve against
+// those members.
+func TestValidateEffectiveConfig_SubflowPortsInNestedShape(t *testing.T) {
+	const def = `{
+	  "id":"sf_a","type":"subflow","name":"A",
+	  "in":[{"x":40,"y":40,"wires":[{"id":"inner","port":0}]}],
+	  "out":[{"x":160,"y":160,"wires":[{"id":"inner","port":0}]}],
+	  "nodes":[{"id":"inner","type":"inject","z":"sf_a","x":140,"y":140,"wires":[[]]}]
+	}`
+	if issues := subflowDefinitionPortIssues(json.RawMessage(def)); len(issues) != 0 {
+		t.Fatalf("expected no issues, got %+v", issues)
+	}
+	broken := `{
+	  "id":"sf_a","type":"subflow","name":"A",
+	  "in":[{"x":40,"y":40,"wires":[{"id":"ghost","port":0}]}],
+	  "nodes":[{"id":"inner","type":"inject","z":"sf_a","x":140,"y":140,"wires":[[]]}]
+	}`
+	if issues := subflowDefinitionPortIssues(json.RawMessage(broken)); len(issues) != 1 {
+		t.Fatalf("expected one issue, got %+v", issues)
+	}
+}

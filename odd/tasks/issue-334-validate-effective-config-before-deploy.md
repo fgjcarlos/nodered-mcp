@@ -23,6 +23,7 @@ on 127.0.0.1:1880), not assumed:
 | Full deploy with a subflow instance and no definition | `POST /flows` with a node of type `subflow:missing-id` and no definition | **HTTP 204**, and then the runtime logs `Waiting for missing types to be registered: - subflow:missing-id` and **the flows stay stopped** |
 | Full deploy with an unknown node type | same, with type `totally-not-a-real-type` | HTTP 204, same "waiting for missing types" outcome |
 | Full deploy with a subflow definition and an instance of it | `POST /flows` with the definition, its inner node and the instance | HTTP 204; `GET /flows` returns **the definition and its inner node in the flat array**, and `GET /flow/global` returns the same definition with its nodes nested |
+| A subflow definition whose `in` port names a node that is not in it | `POST /flows` with `"in":[{"wires":[{"id":"ghost","port":0}]}]` | **HTTP 204**, and then the runtime throws `TypeError: Cannot read properties of undefined (reading 'id')` (@node-red/runtime/lib/flows/Subflow.js:223) while it starts the flows — the deployment said success and the flows did not start |
 | A node whose `z` names no tab | `POST /flows` with `z:"nowhere"` | HTTP 204, the flows start, and the node is stored with that `z` — the runtime invents a tab for it (@node-red/runtime/lib/flows/util.js, parseConfig) and the node runs outside the flow that was deployed |
 | Two entries with the same id | `POST /flows` with two nodes called `n1` | HTTP 204, the flows start, and the runtime keys every node by its id, so the last one wins and the earlier one is gone |
 
@@ -41,7 +42,13 @@ util.js, parseConfig), which the guard mirrors:
   and a runtime with a missing type refuses to start the flows;
 - **the wires of a `link out` node are recomputed** from the `links` arrays
   (`n.wires = [targets]`), so a wire of a link out that points nowhere is a
-  value the runtime overwrites — not a dangling wire.
+  value the runtime overwrites — not a dangling wire;
+- **the ports of a subflow resolve against the definition's own members**:
+  an `in` port that names a node which is not there makes the start throw,
+  and an `out` port that names one logs `Unknown node referenced inside
+  subflow` and the output never fires. The one reference that is legal and
+  is not a member is the definition's own id on an `out` port — that is how
+  a subflow wires its input straight to its output.
 
 The last point is why the guard leaves link nodes alone: a `link in` may
 point at a `link out` in another tab (that is what a link is for), and a
@@ -69,7 +76,8 @@ its wires then, so they are checked like any other node's.
 ## Work unit
 - `internal/nodered/validate_deploy.go` (new): `ValidateEffectiveConfig`
   and the rules — the dangling wire, the orphan node, the duplicate id, the
-  subflow instance without a definition. The per-owner rules are the ones
+  subflow instance without a definition, and the port of a subflow that
+  names a node which is not in it. The per-owner rules are the ones
   `ValidateFlow` applies, applied to a document rebuilt per owner (a tab or
   a subflow definition), so the tab path and the deployment path judge a
   wire by the same rule.
@@ -93,14 +101,14 @@ its wires then, so they are checked like any other node's.
   guard and the recovery path, so a caller knows both before it tries.
 
 ## Delivery
-- Tests: 17 unit tests for the rules (internal/nodered/validate_deploy_test.go),
-  7 write-path tests (internal/nodered/validate_deploy_write_test.go) and
+- Tests: 22 unit tests for the rules (internal/nodered/validate_deploy_test.go),
+  9 write-path tests (internal/nodered/validate_deploy_write_test.go) and
   5 tool-boundary tests (internal/mcp/config_validation_test.go).
-- The complexity gate now covers the new code: floors for the seven new
-  named functions are added to scripts/complexity-baseline.txt. No existing
-  floor moves, and the PR adds no function above the threshold — the tree
-  has the same 25 functions over 15 before and after (the gate only checks
-  the functions named in the baseline, which is a known narrowness of it).
+- The complexity gate now covers the new code: floors for the new named
+  functions are added to scripts/complexity-baseline.txt. No existing floor
+  moves, and the PR adds no function above the threshold — the tree has the
+  same 25 functions over 15 before and after (the gate only checks the
+  functions named in the baseline, which is a known narrowness of it).
 
 ## Progress
 **RED**, re-derived against the tree before the fix (`main` @ 5c1791b, in a
@@ -113,7 +121,7 @@ deployed the broken configuration.
 --- FAIL: TestCreateSubflow_DanglingWireIsRefused  RED: expected CreateSubflow to refuse a dangling wire, got nil
 ```
 
-**GREEN** on the branch: the same three tests pass, plus 26 more.
+**GREEN** on the branch: the same three tests pass, plus 33 more.
 
 The rules, and what each one is for:
 
@@ -130,6 +138,15 @@ The rules, and what each one is for:
   The runtime installs a node type it cannot resolve, logs `Waiting for
   missing types to be registered` and leaves the flows stopped — measured
   above, against a real runtime.
+- **A port of a subflow definition that names a node which is not in it.**
+  The runtime resolves the ports against the definition's own members when
+  it starts an instance: an `in` port that names a node which is not there
+  makes the start throw, and an `out` port that names one logs `Unknown
+  node referenced inside subflow` and the output never fires. The
+  deployment answers 204 in both cases, so the deployment looks like it
+  worked while the flows do not start — measured above, against a real
+  runtime. The one legal reference that is not a member is the
+  definition's own id on an `out` port, and the guard leaves it alone.
 
 The two topologies the runtime owns are left alone, and the tests say so: a
 `link out` with a `links` array has its wires recomputed by the runtime, so

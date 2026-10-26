@@ -203,6 +203,9 @@ func (c *Client) CreateSubflow(ctx context.Context, subflow json.RawMessage) (Ra
 	if err := validateZRefsInFlow(RawFlow(prepared), newID); err != nil {
 		return nil, err
 	}
+	if err := validateSubflowPorts(prepared); err != nil {
+		return nil, err
+	}
 
 	existing, configs, err := c.fetchGlobalSubflows(ctx)
 	if err != nil {
@@ -254,6 +257,9 @@ func (c *Client) UpdateSubflow(ctx context.Context, id string, subflow json.RawM
 		return err
 	}
 	if err := validateZRefsInFlow(RawFlow(prepared), id); err != nil {
+		return err
+	}
+	if err := validateSubflowPorts(prepared); err != nil {
 		return err
 	}
 	// Force the id in the body to match the path argument. The editor

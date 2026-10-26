@@ -233,3 +233,29 @@ func asConfigValidationError(err error, target **ConfigValidationError) bool {
 func asFlowGuardError(err error, target **FlowGuardError) bool {
 	return errors.As(err, target)
 }
+
+// A subflow definition whose "in" port names a node that is not in it is
+// refused: the runtime throws when it starts an instance of it, and the
+// write that installed it had already answered with success.
+func TestCreateSubflow_RefusesDefinitionWithDanglingPort(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("the runtime was contacted for a definition that was refused: %s %s", r.Method, r.URL.Path)
+	})
+	def := json.RawMessage(`{
+	  "id":"sf_a","type":"subflow","name":"A",
+	  "in":[{"x":40,"y":40,"wires":[{"id":"ghost","port":0}]}],
+	  "out":[{"x":160,"y":160,"wires":[{"id":"inner","port":0}]}],
+	  "nodes":[{"id":"inner","type":"inject","z":"sf_a","x":140,"y":140,"wires":[[]]}]
+	}`)
+	_, err := c.CreateSubflow(context.Background(), def)
+	if err == nil {
+		t.Fatal("expected CreateSubflow to refuse a dangling subflow port, got nil")
+	}
+	var guard *FlowGuardError
+	if !asFlowGuardError(err, &guard) {
+		t.Fatalf("expected a FlowGuardError, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "ghost") {
+		t.Errorf("expected the error to name the missing node: %v", err)
+	}
+}
