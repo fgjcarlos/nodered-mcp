@@ -53,7 +53,9 @@
 #
 #       newConfigIndex              internal/nodered/validate_deploy.go   8
 #       ownerDocument               internal/nodered/validate_deploy.go   8
-#       orphanNodeIssues            internal/nodered/validate_deploy.go   8
+#       orphanNodeIssues            internal/nodered/validate_deploy.go   5
+#       ownerlessNodeIssue         internal/nodered/validate_deploy.go   6
+#       validateLinkShapes         internal/nodered/validate.go          8
 #       validateTabEntries          internal/nodered/validate_deploy.go   8
 #       withoutLinkOutWires         internal/nodered/validate_deploy.go   8
 #       portTargetIssues            internal/nodered/validate_deploy.go   9
@@ -71,6 +73,19 @@
 #       RestoreFlows                internal/nodered/flows.go             6
 #
 #     No existing floor moves: these are new entries.
+#
+#   2026-10-26  the second review round  (PR #363, closes #334)
+#     The second round of the adversarial review left four small
+#     findings, and the floors follow the code that answers them:
+#
+#       orphanNodeIssues            internal/nodered/validate_deploy.go   5
+#       ownerlessNodeIssue         internal/nodered/validate_deploy.go   6
+#       validateLinkShapes         internal/nodered/validate.go          8
+#
+#     orphanNodeIssues went down because the decision about a node
+#     without an owner moved into ownerlessNodeIssue — the extraction
+#     the gate asks for. The links-shape rule joined the shared engine,
+#     so the per-tab and the subflow write paths refuse it too.
 #
 #   2026-10-26  handleSetContext  10 -> 8  (PR #362, closes #333)
 #     Not a change to the function: the floor was stale. gocyclo already
@@ -112,7 +127,9 @@ handleSetContext    internal/mcp/tools_context.go    8
 ValidateEffectiveConfig    internal/nodered/validate_deploy.go    3
 effectiveConfigIssues    internal/nodered/validate_deploy.go    3
 ownerDocument    internal/nodered/validate_deploy.go    8
-orphanNodeIssues    internal/nodered/validate_deploy.go    8
+orphanNodeIssues    internal/nodered/validate_deploy.go    5
+ownerlessNodeIssue    internal/nodered/validate_deploy.go    6
+validateLinkShapes    internal/nodered/validate.go    8
 missingSubflowIssues    internal/nodered/validate_deploy.go    4
 duplicateIDIssues    internal/nodered/validate_deploy.go    5
 restoreFlowsLocked    internal/nodered/flows.go    4

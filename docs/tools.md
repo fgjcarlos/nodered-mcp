@@ -136,8 +136,9 @@ before anything is sent to the runtime. The check is local: nothing
 reaches Node-RED, and no backup is taken, when the configuration is
 refused.
 
-The rules are the ones the runtime applies to the same array, and each
-of them is a reference that does not resolve:
+The rules are the ones the runtime applies to the same array — with one
+exception, called out below — and each of them is a reference that does
+not resolve:
 
 - **a wire that names no node in the same tab (or the same subflow)** —
   this is the repository's rule, shared with the per-tab write path,

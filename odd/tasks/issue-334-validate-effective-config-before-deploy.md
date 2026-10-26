@@ -133,7 +133,7 @@ same explicit escape hatch the restore has.
   guard and the recovery path, so a caller knows both before it tries.
 
 ## Delivery
-- Tests: 27 unit tests for the rules (internal/nodered/validate_deploy_test.go),
+- Tests: 30 unit tests for the rules (internal/nodered/validate_deploy_test.go),
   14 write-path tests (internal/nodered/validate_deploy_write_test.go) and
   7 tool-boundary tests (internal/mcp/config_validation_test.go).
 - The complexity gate now covers the new code: floors for the new named
@@ -149,7 +149,9 @@ same explicit escape hatch the restore has.
 ## Progress
 **RED**, re-derived against the tree before the fix (`main` @ 5c1791b, in a
 separate checkout) rather than against a half-reverted copy: all three
-paths deployed the broken configuration.
+paths deployed the broken configuration. The tests used for the RED run
+were written for that checkout (the branch's own test files use the new
+API and do not compile there), so the names below are the scratch ones:
 
 ```
 --- FAIL: TestRED_SetFlows_DanglingWireIsRefused       RED: expected SetFlows to refuse a dangling wire, got nil
@@ -158,7 +160,8 @@ paths deployed the broken configuration.
 --- FAIL: TestRED_CreateSubflow_DanglingPortIsRefused  RED: expected CreateSubflow to refuse a dangling subflow port, got nil
 ```
 
-**GREEN** on the branch: the same four tests pass, plus 44 more.
+**GREEN** on the branch: the equivalent tests in the branch pass — the
+same four cases, plus 47 more.
 
 The rules, and what each one is for:
 
@@ -191,6 +194,13 @@ The rules, and what each one is for:
 - **A link node whose `links` field is not an array.** The runtime
   iterates that field with forEach when it parses the configuration, so a
   truthy value that is not an array stops the deploy with a TypeError.
+  The rule lives in the shared engine, so the per-tab and the subflow
+  write paths refuse it too, not only the whole-configuration path.
+- **A canvas node with no `z` at all.** The runtime looks a node's
+  container up by its z, finds none and drops the node: it never runs,
+  and the flow looks fine and does nothing. A *configuration* node with
+  no z is legal — the runtime files it at global scope — so the rule
+  only fires on the nodes that carry canvas coordinates.
 
 The two topologies the runtime owns are left alone, and the tests say so: a
 `link out` with a truthy `links` array has its wires recomputed by the
@@ -233,6 +243,15 @@ user-visible text (F11), a misleading error when a subflow body's id did
 not match the path id (F12), and the numbers in this record (F13). The
 review also measured the validation at 4.7s for a ten-thousand-entry
 configuration; with the index it is 256ms.
+
+A second round of the same review, on the fixes, closed every blocking
+finding and left seven observations, none of them a blocker. Four are
+fixed here too: the refusal of a single-tab write was rendered with
+"calling Node-RED" even though the runtime was never contacted (R1); the
+two escape hatches did not treat the tab rule the same way, and a forced
+restore could empty the runtime (R2); the new `links` rule was not
+shared with the per-tab and the subflow write paths (R3); and a canvas
+node with no `z` was accepted although the runtime drops it (R4).
 
 **A finding, not fixed here.** The complexity gate only checks the
 functions named in scripts/complexity-baseline.txt. The tree carries 25

@@ -168,10 +168,12 @@ func validateEffectiveConfig(items []json.RawMessage) error {
 // entries of that tab are the caller's, and the rest of the
 // configuration is the runtime's.
 //
-// The rules are the ones that need the whole configuration to judge: an
-// instance of a subflow whose definition is not there (the runtime would
-// install a node type it cannot resolve and stop), and an id that is
-// already used by another entry (the runtime keys every node by its id).
+// The rule is the one that needs the whole configuration to judge: an
+// instance of a subflow whose definition is not there. The runtime would
+// install a node type it cannot resolve and leave the flows stopped. The
+// other whole-configuration rules are not applied here: an id that is
+// already used is caught by the pre-existing owner check of the write
+// path, and a problem in another tab is not the caller's to answer for.
 func validateTabEntries(items []json.RawMessage, tabID string) error {
 	ix := newConfigIndex(items)
 	var issues []FlowIssue
@@ -257,7 +259,6 @@ type configIndex struct {
 	entries  []configEntry
 	owners   []ownerRef
 	subflows map[string]bool
-	ids      map[string]bool
 	members  map[string][]int
 }
 
@@ -265,16 +266,12 @@ type configIndex struct {
 func newConfigIndex(items []json.RawMessage) *configIndex {
 	ix := &configIndex{
 		subflows: map[string]bool{},
-		ids:      map[string]bool{},
 		members:  map[string][]int{},
 	}
 	for i, item := range items {
 		entry := decodeConfigEntry(item, i)
 		ix.raws = append(ix.raws, item)
 		ix.entries = append(ix.entries, entry)
-		if entry.HasID && entry.ID != "" {
-			ix.ids[entry.ID] = true
-		}
 		switch entry.Type {
 		case "tab", "subflow":
 			// The runtime tells a tab from a subflow definition with a
@@ -430,29 +427,56 @@ func (ix *configIndex) orphanNodeIssues() []FlowIssue {
 		case "tab", "subflow", "group":
 			continue
 		}
-		if !entry.HasZ {
-			// No z at all: the runtime files the node at global scope.
-			continue
+		if issue := ix.ownerlessNodeIssue(entry, known); issue != nil {
+			issues = append(issues, *issue)
 		}
-		if !entry.ZIsString {
-			issues = append(issues, orphanNodeIssue(entry, entry.ZRaw))
-			continue
-		}
-		if entry.Z == "" || known[entry.Z] {
-			continue
-		}
-		issues = append(issues, orphanNodeIssue(entry, entry.ZRaw))
 	}
 	return issues
 }
 
+// ownerlessNodeIssue returns the issue for a node that belongs to no
+// owner, or nil when the node names one.
+func (ix *configIndex) ownerlessNodeIssue(entry configEntry, known map[string]bool) *FlowIssue {
+	if entry.HasZ && entry.ZIsString && entry.Z != "" {
+		if known[entry.Z] {
+			return nil
+		}
+		issue := orphanNodeIssue(entry, entry.ZRaw)
+		return &issue
+	}
+	// No z, an empty one, or one that is not a string. A configuration
+	// node (no canvas coordinates) is filed at global scope by the
+	// runtime, which is legal. A canvas node is not: the runtime looks
+	// its container up by the z, finds none, and drops the node — it
+	// never runs, and the flow looks fine and does nothing.
+	if !hasCanvasCoords(ix.raw(entry.Index)) {
+		return nil
+	}
+	issue := orphanNodeIssue(entry, entry.ZRaw)
+	return &issue
+}
+
 // orphanNodeIssue builds the issue for a node that belongs to no owner.
+//
+// The runtime looks a node's container up by its z, and there are two
+// ways to name none: a z that names nothing (the runtime invents a tab
+// for the node, so it runs outside the flow that is being deployed) and
+// no z at all on a canvas node (the runtime drops the node, so it never
+// runs). The message says which of the two it is.
 func orphanNodeIssue(entry configEntry, z json.RawMessage) FlowIssue {
+	symptom := "the runtime invents a tab for it, so the node runs outside the flow you are deploying"
+	if entry.Z == "" {
+		symptom = "the runtime drops it, so the node never runs and the flow looks fine and does nothing"
+	}
+	owner := fmt.Sprintf("references z=%s", jsonValueText(z))
+	if !entry.HasZ {
+		owner = "has no z"
+	}
 	return FlowIssue{
 		Kind:    IssueOrphanNode,
 		NodeID:  entry.ID,
 		Target:  entry.Z,
-		Message: fmt.Sprintf("node %q references z=%s, which is neither a tab nor a subflow definition in this configuration; the runtime invents a tab for it, so the node runs outside the flow you are deploying", entry.ID, jsonValueText(z)),
+		Message: fmt.Sprintf("node %q %s, which is neither a tab nor a subflow definition in this configuration; %s", entry.ID, owner, symptom),
 	}
 }
 
@@ -681,7 +705,10 @@ func validateSubflowPorts(def json.RawMessage) error {
 func ownerIssues(doc RawFlow) []FlowIssue {
 	var out []FlowIssue
 	for _, issue := range ValidateFlow(doc) {
-		if issue.Kind == IssueDuplicateID {
+		switch issue.Kind {
+		case IssueDuplicateID, IssueInvalidLinks:
+			// Reported once, by the whole-configuration pass: it covers
+			// the cross-owner case a per-document rule cannot see.
 			continue
 		}
 		out = append(out, issue)

@@ -178,6 +178,12 @@ func (s *Server) handleUpdateFlow(ctx context.Context, req mcp.CallToolRequest) 
 	slog.Debug("tool: update_flow", "id", id)
 
 	if err := s.nrClient.UpdateFlow(ctx, id, flow); err != nil {
+		if res, refused := configValidationResult(err,
+			"Fix the references and update again. The tab you are writing is judged in "+
+				"the context of the whole configuration, because a deployment installs "+
+				"the whole configuration."); refused {
+			return res, nil
+		}
 		slog.Error("update_flow failed", "error", err, "id", id)
 		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}

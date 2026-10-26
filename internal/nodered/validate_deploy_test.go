@@ -457,3 +457,48 @@ func TestValidateEffectiveConfig_OrphanNodeWithANonStringZ(t *testing.T) {
 		t.Errorf("expected the message to quote the value, got: %s", issues[0].Message)
 	}
 }
+
+// A canvas node with no z at all is dropped by the runtime: it looks up
+// the node's container by the z, finds none, and never runs the node.
+func TestValidateEffectiveConfig_CanvasNodeWithoutZIsAnOrphan(t *testing.T) {
+	const cfg = `[
+	  {"id":"t1","type":"tab","label":"Home"},
+	  {"id":"n1","type":"inject","x":140,"y":140,"wires":[]}
+	]`
+	issues := ValidateEffectiveConfig(RawFlow(cfg))
+	if len(issues) != 1 || issues[0].Kind != IssueOrphanNode {
+		t.Fatalf("expected one orphan_node issue, got %+v", issues)
+	}
+}
+
+// A configuration node with no z is legal: the runtime files it at
+// global scope.
+func TestValidateEffectiveConfig_GlobalConfigNodeWithoutZIsFine(t *testing.T) {
+	const cfg = `[
+	  {"id":"t1","type":"tab","label":"Home"},
+	  {"id":"cfg1","type":"mqtt-broker","name":"broker"}
+	]`
+	issues := ValidateEffectiveConfig(RawFlow(cfg))
+	if len(issues) != 0 {
+		t.Fatalf("expected no issues, got %d: %+v", len(issues), issues)
+	}
+}
+
+// A link node whose links field is not an array is refused by the
+// per-document guard too, so the tab write path stops it before the
+// runtime does.
+func TestValidateFlowWires_RefusesALinkNodeWithANonArrayLinksField(t *testing.T) {
+	doc := `{
+	  "id":"tabA","label":"Home",
+	  "nodes":[
+	    {"id":"lo","type":"link out","z":"tabA","x":140,"y":140,"links":"nope","wires":[[]]}
+	  ]
+	}`
+	err := validateFlowWires(RawFlow(doc))
+	if err == nil {
+		t.Fatal("expected validateFlowWires to refuse a link node with a non-array links field, got nil")
+	}
+	if !strings.Contains(err.Error(), "links") {
+		t.Errorf("expected the error to name the links field: %v", err)
+	}
+}

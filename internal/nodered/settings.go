@@ -123,7 +123,7 @@ func (c *Client) setFlows(ctx context.Context, flows []json.RawMessage, validate
 	// whose JSON was formatted with a space after the colon — and the
 	// refusal named the configuration rather than the formatting.
 	if !hasTabEntry(flows) {
-		return errors.New(`flows: array must contain at least one element with type "tab"; received only non-tab entries`)
+		return &FlowGuardError{Message: `flows: array must contain at least one element with type "tab"; received only non-tab entries`}
 	}
 	// Issue #334: a full deployment replaces the whole configuration, so
 	// the references of the configuration are checked before anything is

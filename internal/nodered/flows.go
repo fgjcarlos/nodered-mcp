@@ -256,10 +256,10 @@ func (c *Client) RestoreFlows(ctx context.Context, backup RawFlow) error {
 	// backup that carries no tab at all would leave the runtime with no
 	// tabs, exactly as a tab-less deployment would.
 	if len(arr) == 0 {
-		return errors.New("backup does not contain any flow entry")
+		return &FlowGuardError{Message: "backup does not contain any flow entry"}
 	}
 	if !hasTabEntry(arr) {
-		return errors.New(`backup must contain at least one element with type "tab"; received only non-tab entries`)
+		return &FlowGuardError{Message: `backup must contain at least one element with type "tab"; received only non-tab entries`}
 	}
 	if err := validateEffectiveConfig(arr); err != nil {
 		return err
@@ -286,6 +286,16 @@ func (c *Client) RestoreFlowsUnchecked(ctx context.Context, backup RawFlow) erro
 	// security policy, not a rule about the references of the backup.
 	if err := c.deniedNodeTypeInFlows(arr); err != nil {
 		return err
+	}
+	// Neither is the tab rule. A backup with no tab at all would leave
+	// the runtime with no tabs — or with nothing at all — and that is
+	// not a reference problem: it is what the deployment would do to the
+	// runtime, and no reference validation can undo it.
+	if len(arr) == 0 {
+		return &FlowGuardError{Message: "backup does not contain any flow entry"}
+	}
+	if !hasTabEntry(arr) {
+		return &FlowGuardError{Message: `backup must contain at least one element with type "tab"; received only non-tab entries`}
 	}
 	return c.restoreFlowsLocked(ctx, arr)
 }
@@ -552,6 +562,11 @@ func validateFlowWires(raw RawFlow) error {
 			// runtime and then break every subsequent edit through the MCP.
 			// Refuse the write up front, echoing the node id and the
 			// actual JSON shape so the operator can fix it.
+			return &FlowGuardError{Message: issue.Message}
+		case IssueInvalidLinks:
+			// The runtime iterates the links field of a link node when it
+			// parses the configuration, so a value that is not an array
+			// stops the deploy with a TypeError.
 			return &FlowGuardError{Message: issue.Message}
 		}
 	}
