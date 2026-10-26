@@ -393,9 +393,10 @@ func (s *Server) registerTools() {
 				"of type \"subflow:<id>\" is left behind — in a flow tab or nested inside "+
 				"another subflow definition — the runtime can no longer resolve that type "+
 				"and the affected flows never deploy. The call fails with the list of "+
-				"references to remove first; the definition is left untouched. Removing "+
-				"the instances along with the definition is a separate, explicit operation, "+
-				"not a side effect of this one.\n\n"+
+				"references to remove first; the definition is left untouched. Remove the "+
+				"instances with delete_node (an instance in a flow tab) or by rewriting the "+
+				"enclosing definition with update_subflow (an instance nested in another "+
+				"subflow); this tool never removes them for you.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
 				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
 		),

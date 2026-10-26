@@ -270,18 +270,52 @@ func (c *Client) UpdateSubflow(ctx context.Context, id string, subflow json.RawM
 	return c.putGlobalSubflowsLocked(ctx, all, configs)
 }
 
+// Owner kinds reported for the place a subflow instance lives.
+const (
+	// SubflowOwnerTab is a flow tab: the common case.
+	SubflowOwnerTab = "tab"
+	// SubflowOwnerSubflow is another subflow definition: the instance is
+	// nested inside it.
+	SubflowOwnerSubflow = "subflow"
+	// SubflowOwnerGlobal is the global configuration: a node with no "z",
+	// which Node-RED files at global scope.
+	SubflowOwnerGlobal = "global"
+	// SubflowOwnerUnknown is an owner the runtime configuration does not
+	// name: a dangling "z", or a "z" that is not a string.
+	SubflowOwnerUnknown = "unknown"
+)
+
 // SubflowReference points at one place where a subflow definition is
 // still in use. The only thing that keeps a definition alive is an
 // instance node — a node whose type is "subflow:<id>" — because the
 // runtime resolves that type at deploy time.
 type SubflowReference struct {
 	// Owner is the id of the tab or of the subflow definition that
-	// holds the instance node.
+	// holds the instance node. Empty when the owner is unknown.
 	Owner string
-	// OwnerKind is "tab" or "subflow": where the instance lives.
+	// OwnerKind is one of SubflowOwnerTab, SubflowOwnerSubflow,
+	// SubflowOwnerGlobal or SubflowOwnerUnknown.
 	OwnerKind string
-	// NodeID is the id of the instance node itself.
+	// NodeID is the id of the instance node itself. Empty when the node
+	// carries no usable id.
 	NodeID string
+}
+
+// describe renders the reference as one operator-readable line.
+func (r SubflowReference) describe() string {
+	switch r.OwnerKind {
+	case SubflowOwnerTab:
+		return fmt.Sprintf("instance node %q in tab %q", r.NodeID, r.Owner)
+	case SubflowOwnerSubflow:
+		return fmt.Sprintf("instance node %q in subflow %q", r.NodeID, r.Owner)
+	case SubflowOwnerGlobal:
+		return fmt.Sprintf("instance node %q in the global configuration", r.NodeID)
+	default:
+		if r.Owner == "" {
+			return fmt.Sprintf("instance node %q in an unknown owner", r.NodeID)
+		}
+		return fmt.Sprintf("instance node %q in an unknown owner %q", r.NodeID, r.Owner)
+	}
 }
 
 // SubflowInUseError is returned when a subflow definition cannot be
@@ -307,28 +341,93 @@ func (e *SubflowInUseError) Error() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "subflow %q is still in use and was not deleted: %d reference(s) must be removed first", e.ID, len(e.Refs))
 	for _, ref := range e.Refs {
-		fmt.Fprintf(&b, "\n  - instance node %q in %s %q", ref.NodeID, ref.OwnerKind, ref.Owner)
+		fmt.Fprintf(&b, "\n  - %s", ref.describe())
 	}
-	b.WriteString("\nremove the instance nodes first, or delete them as an explicit cascading operation; the definition itself was left untouched")
+	b.WriteString("\nremove the instance nodes first: delete_node for an instance in a flow tab, " +
+		"update_subflow for an instance nested in another subflow definition. " +
+		"The definition itself was left untouched")
 	return b.String()
 }
 
-// subflowDefinitionNodes returns the node objects nested inside a
-// subflow definition.
+// flowItem is one entry of a flat flow configuration, decoded with the
+// tolerance the reference scan needs.
 //
-// A definition with no "nodes" key (or an empty one) yields an empty
-// slice. A "nodes" field that is not an array of objects is an error
-// rather than an empty slice: the references of such a definition
-// cannot be checked, and treating "cannot be checked" as "no
-// references" would silently reopen the hole this check closes.
-func subflowDefinitionNodes(def json.RawMessage) ([]map[string]json.RawMessage, error) {
+// A field that is present but not a JSON string is *unknown*, not
+// absent: the node still exists and the runtime still resolves its
+// type. Decoding the whole entry into a struct of string fields would
+// instead drop the entire entry on the first non-string value, which
+// would hide a real reference — the exact failure this check exists to
+// prevent.
+type flowItem struct {
+	ID     string
+	IDOK   bool
+	Type   string
+	TypeOK bool
+	Z      string
+	ZOK    bool
+	// ZPresent tells an absent "z" from a "z" that is not a string.
+	// The two mean different things: Node-RED files a node with no "z"
+	// at global scope, while a malformed "z" names no owner at all.
+	ZPresent bool
+}
+
+// decodeFlowItem reads the fields the reference scan needs out of one
+// flat flow entry. A non-object entry yields an item with nothing
+// known: the runtime's own missing-type scan only walks node objects,
+// so there is nothing to match there either.
+func decodeFlowItem(raw json.RawMessage) flowItem {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return flowItem{}
+	}
+	it := flowItem{}
+	if v, ok := m["id"]; ok {
+		it.ID, it.IDOK = rawString(v)
+	}
+	if v, ok := m["type"]; ok {
+		it.Type, it.TypeOK = rawString(v)
+	}
+	if v, ok := m["z"]; ok {
+		it.ZPresent = true
+		it.Z, it.ZOK = rawString(v)
+	}
+	return it
+}
+
+// rawString reads a JSON string, reporting whether the value was
+// actually a string.
+func rawString(raw json.RawMessage) (string, bool) {
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return "", false
+	}
+	return s, true
+}
+
+// subflowDefinitionMembers returns the member objects of a subflow
+// definition: the "nodes" collection and the "configs" collection.
+//
+// A Node-RED subflow carries both, and an instance can live in either —
+// a subflow instance with no canvas coordinates is filed in "configs",
+// and the runtime resolves its type just the same.
+//
+// A definition with neither key yields an empty slice. A member
+// collection that is not an array of objects is an error rather than an
+// empty slice: the references of such a definition cannot be checked,
+// and treating "cannot be checked" as "no references" would silently
+// reopen the hole this check closes.
+func subflowDefinitionMembers(def json.RawMessage) ([]map[string]json.RawMessage, error) {
 	var m struct {
-		Nodes []map[string]json.RawMessage `json:"nodes"`
+		Nodes   []map[string]json.RawMessage `json:"nodes"`
+		Configs []map[string]json.RawMessage `json:"configs"`
 	}
 	if err := json.Unmarshal(def, &m); err != nil {
-		return nil, fmt.Errorf("subflow definition has an unreadable nodes array: %w", err)
+		return nil, fmt.Errorf("unreadable member collections: %w", err)
 	}
-	return m.Nodes, nil
+	members := make([]map[string]json.RawMessage, 0, len(m.Nodes)+len(m.Configs))
+	members = append(members, m.Nodes...)
+	members = append(members, m.Configs...)
+	return members, nil
 }
 
 // subflowOwnerKinds maps the id of every tab and subflow definition
@@ -338,18 +437,15 @@ func subflowDefinitionNodes(def json.RawMessage) ([]map[string]json.RawMessage, 
 func subflowOwnerKinds(items []json.RawMessage) map[string]string {
 	kinds := make(map[string]string)
 	for _, item := range items {
-		var meta struct {
-			ID   string `json:"id"`
-			Type string `json:"type"`
-		}
-		if err := json.Unmarshal(item, &meta); err != nil {
+		it := decodeFlowItem(item)
+		if !it.IDOK {
 			continue
 		}
-		switch meta.Type {
+		switch it.Type {
 		case "tab":
-			kinds[meta.ID] = "tab"
+			kinds[it.ID] = SubflowOwnerTab
 		case "subflow":
-			kinds[meta.ID] = "subflow"
+			kinds[it.ID] = SubflowOwnerSubflow
 		}
 	}
 	return kinds
@@ -362,12 +458,14 @@ func subflowOwnerKinds(items []json.RawMessage) map[string]string {
 //
 //   - an instance node in a flow tab, listed in GET /flows;
 //   - an instance node nested inside another subflow's definition,
-//     which lives in the "nodes" array of that definition rather than
-//     in a tab.
+//     listed in the "nodes" or "configs" collection of that definition.
 //
-// The second shape is why this cannot be answered from the global
-// envelope alone: /flow/global carries the definitions, not the tabs
-// that instantiate them.
+// GET /flows carries both shapes flattened: Node-RED keeps every node
+// of the configuration in one flat array, and a node nested in a
+// subflow definition appears there with "z" set to the subflow's id.
+// The definition scan is the second witness for the nested shape, and
+// it is the one that can tell a nested instance from a tab instance
+// when the flat array does not name the owner.
 //
 // definitions is the set of subflow definitions the caller already
 // read for the delete itself, so the nested scan costs no extra
@@ -378,7 +476,11 @@ func (c *Client) subflowReferences(ctx context.Context, id string, definitions S
 	seen := make(map[string]bool)
 
 	add := func(ref SubflowReference) {
-		key := ref.OwnerKind + "|" + ref.Owner + "|" + ref.NodeID
+		// The owner kind is deliberately not part of the key: the same
+		// instance can be seen by both scans, and reporting it twice
+		// with contradictory owners ("in subflow sf_b" and "in tab
+		// sf_b") is worse than reporting it once.
+		key := ref.Owner + "|" + ref.NodeID
 		if seen[key] {
 			return
 		}
@@ -388,24 +490,28 @@ func (c *Client) subflowReferences(ctx context.Context, id string, definitions S
 
 	// Instances nested inside other subflow definitions.
 	for _, def := range definitions {
-		var meta struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(def, &meta); err != nil {
-			return nil, fmt.Errorf("reading subflow definition: %w", err)
-		}
-		if meta.ID == id {
-			// The definition being deleted is not a reference to itself.
+		defItem := decodeFlowItem(def)
+		if defItem.ID == id {
+			// The definition being deleted is not a reference to
+			// itself: an instance inside it goes away with it.
 			continue
 		}
-		nodes, err := subflowDefinitionNodes(def)
+		members, err := subflowDefinitionMembers(def)
 		if err != nil {
-			return nil, err
+			// Name the definition that cannot be read, and the one
+			// that was asked for: without both, the operator cannot
+			// tell which definition to repair.
+			return nil, fmt.Errorf("subflow definition %q cannot be checked for references to %q: %w", defItem.ID, id, err)
 		}
-		for _, node := range nodes {
-			if stringField(node, "type") == wantType {
-				add(SubflowReference{Owner: meta.ID, OwnerKind: "subflow", NodeID: nodeID(node)})
+		for _, member := range members {
+			if stringField(member, "type") != wantType {
+				continue
 			}
+			add(SubflowReference{
+				Owner:     defItem.ID,
+				OwnerKind: SubflowOwnerSubflow,
+				NodeID:    nodeID(member),
+			})
 		}
 	}
 
@@ -418,24 +524,40 @@ func (c *Client) subflowReferences(ctx context.Context, id string, definitions S
 	items := FlowArray(flat)
 	kinds := subflowOwnerKinds(items)
 	for _, item := range items {
-		var meta struct {
-			ID   string `json:"id"`
-			Type string `json:"type"`
-			Z    string `json:"z"`
-		}
-		if err := json.Unmarshal(item, &meta); err != nil {
+		it := decodeFlowItem(item)
+		if !it.TypeOK {
+			// The runtime matches a missing type against a node's
+			// type with /^subflow:(.+)$/; a type that is not a
+			// string cannot match it, so this node is not an
+			// instance of anything.
 			continue
 		}
-		if meta.Type != wantType {
+		if it.Type != wantType {
 			continue
 		}
-		kind := kinds[meta.Z]
-		if kind == "" {
-			// An owner that is not a known tab is still an owner; the
-			// instance exists either way.
-			kind = "tab"
+		if it.Z == id {
+			// The instance lives inside the definition being
+			// deleted. It goes away with it, and the runtime does
+			// not report a missing type for it.
+			continue
 		}
-		add(SubflowReference{Owner: meta.Z, OwnerKind: kind, NodeID: meta.ID})
+		owner, kind := it.Z, kinds[it.Z]
+		switch {
+		case !it.ZPresent:
+			// A node with no "z" is filed at global scope.
+			owner, kind = "", SubflowOwnerGlobal
+		case !it.ZOK:
+			// The owner field is not a string, so the owner cannot be
+			// named. The instance is still real.
+			owner, kind = "", SubflowOwnerUnknown
+		case kind == "":
+			// The owner is not a tab or a subflow definition the
+			// configuration names. The instance still exists, so
+			// the owner is reported as unknown rather than
+			// guessed.
+			kind = SubflowOwnerUnknown
+		}
+		add(SubflowReference{Owner: owner, OwnerKind: kind, NodeID: it.ID})
 	}
 	return refs, nil
 }

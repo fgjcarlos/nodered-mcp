@@ -49,13 +49,14 @@ Audit baseline: main @ 93f47b1 (audit-2026-10-19, area A05, P1).
     and the runtime is left untouched; an unreferenced definition still deletes.
   - Verification: focused regression RED then GREEN, `go test ./...`,
     `go test -race ./...`, `go vet ./...`, gofmt, tool-count parity tests.
-  - Runtime proof: local httptest Node-RED fixtures; no real Node-RED.
+  - Runtime proof: local httptest Node-RED fixtures, plus a real Node-RED 5.0.8
+    driven over its admin API (see "Runtime ground truth" below).
   - Rollback: revert the one issue-scoped commit.
   - Commit: the fix, its regressions, and this record.
 
 ## Delivery
 Forecast: roughly 120–220 authored changed lines; advisory estimate.
-Actual: 425 changed lines (196 client, 205 tests, 24 tool description and docs).
+Actual: 604 changed lines across the fix, its regressions and the docs.
 Strategy: ask-on-risk, single commit, one PR.
 
 ## Progress
@@ -66,20 +67,13 @@ runtime does not: an instance node of type `subflow:<id>` is resolved at deploy
 time, so the definition and its instances are one unit.
 
 Fix: `subflowReferences` walks the runtime for references to the definition
-before the delete. Instances in flow tabs come from `GET /flows`; instances
-nested inside another subflow definition come from the `nodes` array of that
-definition, which the delete already reads. The two shapes are told apart by
-the owner kind: an instance whose owner is a tab is reported as such, one whose
-owner is another subflow is reported as nested. A definition whose `nodes`
-field is unreadable is an error, not an empty result — "cannot be checked" must
-not be read as "no references", or the hole reopens.
+before the delete. The refusal is `*SubflowInUseError`, which carries every
+reference at once: an operator who has to delete one instance, retry, and find
+the next one has a much worse time than one handed the full list. The check
+runs before the backup and the write, so a refused delete costs one read and
+changes nothing.
 
-The refusal is `*SubflowInUseError`, which carries every reference at once: an
-operator who has to delete one instance, retry, and find the next one has a
-much worse time than one handed the full list. The check runs before the
-backup and the write, so a refused delete costs one read and changes nothing.
-
-RED observed on the three refusal regressions before the fix; GREEN after. The
+RED observed on the refusal regressions before the fix; GREEN after. The
 positive control — a definition nothing instances — deletes in both states, so
 the guard does not turn into a blanket refusal.
 
@@ -87,6 +81,68 @@ One existing test changed meaning: `TestSubflowCRUD_EndToEnd` deleted a
 subflow while its instance was live, which is exactly the behaviour the issue
 reports. It now expects the refusal, removes the instance, and deletes the
 definition afterwards.
+
+### Runtime ground truth (Node-RED 5.0.8)
+An independent adversarial pass ran the fix against a real Node-RED 5.0.8 and
+the real `delete_subflow` MCP tool over stdio. The shapes the runtime actually
+produces, confirmed by reading `GET /flows` and `GET /flow/global` on a live
+instance:
+
+- `GET /flows` is a **flat** array: every node of the configuration appears at
+  the top level, including the nodes and configs nested inside a subflow
+  definition, which carry `z` set to the owning subflow's id. A tab instance
+  carries `z` set to the tab id; an instance with no `z` is a global config
+  node.
+- `GET /flow/global` returns the subflow definitions in their **nested** form:
+  each definition carries a `nodes` collection and a `configs` collection, and
+  an instance can live in either — an instance with no canvas coordinates is
+  filed in `configs`.
+- The runtime's own missing-type check matches `/^subflow:(.+)$/` against the
+  type of every node in the flat configuration, so a definition is in use when
+  *any* flat item carries that type.
+
+Both shapes are therefore covered by two witnesses: the flat `/flows` scan,
+which sees every instance, and the definition scan, which sees the nested ones
+and can name their owner.
+
+### Findings from the adversarial pass, and what changed because of them
+The first implementation was rejected by that pass. The findings that changed
+the code:
+
+1. **The `/flows` scan failed open.** Decoding a flat entry into a struct of
+   string fields drops the whole entry when any of them holds a non-string
+   value, so one bad `id` or `z` hid a real instance and the delete went
+   through — reproduced live, with the runtime logging `Waiting for missing
+   types to be registered`. The scan now decodes each field on its own
+   (`decodeFlowItem`) and an unreadable field is *unknown*, not absent. A
+   non-string `type` cannot match the runtime's own pattern and is not an
+   instance; a non-string `id` or `z` on an item whose type does match is an
+   instance, and the delete is refused.
+2. **The definition scan read only `nodes`.** It now reads `configs` as well.
+3. **A malformed unrelated definition blocked every delete.** The error now
+   names both the definition that cannot be read and the one that was asked
+   for, so the operator knows which one to repair.
+4. **A self-instantiating definition could never be deleted.** The flat scan
+   re-reported the definition's own content, defeating the deliberate
+   exclusion in the definition scan; the runtime considers such a delete safe.
+   The flat scan now skips an instance whose owner is the definition being
+   deleted.
+5. **The same instance could be reported twice with contradictory owners.** The
+   owner kind is no longer part of the dedup key, and the kind is derived the
+   same way in both scans.
+6. **An ownerless instance was reported as `in tab ""`.** The owner kind is
+   now one of tab, subflow, global or unknown, and the message reads
+   accordingly.
+7. **The refusal advertised an operation that does not exist.** The message
+   and the tool description now name the operations that do exist:
+   `delete_node` for an instance in a flow tab, `update_subflow` for an
+   instance nested in another subflow definition.
+8. **The changed behaviour had no test at the layer it is surfaced.** The MCP
+   layer now has a regression asserting the refusal arrives as a plain tool
+   error naming the instance and its owner, and that it is not classified as a
+   transport error — a write tool that fails that way is reported as having an
+   indeterminate outcome, which is the wrong advice for a refusal that changed
+   nothing.
 
 ## Next step
 Push the branch, open one PR linking #332, and merge once CI is green.

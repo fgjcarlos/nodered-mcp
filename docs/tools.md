@@ -124,9 +124,10 @@ missing types to be registered` on the next start, and the affected
 flows never deploy.
 
 The refusal names every reference that has to be removed first, and
-the definition is left untouched. Removing the instances along with
-the definition is a separate, explicit operation — not a side effect
-of deleting a definition.
+the definition is left untouched. The instances are removed with
+`delete_node` (an instance in a flow tab) or by rewriting the enclosing
+definition with `update_subflow` (an instance nested in another
+subflow); `delete_subflow` never removes them for you.
 
 ## Palette
 

@@ -165,3 +165,62 @@ func TestListSubflows_EmptyResult(t *testing.T) {
 		t.Errorf("response should contain an empty JSON array, got %q", tc.Text)
 	}
 }
+
+// TestDeleteSubflow_InUseSubflowIsRefusedNotReplayed pins the
+// user-facing behaviour of the guard added for issue #332 at the layer
+// where it is surfaced.
+//
+// The refusal has to reach the caller as a plain tool error that names
+// the instance and its owner. It must NOT be classified as a transport
+// error: a write tool that fails that way is reported as having an
+// indeterminate outcome, which is exactly the wrong advice for a
+// refusal that changed nothing.
+func TestDeleteSubflow_InUseSubflowIsRefusedNotReplayed(t *testing.T) {
+	var putGlobal bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flow/global":
+			_, _ = w.Write([]byte(`{"id":"global","subflows":[
+				{"id":"sf_a","type":"subflow","name":"A","in":[],"out":[],"env":[],"nodes":[]}
+			],"configs":[]}`))
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			_, _ = w.Write([]byte(`[
+				{"id":"tab1","type":"tab","label":"Home"},
+				{"id":"inst1","type":"subflow:sf_a","z":"tab1","x":140,"y":140}
+			]`))
+		case r.Method == "PUT" && r.URL.Path == "/flow/global":
+			putGlobal = true
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	s := New(c, Options{Version: "test"})
+	res, err := s.handleDeleteSubflow(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{Arguments: map[string]any{"id": "sf_a"}},
+	})
+	if err != nil {
+		t.Fatalf("handleDeleteSubflow returned a transport error: %v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected a tool error result, got %+v", res)
+	}
+	text := resultFirstText(res)
+	for _, want := range []string{"sf_a", "inst1", "tab1"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("refusal does not mention %q: %s", want, text)
+		}
+	}
+	if strings.Contains(text, "indeterminate") {
+		t.Errorf("a refusal must not be reported as an indeterminate outcome: %s", text)
+	}
+	if putGlobal {
+		t.Error("the definition was written despite being in use")
+	}
+}
