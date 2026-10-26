@@ -121,8 +121,15 @@ for i in "${!named_funcs[@]}"; do
   # gocyclo formatting: ` 24 nodered ValidateFlow internal/nodered/validate.go:84:1`
   # patterns: receiver is "(s)" prefix on methods, plain on free functions.
   # We just match the literal function name in the line.
+  # The awk reads the whole output instead of exiting at the first
+  # match. An early exit closes the pipe while printf is still writing,
+  # and the write fails with EPIPE ("printf: write error: Broken
+  # pipe"); with `set -euo pipefail` that ends the script and fails the
+  # gate on a run that had nothing wrong with it. It is a race, so it
+  # shows up on some runs and not on others — and it got likelier as
+  # the baseline grew.
   current=$(printf '%s\n' "$cyclo_out" | awk -v fn="$func" -v f="$file" '
-    index($NF, f) == 1 && $3 == fn { print $1; exit }
+    index($NF, f) == 1 && $3 == fn && !found { print $1; found=1 }
   ')
   if [[ -z "$current" ]]; then
     # Try receiver.method form: gocyclo emits " (*Server).handleFoo".
@@ -130,7 +137,7 @@ for i in "${!named_funcs[@]}"; do
       {
         n = $3
         sub(/.*\)\./, "", n)
-        if (n == fn && index($NF, f) == 1) { print $1; exit }
+        if (n == fn && index($NF, f) == 1 && !found) { print $1; found=1 }
       }
     ')
   fi
