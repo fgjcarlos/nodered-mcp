@@ -16,18 +16,55 @@ type revisionedFlows struct {
 
 func apiV2(r *http.Request) { r.Header.Set("Node-RED-API-Version", "v2") }
 
-// deployFlowUpdate replaces only the owning tab's entries. PUT /flow/:id
-// appends the tab in Node-RED; a revision-checked partial deployment does not.
-func (c *Client) deployFlowUpdate(ctx context.Context, id string, flow RawFlow) error {
+// flowSnapshot is the configuration a write is built on: the array, the
+// revision it was read at, and the raw body the backup is taken from.
+//
+// The three belong together. A configuration and a revision read from two
+// different responses can describe two different states of the runtime, and
+// a deployment built that way carries one state with the revision of the
+// other: the runtime accepts it, and whatever changed in between is gone.
+type flowSnapshot struct {
+	raw   RawFlow
+	rev   string
+	flows []json.RawMessage
+}
+
+// readFlowSnapshot reads the whole configuration and the revision that goes
+// with it in one request.
+func (c *Client) readFlowSnapshot(ctx context.Context) (*flowSnapshot, error) {
 	var raw RawFlow
 	if err := c.do(ctx, "GET", "/flows", nil, &raw, apiV2); err != nil {
-		return fmt.Errorf("backup: fetching current flows: %w", err)
+		return nil, fmt.Errorf("backup: fetching current flows: %w", err)
 	}
 	var current revisionedFlows
 	if err := json.Unmarshal(raw, &current); err != nil || current.Rev == "" || current.Flows == nil {
-		return errors.New("updating a flow requires a v2 /flows response with rev and flows")
+		return nil, errors.New("updating a flow requires a v2 /flows response with rev and flows")
 	}
-	next, err := replaceFlowEntries(current.Flows, id, flow)
+	return &flowSnapshot{raw: raw, rev: current.Rev, flows: current.Flows}, nil
+}
+
+// flowTabNotFound is the answer for a tab the current configuration does not
+// hold. The path is the one the caller asked about, not the one that was
+// read: the tab is missing from the runtime, wherever it was looked for.
+func flowTabNotFound(id string) error {
+	return &APIError{StatusCode: http.StatusNotFound, Method: "GET", Path: "/flow/" + id, Body: "flow tab not found in current configuration"}
+}
+
+// deployFlowUpdate replaces only the owning tab's entries. PUT /flow/:id
+// appends the tab in Node-RED; a revision-checked partial deployment does not.
+func (c *Client) deployFlowUpdate(ctx context.Context, id string, flow RawFlow) error {
+	snap, err := c.readFlowSnapshot(ctx)
+	if err != nil {
+		return err
+	}
+	return c.deployFlowUpdateOn(ctx, id, flow, snap)
+}
+
+// deployFlowUpdateOn deploys the tab on the snapshot the document was built
+// on: the entries of the tab are replaced in that snapshot's array, and the
+// deployment carries that snapshot's revision.
+func (c *Client) deployFlowUpdateOn(ctx context.Context, id string, flow RawFlow, snap *flowSnapshot) error {
+	next, err := replaceFlowEntries(snap.flows, id, flow)
 	if err != nil {
 		return err
 	}
@@ -43,10 +80,10 @@ func (c *Client) deployFlowUpdate(ctx context.Context, id string, flow RawFlow) 
 	if err := validateTabEntries(next, id); err != nil {
 		return err
 	}
-	if _, err := c.saveFlowSnapshot(raw); err != nil {
+	if _, err := c.saveFlowSnapshot(snap.raw); err != nil {
 		return err
 	}
-	return c.do(ctx, "POST", "/flows", revisionedFlows{Rev: current.Rev, Flows: next}, nil, apiV2, func(r *http.Request) {
+	return c.do(ctx, "POST", "/flows", revisionedFlows{Rev: snap.rev, Flows: next}, nil, apiV2, func(r *http.Request) {
 		r.Header.Set("Node-RED-Deployment-Type", "flows")
 	})
 }
@@ -136,7 +173,7 @@ func replaceFlowEntries(items []json.RawMessage, id string, flow RawFlow) ([]jso
 		return nil, err
 	}
 	if nodeType(existing[id]) != "tab" {
-		return nil, &APIError{StatusCode: http.StatusNotFound, Method: "GET", Path: "/flow/" + id, Body: "flow tab not found in current configuration"}
+		return nil, flowTabNotFound(id)
 	}
 	submitted, owners, err := flattenFlowUpdate(flow, id, "tab")
 	if err != nil {

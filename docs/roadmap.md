@@ -11,7 +11,7 @@
 | HTTP transport alongside stdio | ✅ Implemented |
 | Bearer auth on HTTP transport | ✅ Token mandatory on non-loopback binds; server refuses to start without it |
 | OAuth for web clients | ✅ OAuth 2.1 / OIDC resource server with JWKS discovery |
-| **Concurrency (two LLMs editing)** | ⬜ **Unresolved: last-write-wins.** Granular edits do read-modify-write, so the window is narrow but not gone |
+| **Concurrency (two LLMs editing)** | ✅ Resolved: a granular edit is built on the revisioned snapshot it deploys, so a deployment that lands in between is refused with a 409 instead of overwriting it |
 | **Backup pruning** | ⬜ **Pending** (marked with `ponytail:` in `backup.go`). Add when the directory gets unwieldy |
 | Debug buffer size | ⬜ Fixed at 500; configurable if someone hits the ceiling |
 | Local query cache | ⬜ Not planned |

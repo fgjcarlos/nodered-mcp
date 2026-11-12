@@ -66,6 +66,14 @@ func issue329Runtime(t *testing.T, bodies map[string]string) (*httptest.Server, 
 	return srv, &seen
 }
 
+// issue329FlatConfig renders the configuration as the runtime serves it
+// from GET /flows: the flat array holds the tab and the nodes that belong
+// to it, and the granular edits are built on that array (issue #345).
+func issue329FlatConfig(tab string, nodes ...string) string {
+	entries := append([]string{tab}, nodes...)
+	return `{"rev":"r","flows":[` + strings.Join(entries, ",") + `]}`
+}
+
 // issue329Server builds a Server whose denylist holds exactly the given
 // node types, wired to the given runtime stand-in.
 func issue329Server(t *testing.T, srv *httptest.Server, types ...string) *Server {

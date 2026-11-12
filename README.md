@@ -177,9 +177,11 @@ require the Node-RED Admin API v2 revisioned `/flows` response and deploy with
 `Node-RED-Deployment-Type: flows`, backing up the exact deployment base first.
 Conflict protection starts at that revisioned snapshot: if another deployment
 changes the revision after the snapshot, this update returns HTTP 409 rather
-than replaying stale changes. Granular edits read the nested tab before taking
-the snapshot, so an external edit in that
-earlier window can still be overwritten. Read the current flow again before
+than replaying stale changes. A granular edit is built on that same snapshot:
+the tab it patches is the tab the deployment carries, so a change another
+editor made to a property the edit does not touch survives the edit, and a
+change that lands after the snapshot is refused with the runtime's own 409
+instead of being overwritten. Read the current flow again before
 retrying an edit after a conflict.
 
 Read tools retry transport failures up to twice. Mutating tools run once: if

@@ -20,30 +20,44 @@ import (
 
 // editFlow reads a tab, applies one granular edit, and writes it back.
 //
-// The write goes through UpdateFlow, so every edit inherits the same guardrails
-// as a hand-written one: the wires are validated and a backup is taken before
-// anything reaches the runtime.
+// The write goes through the same path as a hand-written one, so every edit
+// inherits the same guardrails: the wires are validated and a backup is taken
+// before anything reaches the runtime.
+//
+// Issue #345: the configuration, its revision and the base of the edit come
+// from ONE read. The edit used to be built on the nested GET /flow/:id and
+// deployed with the revision of a later GET /flows — two snapshots of the
+// runtime, and a change that landed in between was overwritten without a
+// conflict. The base of the edit is now the tab as the deployment's own
+// snapshot holds it, so a change another editor made to a property this edit
+// does not touch survives it, and a change that lands after the snapshot is
+// refused by the runtime with its own 409 (fail-closed, no conflict replay).
 //
 // This is read-modify-write against a live instance. Two concurrent editors
-// still race — the loser's change is overwritten — but the window is one round
-// trip rather than however long a model takes to rewrite a whole tab.
+// still race — the loser's change is refused with a 409, not silently
+// applied — but the window is one round trip rather than however long a
+// model takes to rewrite a whole tab.
 func (c *Client) editFlow(ctx context.Context, flowID string, edit func(RawFlow) (RawFlow, error)) error {
 	defer c.writeGuard()()
 	if flowID == "" {
 		return errors.New("flow id is required")
 	}
-	current, err := c.GetFlow(ctx, flowID)
+	snap, err := c.readFlowSnapshot(ctx)
 	if err != nil {
 		return err
+	}
+	current, ok := synthesizeFlowFromFlat(snap.raw, flowID)
+	if !ok {
+		return flowTabNotFound(flowID)
 	}
 	next, err := edit(current)
 	if err != nil {
 		return err
 	}
-	// updateFlowLocked is the no-mutex twin of UpdateFlow; we already hold
-	// writeMu here and a public call would deadlock on the non-reentrant
-	// sync.Mutex.
-	return c.updateFlowLocked(ctx, flowID, next)
+	// deployFlowUpdateOn is the snapshot twin of deployFlowUpdate; the
+	// snapshot was already read, and reading it again would be a second
+	// snapshot — the very thing this path exists to avoid.
+	return c.deployFlowUpdateOn(ctx, flowID, next, snap)
 }
 
 // AddNode appends a node to a flow tab.
