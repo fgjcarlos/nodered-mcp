@@ -216,3 +216,53 @@ func TestValidateEffectiveConfig_MissingTypeReportedOnce(t *testing.T) {
 		t.Fatalf("expected exactly 2 %s issues (n1, c1), got %+v", IssueMissingType, issues)
 	}
 }
+
+// The deployment check (set_flows, backup restore) refuses a group whose
+// z names no tab and no subflow definition.
+func TestValidateEffectiveConfig_OrphanGroup(t *testing.T) {
+	const cfg = `[
+	  {"id":"t1","type":"tab","label":"Home"},
+	  {"id":"g1","type":"group","z":"nowhere","nodes":[],"x":10,"y":10,"w":100,"h":100}
+	]`
+	issues := ValidateEffectiveConfig(RawFlow(cfg))
+	if len(issues) != 1 {
+		t.Fatalf("expected exactly 1 issue, got %d: %+v", len(issues), issues)
+	}
+	if orphan, ok := findIssue(issues, IssueOrphanNode, "g1"); !ok || orphan.Target != "nowhere" {
+		t.Fatalf("expected %s on g1 naming z=nowhere, got %+v", IssueOrphanNode, issues)
+	}
+	if err := validateEffectiveConfig(mustFlowArray(t, cfg)); err == nil {
+		t.Fatal("expected the deployment to be refused")
+	}
+}
+
+// The deployment check reports the dangling wire of an orphan node, which
+// no owner rule visits.
+func TestValidateEffectiveConfig_OrphanDanglingWire(t *testing.T) {
+	const cfg = `[
+	  {"id":"t1","type":"tab","label":"Home"},
+	  {"id":"n1","type":"inject","z":"nowhere","x":140,"y":140,"wires":[["ghost"]]}
+	]`
+	issues := ValidateEffectiveConfig(RawFlow(cfg))
+	if len(issues) != 2 {
+		t.Fatalf("expected exactly 2 issues, got %d: %+v", len(issues), issues)
+	}
+	if _, ok := findIssue(issues, IssueOrphanNode, "n1"); !ok {
+		t.Fatalf("expected %s on n1, got %+v", IssueOrphanNode, issues)
+	}
+	if wire, ok := findIssue(issues, IssueDanglingWire, "n1"); !ok || wire.Target != "ghost" {
+		t.Fatalf("expected %s from n1 to ghost, got %+v", IssueDanglingWire, issues)
+	}
+}
+
+// A type the runtime coerces into a name is not a missing type on the
+// deployment path either.
+func TestValidateEffectiveConfig_CoercibleTypeIsNotMissing(t *testing.T) {
+	const cfg = `[
+	  {"id":"t1","type":"tab","label":"Home"},
+	  {"id":"n1","type":["inject"],"z":"t1","x":140,"y":140,"wires":[]}
+	]`
+	if issues := ValidateEffectiveConfig(RawFlow(cfg)); len(issues) != 0 {
+		t.Fatalf("expected 0 issues, got %+v", issues)
+	}
+}
