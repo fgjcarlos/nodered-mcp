@@ -52,6 +52,10 @@ const (
 	// model intended (issue #99). Reported on the validate_flow tool and
 	// rejected by validateFlowWires so update_flow / set_flows fail loud.
 	IssueBadZ FlowIssueKind = "bad_z"
+	// IssueMissingType is a node whose "type" is absent, null or empty. The runtime files it under a node type it cannot
+	// resolve, and a runtime with a missing node type refuses to start
+	// the flows at all (issue #336).
+	IssueMissingType FlowIssueKind = "missing_type"
 )
 
 // FlowGuardError is a refusal by the client-side guard of a flow
@@ -118,20 +122,10 @@ func ValidateFlow(flow RawFlow) []FlowIssue {
 	seen := make(map[string]bool, len(doc.Nodes)+len(doc.Configs))
 
 	for _, node := range doc.Nodes {
-		if issue := checkNode(node, seen, true); issue != nil {
-			issues = append(issues, *issue)
-		}
-		if issue := checkZRef(node, doc); issue != nil {
-			issues = append(issues, *issue)
-		}
+		issues = append(issues, nodeIssues(node, doc, seen, true)...)
 	}
 	for _, node := range doc.Configs {
-		if issue := checkNode(node, seen, false); issue != nil {
-			issues = append(issues, *issue)
-		}
-		if issue := checkZRef(node, doc); issue != nil {
-			issues = append(issues, *issue)
-		}
+		issues = append(issues, nodeIssues(node, doc, seen, false)...)
 	}
 
 	// Wires are validated against the union of both collections.
@@ -146,6 +140,42 @@ func ValidateFlow(flow RawFlow) []FlowIssue {
 		issues = []FlowIssue{}
 	}
 	return issues
+}
+
+// nodeIssues runs the per-node rules over one node of a tab document.
+func nodeIssues(node map[string]json.RawMessage, doc *flowDoc, seen map[string]bool, requireXY bool) []FlowIssue {
+	var issues []FlowIssue
+	if issue := checkNode(node, seen, requireXY); issue != nil {
+		issues = append(issues, *issue)
+	}
+	if raw, ok := node["type"]; typeMissing(raw, ok) {
+		issues = append(issues, missingTypeIssue(nodeID(node)))
+	}
+	if issue := checkZRef(node, doc); issue != nil {
+		issues = append(issues, *issue)
+	}
+	return issues
+}
+
+// typeMissing reports whether a node's type field names no node type: it
+// is absent, null, or empty once the runtime coerces it with String().
+// A non-string value that coerces to a type name (["inject"]) is left to
+// the runtime, which resolves it like the string.
+func typeMissing(raw json.RawMessage, present bool) bool {
+	if !present || strings.TrimSpace(string(raw)) == "null" {
+		return true
+	}
+	typ, ok := jsTypeString(raw)
+	return !ok || typ == ""
+}
+
+// missingTypeIssue builds the issue for a node without a usable type.
+func missingTypeIssue(id string) FlowIssue {
+	const symptom = "the runtime cannot resolve the node type and refuses to start the flows until it is registered"
+	if id == "" {
+		return FlowIssue{Kind: IssueMissingType, Message: "a node has no type (absent, null or empty); " + symptom}
+	}
+	return FlowIssue{Kind: IssueMissingType, NodeID: id, Message: fmt.Sprintf("node %q has no type (absent, null or empty); %s", id, symptom)}
 }
 
 // checkNode returns the first issue found in node, or nil. Records the id
@@ -336,61 +366,62 @@ func badZMessage(id, z string) string {
 	return fmt.Sprintf("node %q references z=%q which is neither the owning tab nor an existing node in this flow: Node-RED's runtime will crash on deploy with 'Cannot read properties of undefined (reading wires)' if this is written", id, z)
 }
 
-// ValidateFlows validates every tab in raw and aggregates the issues.
+// ValidateFlows validates a flow document and returns every issue.
 //
 // raw is one of:
 //
 //   - a single nested tab doc (the shape ValidateFlow already accepts);
 //   - a flat array of tabs and nodes (the shape GET /flows returns).
 //
-// Issue #413: create_flow / update_flow already route their input through
-// normalizeFlowDoc, which accepts a flat-array payload and splits it into
-// per-tab documents. validate_flow used to call ValidateFlow on the raw
-// bytes, so the same flat-array payload that the write tools accept was
-// rejected here as invalid_document. This function closes that gap by
-// iterating the tabs in a flat array and validating each one.
+// A flat array is judged as a whole first (issue #336): ids must be
+// unique across every tab, subflow and configuration node, every entry
+// needs a type, and every node must belong to a tab or a subflow
+// definition. Then the rules of each tab and each subflow definition run
+// over its members. Validating one rebuilt tab at a time used to drop
+// every entry outside the tabs, and to miss an id shared by two tabs.
+//
+// These are the rules the full deployment path applies
+// (ValidateEffectiveConfig), with one exception: an instance of a subflow
+// whose definition is not in the payload is not reported. validate_flow
+// never contacts the runtime, and the definition may already be deployed.
 //
 // An empty array, or a flat array with no "type":"tab" element, falls
 // through to ValidateFlow, which reports a single invalid_document issue.
 // That keeps the "this is not a flow document" answer for genuinely
-// broken input.
+// broken input (issue #413 made the flat shape acceptable at all).
 func ValidateFlows(raw RawFlow) []FlowIssue {
 	var arr []json.RawMessage
 	if err := json.Unmarshal(raw, &arr); err != nil {
 		// Not a JSON array; treat as a single tab doc.
 		return ValidateFlow(raw)
 	}
-	var tabIDs []string
+	if !hasIdentifiedTab(arr) {
+		// A flat array with no tabs is not a valid flow document; let
+		// ValidateFlow surface that as a single invalid_document issue.
+		return ValidateFlow(raw)
+	}
+	all := []FlowIssue{}
+	for _, issue := range effectiveConfigIssues(arr) {
+		if issue.Kind == IssueMissingSubflow {
+			continue
+		}
+		all = append(all, issue)
+	}
+	return all
+}
+
+// hasIdentifiedTab reports whether a flat array holds at least one tab with an id.
+func hasIdentifiedTab(arr []json.RawMessage) bool {
 	for _, item := range arr {
 		var meta struct {
 			ID   string `json:"id"`
 			Type string `json:"type"`
 		}
 		if err := json.Unmarshal(item, &meta); err == nil && meta.Type == "tab" && meta.ID != "" {
-			tabIDs = append(tabIDs, meta.ID)
+			return true
 		}
 	}
-	if len(tabIDs) == 0 {
-		// A flat array with no tabs is not a valid flow document; let
-		// ValidateFlow surface that as a single invalid_document issue.
-		return ValidateFlow(raw)
-	}
-	var all []FlowIssue
-	for _, id := range tabIDs {
-		nested, ok := synthesizeFlowFromFlat(raw, id)
-		if !ok {
-			all = append(all, FlowIssue{
-				Kind:    "invalid_document",
-				Message: "no tab with id \"" + id + "\" in the supplied flat flow array",
-			})
-			continue
-		}
-		all = append(all, ValidateFlow(nested)...)
-	}
-	if all == nil {
-		all = []FlowIssue{}
-	}
-	return all
+	return false
 }
 
 // jsonTypeOf reports the JSON shape a raw value carries — "object", "array",
