@@ -11,6 +11,13 @@ and Gemini CLI use.
 A single long-running process serves several clients. The MCP
 endpoint is at `<addr>/mcp`.
 
+The endpoint supports the streaming half of Streamable HTTP: a `GET`
+with `Accept: text/event-stream` opens a listening stream for server
+notifications, and responses may be sent as Server-Sent Events. A
+reverse proxy in front of the server must not buffer
+`text/event-stream` responses (for nginx, `proxy_buffering off`), or
+events arrive late or not at all.
+
 ```bash
 nodered-mcp serve --transport http --http-addr :8090
 ```
