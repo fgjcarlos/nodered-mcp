@@ -115,7 +115,7 @@ access is granted to the MCP server.
 | `update_node` | `GET /flows` + `POST /flows` | write | Merges properties |
 | `delete_node` | `GET /flows` + `POST /flows` | write | Cleans incoming wires |
 | `connect_nodes` | `GET /flows` + `POST /flows` | write | |
-| `validate_flow` | local | read | Dry-run structural check |
+| `validate_flow` | local | read | Dry-run structural check; a flat array is judged as a whole: unique ids across tabs, subflows and config nodes, a type on every entry, and an owner (tab or subflow) for every node and group. An instance of a subflow not in the payload is not reported |
 | `disable_flow` | `GET /flows` + `POST /flows` | write | |
 | `enable_flow` | `GET /flows` + `POST /flows` | write | |
 | `inject_node` | `POST /inject/:id` | action | Excluded from `--read-only`; optional payload |

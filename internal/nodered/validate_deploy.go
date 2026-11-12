@@ -207,7 +207,9 @@ type configEntry struct {
 	// JavaScript String() coercion (see jsTypeString). The runtime
 	// matches a node against /^subflow:(.+)$/ with that value, so a
 	// type of ["subflow:x"] is the reference it looks like.
-	TypeJS    string
+	TypeJS string
+	// TypeRaw is the type field as written, for the missing-type rule.
+	TypeRaw   json.RawMessage
 	Z         string
 	HasZ      bool
 	ZIsString bool
@@ -230,6 +232,7 @@ func decodeConfigEntry(raw json.RawMessage, index int) configEntry {
 	}
 	if v, ok := m["type"]; ok {
 		entry.HasType = true
+		entry.TypeRaw = v
 		entry.Type, _ = rawString(v)
 		entry.TypeJS, _ = jsTypeString(v)
 	}
@@ -307,6 +310,7 @@ func (ix *configIndex) ownerIndex(id string) (int, bool) {
 func (ix *configIndex) issues() []FlowIssue {
 	var issues []FlowIssue
 	issues = append(issues, ix.duplicateIDIssues()...)
+	issues = append(issues, ix.missingTypeIssues()...)
 	issues = append(issues, ix.ownerRuleIssues()...)
 	issues = append(issues, ix.orphanNodeIssues()...)
 	issues = append(issues, ix.missingSubflowIssues()...)
@@ -323,6 +327,20 @@ func (ix *configIndex) linksShapeIssues() []FlowIssue {
 			continue
 		}
 		issues = append(issues, ix.linksShapeIssue(entry)...)
+	}
+	return issues
+}
+
+// missingTypeIssues reports the entries without a usable type, wherever
+// they live: a tab member, a subflow member, an orphan or a global
+// configuration node. The runtime cannot resolve such a node type, and a
+// runtime with a missing node type refuses to start the flows (issue #336).
+func (ix *configIndex) missingTypeIssues() []FlowIssue {
+	var issues []FlowIssue
+	for _, entry := range ix.entries {
+		if typeMissing(entry.TypeRaw, entry.HasType) {
+			issues = append(issues, missingTypeIssue(entry.ID))
+		}
 	}
 	return issues
 }
@@ -422,16 +440,44 @@ func (ix *configIndex) orphanNodeIssues() []FlowIssue {
 		known[owner.id] = true
 	}
 	var issues []FlowIssue
+	ids := ix.idSet()
 	for _, entry := range ix.entries {
 		switch entry.Type {
-		case "tab", "subflow", "group":
+		case "tab", "subflow":
 			continue
 		}
-		if issue := ix.ownerlessNodeIssue(entry, known); issue != nil {
-			issues = append(issues, *issue)
+		// A group belongs to a tab or a subflow definition like any
+		// node, so a group whose z names neither has no owner either.
+		issue := ix.ownerlessNodeIssue(entry, known)
+		if issue == nil {
+			continue
 		}
+		issues = append(issues, *issue)
+		// No owner rule ever visits an orphan, so its wires are
+		// checked here, against every id in the configuration.
+		issues = append(issues, ix.orphanWireIssues(entry, ids)...)
 	}
 	return issues
+}
+
+// idSet returns every id the configuration declares.
+func (ix *configIndex) idSet() map[string]bool {
+	ids := make(map[string]bool, len(ix.entries))
+	for _, entry := range ix.entries {
+		if entry.ID != "" {
+			ids[entry.ID] = true
+		}
+	}
+	return ids
+}
+
+// orphanWireIssues checks the wires of an entry that belongs to no owner.
+func (ix *configIndex) orphanWireIssues(entry configEntry, ids map[string]bool) []FlowIssue {
+	var node map[string]json.RawMessage
+	if err := json.Unmarshal(ix.raw(entry.Index), &node); err != nil || node == nil {
+		return nil
+	}
+	return validateWires([]map[string]json.RawMessage{node}, nil, ids)
 }
 
 // ownerlessNodeIssue returns the issue for a node that belongs to no
@@ -706,7 +752,7 @@ func ownerIssues(doc RawFlow) []FlowIssue {
 	var out []FlowIssue
 	for _, issue := range ValidateFlow(doc) {
 		switch issue.Kind {
-		case IssueDuplicateID, IssueInvalidLinks:
+		case IssueDuplicateID, IssueInvalidLinks, IssueMissingType:
 			// Reported once, by the whole-configuration pass: it covers
 			// the cross-owner case a per-document rule cannot see.
 			continue

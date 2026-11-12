@@ -568,6 +568,11 @@ func validateFlowWires(raw RawFlow) error {
 			// parses the configuration, so a value that is not an array
 			// stops the deploy with a TypeError.
 			return &FlowGuardError{Message: issue.Message}
+		case IssueMissingType:
+			// A node type the runtime cannot resolve stops every flow
+			// until it is registered (issue #336); AddNode refuses the
+			// same node.
+			return &FlowGuardError{Message: issue.Message}
 		}
 	}
 	return nil

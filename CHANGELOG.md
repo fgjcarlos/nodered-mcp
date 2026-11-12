@@ -8,6 +8,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Validate a flat flow array as a whole in `validate_flow` (#336). The
+  validator rebuilt one document per tab, so an id shared by two tabs, a
+  node outside every tab and the nodes of a subflow definition were never
+  checked, and a node without a `type` passed everywhere. `validate_flow`
+  now reports `duplicate_id` across the whole array, `orphan_node` for a
+  node or group whose `z` names no tab or subflow (with its dangling wires),
+  and a new `missing_type` issue. The full deployment check (`set_flows`,
+  backup restore) and the tab write guard (`create_flow`, `update_flow`)
+  refuse a node without a type as well; a type the runtime coerces into a
+  name, such as `["inject"]`, is still accepted.
 - Restore Streamable HTTP streaming on the HTTP transport (#335). The
   request logging wrapper hid `http.Flusher` from mcp-go, so a `GET /mcp`
   listening stream was answered with `405 Streaming unsupported` and SSE

@@ -263,8 +263,11 @@ func (s *Server) registerTools() {
 	validateFlow := mcp.NewTool("validate_flow",
 		mcp.WithDescription(
 			"Run the structural checks the write path applies (dangling wires, "+
-				"duplicate or missing ids, missing x/y canvas coordinates) against a "+
-				"flow document WITHOUT writing it. Returns every issue found so the "+
+				"duplicate or missing ids, missing types, missing x/y canvas coordinates) "+
+				"against a flow document WITHOUT writing it. A flat array (the GET /flows "+
+				"shape) is checked as a whole: ids must be unique across every tab, "+
+				"subflow and config node, and every node and group must belong to a tab "+
+				"or a subflow definition. Returns every issue found so the "+
 				"caller can fix them all at once, rather than discover one per failed "+
 				"deploy. Read-only — nothing is sent to the runtime.",
 		),
