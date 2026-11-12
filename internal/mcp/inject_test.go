@@ -312,3 +312,46 @@ func TestHandleInjectNode_EmptyID(t *testing.T) {
 		t.Errorf("expected a required-id error, got %q", tc.Text)
 	}
 }
+
+// A non-inject node is refused the same way with and without a payload,
+// and no fire request reaches the runtime (#338). The payload path used
+// to POST /inject/:id and report "fired with payload" on a comment node.
+func TestHandleInjectNode_RejectsNonInjectNode(t *testing.T) {
+	cases := map[string]map[string]any{
+		"no payload":   {"id": "c1"},
+		"with payload": {"id": "c1", "payload": map[string]any{"foo": 1}},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			var posts int
+			srv, _ := injectServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet && r.URL.Path == "/flows" {
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`[{"id":"t","type":"tab"},{"id":"c1","type":"comment","z":"t","x":1,"y":1}]`))
+					return
+				}
+				if r.Method == http.MethodPost {
+					posts++
+				}
+				w.WriteHeader(http.StatusOK)
+			})
+
+			res, err := srv.handleInjectNode(context.Background(), mcp.CallToolRequest{
+				Params: mcp.CallToolParams{Arguments: args},
+			})
+			if err != nil {
+				t.Fatalf("handleInjectNode: %v", err)
+			}
+			if !res.IsError {
+				t.Fatalf("expected an error result, got %+v", res)
+			}
+			want := `node "c1" is type "comment", not "inject"; only inject nodes can be fired`
+			if got := res.Content[0].(mcp.TextContent).Text; got != want {
+				t.Errorf("text = %q, want %q", got, want)
+			}
+			if posts != 0 {
+				t.Errorf("expected no fire request, got %d POSTs", posts)
+			}
+		})
+	}
+}

@@ -411,27 +411,10 @@ func (s *Server) handleEnableFlow(ctx context.Context, req mcp.CallToolRequest) 
 // handleInjectNode triggers an inject node, optionally with a custom
 // payload.
 //
-// The no-payload path is the original behaviour: InjectNode looks up
-// the node's type first (issue #43/#56) and refuses to fire anything
-// that is not type:"inject", so the operator sees a typed error
-// instead of a phantom success.
-//
-// The with-payload path goes through InjectNodeWithBody (added by
-// issue #52 for set_context) with the magic __user_inject_props__
-// trigger that makes Node-RED 5.x forward the body to node.receive.
-// The trigger's value is the inject's per-call prop override list;
-// an empty array means "use this body as msg", which is what we
-// want when the operator is commissioning a flow with a specific
-// input. Anything else the caller put in the payload (topic,
-// headers, custom keys) round-trips through as part of msg.
-
-// handleInjectNode triggers an inject node, optionally with a custom
-// payload.
-//
-// The no-payload path is the original behaviour: InjectNode looks up
-// the node's type first (issue #43/#56) and refuses to fire anything
-// that is not type:"inject", so the operator sees a typed error
-// instead of a phantom success.
+// Both paths refuse anything that is not type:"inject" before any
+// fire request (issues #43/#56, and #338 for the payload path): the
+// runtime's /inject/:id accepts other types and reports success
+// without firing, so the operator would see a phantom success.
 //
 // The with-payload path goes through InjectNodeWithBody (added by
 // issue #52 for set_context) with the magic __user_inject_props__
@@ -517,6 +500,9 @@ func (s *Server) handleInjectNode(ctx context.Context, req mcp.CallToolRequest) 
 	if lookup.TabDisabled {
 		return mcp.NewToolResultError(fmt.Sprintf("node %q is in a disabled tab", id)), nil
 	}
+	if lookup.Type != "inject" {
+		return mcp.NewToolResultError(fmt.Sprintf("node %q is type %q, not \"inject\"; only inject nodes can be fired", id, lookup.Type)), nil
+	}
 
 	if !hasPayload || rawPayload == nil {
 		if err := s.nrClient.InjectNode(ctx, id); err != nil {
@@ -540,11 +526,6 @@ func (s *Server) handleInjectNode(ctx context.Context, req mcp.CallToolRequest) 
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Inject node %q fired with payload.%s", id, notice)), nil
 }
-
-// encodePayloadArg normalises a payload argument that arrived as
-// either a JSON object (map[string]any) or a JSON-encoded string
-// into a single json.RawMessage. Anything else is a caller mistake
-// and gets a typed error before the runtime is touched.
 
 // encodePayloadArg normalises a payload argument that arrived as
 // either a JSON object (map[string]any) or a JSON-encoded string
