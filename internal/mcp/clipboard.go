@@ -96,7 +96,7 @@ func (s *Server) handleImportFlow(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("created flow has no id: %v (response: %s)", err, string(created))), nil
 	}
-	msg := fmt.Sprintf("Flow imported. New id: %q. Node-RED assigns the tab id on import.", newID)
+	msg := fmt.Sprintf("Flow imported. New id: %q. Node-RED rewrites the tab id on POST /flow; call export_flow with the new id to learn the runtime-assigned one.", newID)
 	if reminted > 0 {
 		msg += fmt.Sprintf(" %d node ids already existed on this instance, so every node id of the copy was reminted and its wires and references rewritten.", reminted)
 	}
