@@ -56,6 +56,13 @@ func recoverPanics(next http.Handler) http.Handler {
 }
 
 // statusWriter wraps a ResponseWriter to capture the status code for logging.
+//
+// It must not hide the underlying writer's optional capabilities (issue
+// #335): mcp-go enables Streamable HTTP SSE only when the writer it
+// receives implements http.Flusher, so dropping it turned every GET
+// listening stream into 405 "Streaming unsupported". Flush forwards
+// through http.ResponseController, and Unwrap lets ResponseController
+// reach the real writer for deadlines, Hijack and future capabilities.
 type statusWriter struct {
 	http.ResponseWriter
 	status      int
@@ -68,4 +75,16 @@ func (s *statusWriter) WriteHeader(code int) {
 		s.wroteHeader = true
 	}
 	s.ResponseWriter.WriteHeader(code)
+}
+
+// Flush implements http.Flusher. A flush before WriteHeader commits an
+// implicit 200, which is already the recorded default status.
+func (s *statusWriter) Flush() {
+	s.wroteHeader = true
+	_ = http.NewResponseController(s.ResponseWriter).Flush()
+}
+
+// Unwrap returns the wrapped writer for http.ResponseController.
+func (s *statusWriter) Unwrap() http.ResponseWriter {
+	return s.ResponseWriter
 }

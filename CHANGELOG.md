@@ -8,6 +8,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Restore Streamable HTTP streaming on the HTTP transport (#335). The
+  request logging wrapper hid `http.Flusher` from mcp-go, so a `GET /mcp`
+  listening stream was answered with `405 Streaming unsupported` and SSE
+  responses were unavailable. The wrapper now forwards `Flush` and exposes
+  `Unwrap` for `http.ResponseController`.
+
 - Enforce the node denylist on every mutating surface (#329).
   `MCP_NODE_DENYLIST` is now judged on the effective configuration a write
   would deploy, and the document is walked recursively, so a forbidden type
