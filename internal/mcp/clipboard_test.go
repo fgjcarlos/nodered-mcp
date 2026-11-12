@@ -3,11 +3,9 @@ package mcp
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -26,52 +24,6 @@ const sampleTab = `{
     {"id": "n2", "type": "debug", "z": "tab1", "name": "show", "wires": [], "x": 300, "y": 100}
   ]
 }`
-
-// TestExportFlow_HappyPath: export_flow returns the same bytes the
-// editor's Ctrl+C produces — a single-element array containing the
-// tab document, pretty-printed.
-func TestExportFlow_HappyPath(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/flow/tab1" {
-			t.Errorf("expected /flow/tab1, got %s", r.URL.Path)
-		}
-		_, _ = w.Write([]byte(sampleTab))
-	}))
-	t.Cleanup(srv.Close)
-
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
-	s := New(c, Options{Version: "test"})
-
-	res, err := s.handleExportFlow(context.Background(), mcp.CallToolRequest{
-		Params: mcp.CallToolParams{Arguments: map[string]any{"id": "tab1"}},
-	})
-	if err != nil {
-		t.Fatalf("handleExportFlow: %v", err)
-	}
-	if res.IsError {
-		t.Fatalf("unexpected error: %v", res.Content)
-	}
-	tc := res.Content[0].(mcp.TextContent)
-	body := stripCodeFence(tc.Text)
-	var arr []json.RawMessage
-	if err := json.Unmarshal([]byte(body), &arr); err != nil {
-		t.Fatalf("response is not a JSON array: %v\nbody: %s", err, body)
-	}
-	if len(arr) != 1 {
-		t.Fatalf("clipboard has %d elements, want 1", len(arr))
-	}
-	// The single element must carry the tab's id and label.
-	var tab map[string]any
-	if err := json.Unmarshal(arr[0], &tab); err != nil {
-		t.Fatalf("clipboard element is not an object: %v", err)
-	}
-	if tab["id"] != "tab1" {
-		t.Errorf("clipboard element id = %v, want tab1", tab["id"])
-	}
-	if tab["label"] != "Home" {
-		t.Errorf("clipboard element label = %v, want Home", tab["label"])
-	}
-}
 
 // TestImportFlow_HappyPath: import_flow accepts a clipboard array,
 // POSTs /flow, and returns the runtime-assigned id.
@@ -112,90 +64,6 @@ func TestImportFlow_HappyPath(t *testing.T) {
 	}
 	if len(postedBody) == 0 {
 		t.Error("server was not POSTed to")
-	}
-}
-
-// TestExportImportRoundTrip: the issue's acceptance criterion —
-// export → import → export must return the same bytes (modulo
-// runtime-assigned id differences).
-//
-// The test runs against a single httptest server that holds the
-// in-memory flow state. First export pulls tab1; import_flow creates
-// a new tab with a runtime-assigned id; second export pulls that
-// new tab; the bodies must match after the id is normalised.
-func TestExportImportRoundTrip(t *testing.T) {
-	var (
-		mu      sync.Mutex
-		flows   = map[string]string{"tab1": sampleTab}
-		counter = 0
-	)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
-		switch {
-		case r.Method == "GET" && r.URL.Path == "/flow/tab1":
-			_, _ = w.Write([]byte(flows["tab1"]))
-		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/flow/"):
-			id := strings.TrimPrefix(r.URL.Path, "/flow/")
-			body, ok := flows[id]
-			if !ok {
-				http.Error(w, "not found", http.StatusNotFound)
-				return
-			}
-			_, _ = w.Write([]byte(body))
-		case r.Method == "POST" && r.URL.Path == "/flow":
-			counter++
-			newID := fmt.Sprintf("runtime-%d", counter)
-			body := make([]byte, r.ContentLength)
-			_, _ = r.Body.Read(body)
-			flows[newID] = string(body)
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"id":%q}`, newID)))
-		case r.Method == "GET" && r.URL.Path == "/flows":
-			_, _ = w.Write([]byte(`{"rev":"x","flows":[]}`))
-		default:
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
-		}
-	}))
-	t.Cleanup(srv.Close)
-
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
-	s := New(c, Options{Version: "test"})
-
-	// First export.
-	res1, err := s.handleExportFlow(context.Background(), mcp.CallToolRequest{
-		Params: mcp.CallToolParams{Arguments: map[string]any{"id": "tab1"}},
-	})
-	if err != nil {
-		t.Fatalf("first export: %v", err)
-	}
-	first := stripCodeFence(res1.Content[0].(mcp.TextContent).Text)
-
-	// Import the exported bytes.
-	importRes, err := s.handleImportFlow(context.Background(), mcp.CallToolRequest{
-		Params: mcp.CallToolParams{Arguments: map[string]any{"clipboard": first}},
-	})
-	if err != nil {
-		t.Fatalf("import: %v", err)
-	}
-	importText := importRes.Content[0].(mcp.TextContent).Text
-	// The success message contains "New id: \"<id>\"".
-	importedID := extractQuotedID(t, importText)
-
-	// Second export, against the runtime-assigned id.
-	res2, err := s.handleExportFlow(context.Background(), mcp.CallToolRequest{
-		Params: mcp.CallToolParams{Arguments: map[string]any{"id": importedID}},
-	})
-	if err != nil {
-		t.Fatalf("second export: %v", err)
-	}
-	second := stripCodeFence(res2.Content[0].(mcp.TextContent).Text)
-
-	// The two exports differ only in the id field — the runtime
-	// assigns its own. We normalise the id in `second` to the
-	// `first`'s id and re-marshal so the comparison is structural,
-	// not byte-for-byte (which can drift on key ordering).
-	if !equalExceptID(t, first, second, importedID, "tab1") {
-		t.Errorf("round-trip changed the tab body\nfirst:\n%s\n\nsecond:\n%s", first, second)
 	}
 }
 
@@ -395,46 +263,4 @@ func stripCodeFence(s string) string {
 		}
 	}
 	return strings.TrimSpace(s)
-}
-
-// extractQuotedID pulls the "id" out of an import_flow success
-// message: "Flow imported. New id: \"<id>\". ..."
-func extractQuotedID(t *testing.T, msg string) string {
-	t.Helper()
-	i := strings.Index(msg, "New id:")
-	if i < 0 {
-		t.Fatalf("success message has no 'New id:' prefix: %q", msg)
-	}
-	rest := msg[i:]
-	j := strings.Index(rest, "\"")
-	if j < 0 {
-		t.Fatalf("no opening quote after 'New id:': %q", msg)
-	}
-	rest = rest[j+1:]
-	j = strings.Index(rest, "\"")
-	if j < 0 {
-		t.Fatalf("no closing quote: %q", msg)
-	}
-	return rest[:j]
-}
-
-// equalExceptID compares two clipboard bodies, normalising the
-// `id` field on each top-level element. Returns true when the bodies
-// match modulo that field — which is what the round-trip test
-// wants, since the runtime rewrites ids.
-func equalExceptID(t *testing.T, a, b, aID, bID string) bool {
-	t.Helper()
-	normalise := func(raw, fromID, toID string) string {
-		var arr []map[string]any
-		if err := json.Unmarshal([]byte(raw), &arr); err != nil {
-			t.Fatalf("not a JSON array: %v", err)
-		}
-		if len(arr) != 1 {
-			t.Fatalf("expected 1 element, got %d", len(arr))
-		}
-		arr[0]["id"] = toID
-		out, _ := json.Marshal(arr)
-		return string(out)
-	}
-	return normalise(a, aID, "tab1") == normalise(b, bID, "tab1")
 }

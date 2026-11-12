@@ -4,11 +4,11 @@ package mcp
 // exposed as MCP tools so a flow can be moved between instances (or
 // between the editor and an instance) without copy-paste in the UI.
 //
-// The format is the same one Ctrl+C produces in the editor: a JSON
-// array whose single element is the flow tab document. Round-trip
-// (export → import → export) returns the same bytes, so a caller can
-// diff the two exports and trust any delta to be runtime state, not
-// the copy itself.
+// The format is the one the editor's export produces (issue #337): a
+// flat JSON array whose elements are the tab ({"type":"tab"}), each of
+// its nodes, and the global config nodes and subflow definitions they
+// depend on. clipboard_convert.go converts between that array and the
+// nested document POST /flow takes.
 
 import (
 	"context"
@@ -17,15 +17,14 @@ import (
 	"log/slog"
 
 	"github.com/mark3labs/mcp-go/mcp"
+
+	"github.com/fgjcarlos/nodered-mcp/internal/nodered"
 )
 
-// handleExportFlow returns the editor clipboard representation of a
-// single flow tab. The shape is `[{...tab...}]` — a single-element
-// array containing the tab document that GET /flow/:id returned,
-// pretty-printed so the LLM (or a human) can read it directly.
-//
-// Wires round-trip intact because we hand back the bytes Node-RED
-// itself produced. No re-encoding, no field dropping.
+// handleExportFlow returns the editor clipboard for one flow tab,
+// pretty-printed so the LLM (or a human) can read it directly. Elements
+// are the bytes Node-RED itself stores, so wires and every node field
+// round-trip intact.
 func (s *Server) handleExportFlow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	id, err := req.RequireString("id")
 	if err != nil {
@@ -33,46 +32,60 @@ func (s *Server) handleExportFlow(ctx context.Context, req mcp.CallToolRequest) 
 	}
 	slog.Debug("tool: export_flow", "id", id)
 
-	tab, err := s.nrClient.GetFlow(ctx, id)
+	current, err := s.currentFlowItems(ctx)
 	if err != nil {
 		slog.Error("export_flow failed", "error", err, "id", id)
-		return toolResultError(err, fmt.Sprintf("reading flow: %v", err))
+		return toolResultError(err, fmt.Sprintf("reading flows: %v", err))
 	}
-
-	clipboard, err := wrapTabInClipboardArray(tab)
+	items, err := exportClipboard(current, id)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	clipboard, err := json.MarshalIndent(items, "", "  ")
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("encoding clipboard: %v", err)), nil
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("```json\n%s\n```", string(clipboard))), nil
 }
 
-// handleImportFlow accepts an editor clipboard JSON document and
-// creates a new flow tab from it. The tool enforces a single-tab
-// import (one element in the array) to match the editor's "copy one
-// tab" verb and to keep the import boundary obvious to the caller.
+// handleImportFlow accepts an editor clipboard and creates a new flow tab
+// from it. Exactly one element must be a tab, so a "copy several tabs by
+// accident" never silently lands as one import. The nested single-tab
+// shape earlier releases exported is still accepted.
 //
-// The tab's id is rewritten by Node-RED on POST /flow (it ignores
-// what we send), so the returned id is the runtime-assigned one, not
-// the one in the clipboard. The caller should re-export to learn it
-// if needed.
+// Node-RED assigns the tab id on POST /flow; member ids are kept unless
+// one already exists on this instance, in which case all of them are
+// reminted (see clipboardImport.resolve).
 func (s *Server) handleImportFlow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	raw, err := clipboardParam(req, "clipboard")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	tabBytes, err := extractSingleTabFromClipboard(raw)
+	doc, err := parseClipboard(raw)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	// Build the nested tab document Node-RED's POST /flow expects.
-	// normalizeFlowDoc accepts both the flat-array shape and the
-	// nested-tab shape; either is fine, the helper reconciles.
-	tab, err := normalizeFlowDoc(tabBytes, "", true)
+	// Refuse a forbidden type before any request, as the nested path did;
+	// CreateFlow judges the final document again.
+	for _, t := range doc.types {
+		if !s.nrClient.NodeTypeAllowed(t) {
+			return mcp.NewToolResultError(deniedNodeMessage(t)), nil
+		}
+	}
+	current, err := s.currentFlowItems(ctx)
+	if err != nil {
+		return toolResultError(err, fmt.Sprintf("reading flows: %v", err))
+	}
+	nested, reminted, err := doc.resolve(current)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	tab, err := normalizeFlowDoc(nested, "", true)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("clipboard is not a valid flow document: %v", err)), nil
 	}
 
-	slog.Debug("tool: import_flow", "bytes", len(tab))
+	slog.Debug("tool: import_flow", "bytes", len(tab), "reminted", reminted)
 
 	created, err := s.nrClient.CreateFlow(ctx, tab)
 	if err != nil {
@@ -83,61 +96,24 @@ func (s *Server) handleImportFlow(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("created flow has no id: %v (response: %s)", err, string(created))), nil
 	}
-	return mcp.NewToolResultText(fmt.Sprintf(
-		"Flow imported. New id: %q. Node-RED rewrites the tab id on POST /flow; call export_flow with the new id to learn the runtime-assigned one.",
-		newID,
-	)), nil
+	msg := fmt.Sprintf("Flow imported. New id: %q. Node-RED rewrites the tab id on POST /flow; call export_flow with the new id to learn the runtime-assigned one.", newID)
+	if reminted > 0 {
+		msg += fmt.Sprintf(" %d node ids already existed on this instance, so every node id of the copy was reminted and its wires and references rewritten.", reminted)
+	}
+	return mcp.NewToolResultText(msg), nil
 }
 
-// wrapTabInClipboardArray produces the editor's clipboard shape: a
-// single-element JSON array containing the tab document, pretty-
-// printed. Pretty-printing is intentional: the export tool is meant
-// to be readable by the LLM (and by humans) and there is no size
-// reason to compact it.
-func wrapTabInClipboardArray(tab json.RawMessage) ([]byte, error) {
-	var prettyTab []byte
-	if len(tab) > 0 {
-		var anyTab interface{}
-		if err := json.Unmarshal(tab, &anyTab); err != nil {
-			return nil, fmt.Errorf("tab is not valid JSON: %w", err)
-		}
-		p, err := json.MarshalIndent(anyTab, "", "  ")
-		if err != nil {
-			return nil, err
-		}
-		prettyTab = p
-	}
-	clipboard := []json.RawMessage{prettyTab}
-	out, err := json.MarshalIndent(clipboard, "", "  ")
+// currentFlowItems reads the instance's flat configuration.
+func (s *Server) currentFlowItems(ctx context.Context) ([]json.RawMessage, error) {
+	raw, err := s.nrClient.ListFlows(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
-}
-
-// extractSingleTabFromClipboard accepts a clipboard array and returns
-// the single tab element. The editor's clipboard is `[<tab>, ...]`,
-// but a user pasting one tab produces a 1-element array; the tool
-// rejects anything else so a "copy several tabs by accident" never
-// silently lands as one import.
-func extractSingleTabFromClipboard(raw json.RawMessage) (json.RawMessage, error) {
-	if len(raw) == 0 {
-		return nil, fmt.Errorf("clipboard is empty")
+	items := nodered.FlowArray(raw)
+	if items == nil {
+		return nil, fmt.Errorf("unrecognizable flow configuration from GET /flows")
 	}
-	var arr []json.RawMessage
-	if err := json.Unmarshal(raw, &arr); err != nil {
-		return nil, fmt.Errorf("clipboard is not a JSON array: %w", err)
-	}
-	if len(arr) == 0 {
-		return nil, fmt.Errorf("clipboard array is empty")
-	}
-	if len(arr) > 1 {
-		return nil, fmt.Errorf(
-			"clipboard has %d tabs; import_flow only accepts a single tab — split the import by hand if you want them on separate tabs",
-			len(arr),
-		)
-	}
-	return arr[0], nil
+	return items, nil
 }
 
 // clipboardParam reads the "clipboard" argument as either a JSON-

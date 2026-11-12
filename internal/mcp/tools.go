@@ -94,15 +94,16 @@ func (s *Server) registerTools() {
 
 	// ---- export_flow / import_flow ------------------------------------
 	// Editor clipboard model exposed as MCP tools. export_flow returns
-	// the same shape Ctrl+C produces in the editor; import_flow takes
-	// that shape back and creates a new flow tab on this instance.
+	// the flat array the editor exports; import_flow takes that shape
+	// back and creates a new flow tab on this instance (issue #337).
 	exportFlow := mcp.NewTool("export_flow",
 		mcp.WithDescription(
-			"Read a flow tab in editor clipboard format. Returns the same JSON "+
-				"document that Ctrl+C produces in the Node-RED editor — a single-"+
-				"element array whose element is the flow tab. Use this to capture a "+
-				"tested flow, then call import_flow on another instance to deploy it. "+
-				"Wires round-trip intact. Read-only.",
+			"Read a flow tab in editor clipboard format: the same flat JSON array the "+
+				"Node-RED editor exports — the tab as one element (\"type\":\"tab\"), then "+
+				"each of its nodes, then the global config nodes and subflow definitions "+
+				"they use. Use this to capture a tested flow, then call import_flow on "+
+				"another instance (or paste it into the editor). Wires round-trip intact. "+
+				"Read-only.",
 		),
 		mcp.WithString("id", mcp.Required(),
 			mcp.Description("The flow tab ID to export.")),
@@ -111,10 +112,14 @@ func (s *Server) registerTools() {
 
 	importFlow := mcp.NewTool("import_flow",
 		mcp.WithDescription(
-			"Create a new flow tab from an editor clipboard JSON document. The "+
-				"argument shape is the same one export_flow returns: a single-element "+
-				"array whose element is the flow tab. Only one tab per call — split "+
-				"multi-tab pastes by hand. Returns the runtime-assigned id of the new tab.\n\n"+
+			"Create a new flow tab from an editor clipboard JSON document: the flat "+
+				"array export_flow returns or the Node-RED editor exports. Exactly one "+
+				"element must be a tab — split multi-tab pastes by hand. Node ids are kept "+
+				"unless one already exists on this instance; then every node id of the copy "+
+				"is reminted and its wires and references rewritten. Global config nodes "+
+				"and subflows the instance already has are reused; a subflow it lacks must "+
+				"be created first with create_subflow. Returns the runtime-assigned id of "+
+				"the new tab.\n\n"+
 				"WARNING: this tool can deploy any node type the Node-RED instance has "+
 				"installed, including exec/system nodes that execute shell commands on "+
 				"the Node-RED host. The MCP server blocks a configurable set of node "+
@@ -123,7 +128,7 @@ func (s *Server) registerTools() {
 				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
 		),
 		mcp.WithString("clipboard", mcp.Required(),
-			mcp.Description("Editor clipboard JSON: a single-element array containing the flow tab. Either the raw array or a JSON-encoded string is accepted.")),
+			mcp.Description("Editor clipboard JSON: a flat array with one tab element plus its nodes and dependencies. Either the raw array or a JSON-encoded string is accepted.")),
 	)
 	s.addWriteTool(importFlow, s.handleImportFlow)
 

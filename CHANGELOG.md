@@ -8,6 +8,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Speak the real editor clipboard format in `export_flow` and
+  `import_flow` (#337). Both assumed a single-element array holding a
+  nested tab, so a real editor export (the tab and its nodes as separate
+  elements) was refused as "clipboard has N tabs", and `export_flow`
+  produced a document the editor does not export. `export_flow` now
+  returns the flat array — the tab, its nodes, and the global config
+  nodes and subflow definitions they use — and `import_flow` counts tabs
+  by `type`. Importing a copy into the same instance used to fail on
+  duplicate ids; when any node id already exists, every node id of the
+  copy is now reminted and its wires and references rewritten. Global
+  config nodes and subflows the instance has are reused; a missing
+  subflow is refused with the step to take. The nested shape earlier
+  releases exported is still accepted.
+
 - Validate a flat flow array as a whole in `validate_flow` (#336). The
   validator rebuilt one document per tab, so an id shared by two tabs, a
   node outside every tab and the nodes of a subflow definition were never

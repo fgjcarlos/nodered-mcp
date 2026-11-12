@@ -119,8 +119,8 @@ access is granted to the MCP server.
 | `disable_flow` | `GET /flows` + `POST /flows` | write | |
 | `enable_flow` | `GET /flows` + `POST /flows` | write | |
 | `inject_node` | `POST /inject/:id` | action | Excluded from `--read-only`; optional payload |
-| `export_flow` | `GET /flow/:id` | read | |
-| `import_flow` | `POST /flow` | write | |
+| `export_flow` | `GET /flows` | read | Editor clipboard format: a flat array with the tab (`"type":"tab"`) first, then its nodes, and the global config nodes and subflow definitions they use (transitively) |
+| `import_flow` | `GET /flows` + `POST /flow` | write | Takes the flat editor clipboard (exactly one `tab` element; the nested `[{...tab, nodes}]` shape is still accepted). Ids are kept unless one already exists on the instance; then every node id of the copy is reminted and its wires and references rewritten. Global config nodes and subflows the instance has are reused; a missing global config node is created scoped to the new tab; a missing subflow is refused (create it first with `create_subflow`) |
 | `list_subflows` | `GET /flow/global` | read | |
 | `get_subflow` | `GET /flow/global` | read | |
 | `create_subflow` | `PUT /flow/global` | write | The definition's topology is validated first |
