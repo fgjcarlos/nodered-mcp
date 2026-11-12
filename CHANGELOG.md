@@ -8,6 +8,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Refuse `inject_node` with a `payload` on a node that is not of type
+  `inject` (#338). The payload path skipped the type check, so a call on
+  a comment node sent `POST /inject/:id` and reported "fired with
+  payload" while nothing fired. Both paths now return the same typed
+  error and send no fire request.
 - Speak the real editor clipboard format in `export_flow` and
   `import_flow` (#337). Both assumed a single-element array holding a
   nested tab, so a real editor export (the tab and its nodes as separate
