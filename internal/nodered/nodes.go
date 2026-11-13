@@ -8,9 +8,14 @@ import (
 	"time"
 )
 
-// installTimeout bounds install/uninstall calls. npm runs under the hood and
+// InstallTimeout bounds install/uninstall calls. npm runs under the hood and
 // can take well over the default read timeout, so these get their own budget.
-const installTimeout = 5 * time.Minute
+//
+// The MCP layer grants the same budget to the palette tools: the wrapper's
+// deadline is the parent of this one, and a child context cannot extend its
+// parent, so a shorter wrapper deadline silently truncated the install
+// (issue #339).
+const InstallTimeout = 5 * time.Minute
 
 // nodeInfoPath builds the per-module admin API path, escaping both the
 // module name and any optional node set so a crafted name cannot alter the
@@ -55,7 +60,7 @@ func (c *Client) InstallNode(ctx context.Context, module, version string) (*Inst
 	if module == "" {
 		return nil, errors.New("module name is required")
 	}
-	ctx, cancel := context.WithTimeout(ctx, installTimeout)
+	ctx, cancel := context.WithTimeout(ctx, InstallTimeout)
 	defer cancel()
 
 	body := map[string]string{"module": module}
@@ -77,7 +82,7 @@ func (c *Client) UninstallNode(ctx context.Context, module string) error {
 	if module == "" {
 		return errors.New("module name is required")
 	}
-	ctx, cancel := context.WithTimeout(ctx, installTimeout)
+	ctx, cancel := context.WithTimeout(ctx, InstallTimeout)
 	defer cancel()
 
 	return c.do(ctx, "DELETE", nodeInfoPath(module, ""), nil, nil)

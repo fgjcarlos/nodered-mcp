@@ -302,11 +302,17 @@ func (c *Client) RestoreFlowsUnchecked(ctx context.Context, backup RawFlow) erro
 
 // restoreFlowsLocked deploys a flow array as a full configuration. The
 // caller holds the write lock.
+//
+// The budget is the one a full deployment gets (SettingsStateTimeout), the
+// same one set_flows uses: a restore is the same POST /flows, so it must
+// not be cut short where a deploy is not (issue #339).
 func (c *Client) restoreFlowsLocked(ctx context.Context, arr []json.RawMessage) error {
 	body, err := json.Marshal(arr)
 	if err != nil {
 		return fmt.Errorf("re-encoding backup: %w", err)
 	}
+	ctx, cancel := context.WithTimeout(ctx, SettingsStateTimeout)
+	defer cancel()
 	if _, err := c.snapshotFlows(ctx); err != nil {
 		return err
 	}

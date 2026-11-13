@@ -171,9 +171,9 @@ func TestWithTimeoutRetry_RetriesOnTransportResult(t *testing.T) {
 	handler := func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		n := calls.Add(1)
 		if n < 2 {
-			// Mirror what nodered.Client.do emits when its 30s defaultTimeout
-			// fires before the wrapper's 15s — the handler sees ctx.Err()
-			// and rewrites it via NewToolResultError.
+			// Mirror what nodered.Client.do emits when a deadline fires
+			// inside the attempt — the handler sees ctx.Err() and rewrites
+			// it via NewToolResultError.
 			return toolResultError(context.DeadlineExceeded, "calling GET http://localhost:1880/flows: context deadline exceeded")
 		}
 		return mcp.NewToolResultText("ok"), nil
