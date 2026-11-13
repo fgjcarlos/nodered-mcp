@@ -63,6 +63,38 @@ carries, and three things follow:
 - a conflict is a conflict: the tool reports it instead of overwriting the
   other editor's work. Read the flow again before retrying.
 
+## Timeout budgets
+
+Each tool attempt runs under a context deadline. The default is 15 seconds.
+The tools whose work legitimately outlasts it carry their own budget, so the
+deadline the MCP wrapper sets does not cut the operation short:
+
+| Tools | Budget | Why |
+|---|---|---|
+| `install_node`, `uninstall_node` | 5 minutes | npm runs under the hood and takes minutes |
+| `set_flows`, `set_flows_state`, `restore_backup` | 2 minutes | a full deploy, a runtime restart or a restore can stall a busy instance |
+| every other tool | 15 seconds | the default |
+
+The budget is the server's, not the client's: many MCP clients give up on a
+call after their own timeout, so a five-minute install only runs as long as
+the client is willing to wait for it.
+
+A client can cancel a call at any time. The cancellation reaches the runtime:
+the in-flight request is aborted. What the runtime does with the operation
+after that is up to the runtime — an npm install it has already started keeps
+running — so a cancelled operation is never replayed automatically.
+
+Cancelling a call means the client stops waiting; it does not mean the
+server gets to report the outcome back to the client that walked away. A
+write that is cancelled while it is running reports an indeterminate outcome
+if the caller is still listening; a write cancelled while it is still waiting
+for the write lock reports that no action was started; a cancelled read
+reports a failed attempt.
+
+While a long palette operation holds the write lock, a write that arrives
+during it is refused once its own deadline passes. The refusal says that no
+action was started, and nothing reaches the runtime.
+
 ## Backup recovery limits
 
 Automatic backups are **structural snapshots of `GET /flows`**, not full
