@@ -75,6 +75,10 @@ deadline the MCP wrapper sets does not cut the operation short:
 | `set_flows`, `set_flows_state`, `restore_backup` | 2 minutes | a full deploy, a runtime restart or a restore can stall a busy instance |
 | every other tool | 15 seconds | the default |
 
+The server adds a short allowance on top of those budgets, so the budget the
+runtime work actually gets is the one above and not the time the call spent
+waiting for the write lock.
+
 The budget is the server's, not the client's: many MCP clients give up on a
 call after their own timeout, so a five-minute install only runs as long as
 the client is willing to wait for it.

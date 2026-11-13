@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mark3labs/mcp-go/mcp"
+
 	"github.com/fgjcarlos/nodered-mcp/internal/nodered"
 )
 
@@ -28,10 +30,10 @@ import (
 // it is the reason a queued write is not an indeterminate outcome: it never
 // began.
 func TestIssue339QueuedDeployIsRefusedDuringLongInstall(t *testing.T) {
-	// The two deployment writes get their own budget, so the default is
-	// scaled down for the install only; the deployments are scaled to a
-	// budget shorter than the install holds the lock, which is what makes
-	// their wait for the lock expire.
+	// set_flows and restore_backup are scaled to 100ms — shorter than the
+	// 600ms the install holds the write lock — so their wait for the lock
+	// expires while they wait. The install keeps its real budget: it is the
+	// one doing the work, and it must still complete.
 	scaleToolBudget(t, "set_flows", 100*time.Millisecond)
 	scaleToolBudget(t, "restore_backup", 100*time.Millisecond)
 
@@ -131,6 +133,22 @@ func TestIssue339SlowRestoreCompletesOnce(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "indeterminate") {
 		t.Fatalf("the restore did not complete: %s", raw)
+	}
+	var envelope struct {
+		Result mcp.CallToolResult `json:"result"`
+		Error  json.RawMessage    `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope.Error) != 0 || envelope.Result.IsError {
+		t.Fatalf("the restore did not complete: %s", raw)
+	}
+	// The result has to name the backup that was restored: a restore that
+	// deploys the right array but reports the wrong one is still a wrong
+	// answer to the operator.
+	if text := resultFirstText(&envelope.Result); !strings.Contains(text, "flows-test-000001.json") {
+		t.Fatalf("restore result = %q, want it to name the restored backup", text)
 	}
 }
 
