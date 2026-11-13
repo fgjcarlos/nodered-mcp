@@ -242,3 +242,23 @@ the CHANGELOG say so. Checks on the follow-up branch: `gofmt -l .` clean,
 `go vet ./...` clean, `git diff --check` clean, `go test ./... -count=1`
 green, `go test -race ./internal/mcp ./internal/nodered -count=1` green,
 `scripts/complexity-check.sh` OK.
+L19. Publication and native RDD review of the advisories branch. One
+work-unit commit (e8cf837) pushed as PR #375; remote CI green on every job.
+The native review: lineage `review-cce5d3613d4ce997`, target
+`sha256:2a06da8f...`, the reviewed tree `5c8cd541...` being exactly HEAD's
+tree at review time. The R3 reliability lens approved the candidate and the
+acknowledgement burned the authority
+(`native-approved-acknowledgement-completed`). One non-blocking advisory:
+`R3-headroom-behavior-unproved` (`internal/mcp/server.go:452`, WARNING,
+informational) — the headroom's effect is pinned by
+`TestIssue339WrapperBudgetExceedsTheClientBudget` at the deadline level, and
+the reviewer notes the end-to-end behaviour (a queued call still getting its
+full client budget for the runtime work) has no direct regression. Left as
+separate later work for the maintainer, like the round-one advisories.
+Two host-relay findings worth recording for the next review: the provider's
+RDD switch had flipped to global-off and START failed with `rdd_disabled`
+until `gentle-ai review mode enable --scope=global` restored it, and the
+capture binding was accepted only in the facade's camelCase projection
+with the artifact subject's exact schema literal plus an explicit
+`workspaceRoot` — without it the tool negotiates its STATUS inside the
+frozen candidate view instead of the repository.
