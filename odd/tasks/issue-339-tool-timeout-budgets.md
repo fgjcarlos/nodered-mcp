@@ -220,3 +220,25 @@ L17. The advisories above are separate later work, not a reason to re-run
 review on this candidate, and they are left unfixed here on purpose: the
 review receipt stands for the tree that was reviewed, and the maintainer
 decides whether to take them.
+L18. The three advisories were taken in a follow-up branch
+(`fix/issue-339-review-advisories`), because the user asked for a PR and the
+advisories were the only outstanding work. What changed:
+- R3-budget-equals-not-exceeds: the wrapper now grants the client's budget
+  plus `toolBudgetHeadroom` (30s), so the client's own deadline is the one
+  that binds the runtime work instead of the wrapper's. With the two equal,
+  the parent's fired first and the client never got its full budget once
+  the call had queued for the write lock. The new regression
+  `TestIssue339WrapperBudgetExceedsTheClientBudget` pins the relationship;
+  a scratch copy with the headroom removed fails it for all five tools, so
+  it tests the fix rather than the comment.
+- R3-queued-deploy-comment-and-timing: the comment above the queued-deploy
+  test now names the budgets it scales and says which one keeps its real
+  budget.
+- R3-slow-restore-weak-assertion: the slow-restore test now parses the
+  result and asserts that it names the backup that was restored, on top of
+  the POST count and the absence of an indeterminate outcome.
+The headroom changes the budget the operator observes, so docs/tools.md and
+the CHANGELOG say so. Checks on the follow-up branch: `gofmt -l .` clean,
+`go vet ./...` clean, `git diff --check` clean, `go test ./... -count=1`
+green, `go test -race ./internal/mcp ./internal/nodered -count=1` green,
+`scripts/complexity-check.sh` OK.

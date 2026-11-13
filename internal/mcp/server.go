@@ -434,8 +434,26 @@ func (s *Server) attachMinVersion(tool *mcp.Tool) {
 // It is a var so a test can scale it down; production never reassigns it.
 var toolTimeout = 15 * time.Second
 
+// toolBudgetHeadroom is the slack the wrapper adds to a budget the client
+// also asks for.
+//
+// The deadline this wrapper sets is the *parent* of the client's, and a
+// child context cannot extend its parent. With equal deadlines the
+// wrapper's fires first and the client's own budget never binds: the
+// client would ask for five minutes and get the wrapper's five minutes,
+// counted from before the call was even queued. The headroom lets the
+// client's budget govern the runtime work while the wrapper still bounds
+// the whole call.
+//
+// A call that waits longer than the headroom for the write lock still
+// spends that wait out of its runtime budget. A runtime budget fully
+// independent of the queue would remove the wrapper's bound on the call,
+// and with it the bound on how long a write holds the lock.
+const toolBudgetHeadroom = 30 * time.Second
+
 // toolBudgets gives the tools whose work legitimately outlasts the default
-// deadline their own budget. The client asks for the same budget
+// deadline their own budget, plus the headroom that keeps the client's
+// budget the binding one. The client asks for the same budget
 // (nodered.InstallTimeout, nodered.SettingsStateTimeout), and the deadline
 // this wrapper sets is the *parent* of the client's: a child context cannot
 // extend its parent, so a 15s wrapper silently truncated a 5-minute npm
@@ -445,11 +463,11 @@ var toolTimeout = 15 * time.Second
 // TestIssue339BudgetKeysAreRegisteredTools keeps the keys honest: a renamed
 // tool would fall back to the default without anyone noticing.
 var toolBudgets = map[string]time.Duration{
-	"install_node":    nodered.InstallTimeout,
-	"uninstall_node":  nodered.InstallTimeout,
-	"set_flows":       nodered.SettingsStateTimeout,
-	"set_flows_state": nodered.SettingsStateTimeout,
-	"restore_backup":  nodered.SettingsStateTimeout,
+	"install_node":    nodered.InstallTimeout + toolBudgetHeadroom,
+	"uninstall_node":  nodered.InstallTimeout + toolBudgetHeadroom,
+	"set_flows":       nodered.SettingsStateTimeout + toolBudgetHeadroom,
+	"set_flows_state": nodered.SettingsStateTimeout + toolBudgetHeadroom,
+	"restore_backup":  nodered.SettingsStateTimeout + toolBudgetHeadroom,
 }
 
 // toolBudget returns the deadline one attempt of toolName gets.

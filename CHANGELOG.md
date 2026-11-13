@@ -20,6 +20,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   now run under their own budget; every other tool keeps the 15
   seconds. A cancelled call aborts the request to the runtime and is
   never replayed.
+- Give the palette and deployment budgets an allowance over the
+  client's own, so the runtime work gets its full budget instead of
+  losing the time the call spent waiting for the write lock (#339).
+  With the two deadlines equal the wrapper's fired first and the
+  client's own budget never bound the work; this is what the R3
+  reliability review asked for.
 - Refuse `inject_node` with a `payload` on a node that is not of type
   `inject` (#338). The payload path skipped the type check, so a call on
   a comment node sent `POST /inject/:id` and reported "fired with
