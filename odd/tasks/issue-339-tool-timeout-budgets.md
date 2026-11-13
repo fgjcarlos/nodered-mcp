@@ -74,13 +74,15 @@ Slice boundaries (feature branch, one PR per issue):
   354 authored lines. The guard regressions: table keys against the registry,
   no replay of an expired install, a queued write refused cleanly, the
   restore budget on the wire.
-- Slice C 3d23a50 docs: describe the per-tool timeout budgets — 227 authored
+- Slice C 22597fe docs: describe the per-tool timeout budgets — 227 authored
   lines. The guarantees that changed, plus this record.
-Total 904 authored changed lines. The whole change is past the ~400-line
-heuristic because the behaviour and its guards are one indivisible unit: the
-table is three lines of code and its value is entirely in the guarantees the
-tests pin. A split that separated them would leave a commit whose tests
-prove nothing about the change it claims to make.
+- Slice D (this commit) chore: record the publication evidence — this
+  record's Log entry L15 and the slice note.
+Total 919 authored changed lines across the four commits. The whole change
+is past the ~400-line heuristic because the behaviour and its guards are one
+indivisible unit: the table is three lines of code and its value is entirely
+in the guarantees the tests pin. A split that separated them would leave a
+commit whose tests prove nothing about the change it claims to make.
 
 ## Log
 L1. User request verbatim: "Crea un plan para resolver la issue #339".
@@ -181,3 +183,12 @@ L14. Checks on the final tree: `gofmt -l .` clean, `go vet ./...` clean,
 `git diff --check` clean, `go test ./... -count=1` green,
 `go test -race ./... -count=1` green, `scripts/complexity-check.sh` OK
 (gocyclo from GOPATH/bin).
+L15. Publication: four work-unit commits on
+`fix/issue-339-tool-timeout-budgets` (26ae462 behaviour, e3ab1ca guard
+regressions, 22597fe docs and this record, plus this commit), pushed and
+opened as PR #374 against main. Remote CI (run 43381990827) green on every
+job: check, test on ubuntu/macos/windows, race, cross-build, docker-smoke,
+npm-wrapper on ubuntu/windows, release-snapshot, release-artifact-smoke on
+ubuntu/windows/macos, plus GitGuardian. The issue stays open pending the
+maintainer's review and merge: the PR body carries `Closes #339`, and the
+merge decision is the maintainer's.
