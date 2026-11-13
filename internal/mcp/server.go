@@ -427,13 +427,42 @@ func (s *Server) attachMinVersion(tool *mcp.Tool) {
 	tool.Description = tool.Description + ann
 }
 
-// toolTimeout is the per-tool call deadline. Set per the v0.5.12 audit:
-// the audit observed 4-minute hangs; 15s is well below that and above
-// the largest legitimate write (set_flows on a 50-node instance).
-const toolTimeout = 15 * time.Second
+// toolTimeout is the default per-tool call deadline. Set per the v0.5.12
+// audit: the audit observed 4-minute hangs; 15s is well below that and above
+// the largest legitimate write that has no budget of its own.
+//
+// It is a var so a test can scale it down; production never reassigns it.
+var toolTimeout = 15 * time.Second
+
+// toolBudgets gives the tools whose work legitimately outlasts the default
+// deadline their own budget. The client asks for the same budget
+// (nodered.InstallTimeout, nodered.SettingsStateTimeout), and the deadline
+// this wrapper sets is the *parent* of the client's: a child context cannot
+// extend its parent, so a 15s wrapper silently truncated a 5-minute npm
+// install and reported an indeterminate outcome (issue #339).
+//
+// It is a var so a test can scale it down; production never reassigns it.
+// TestIssue339BudgetKeysAreRegisteredTools keeps the keys honest: a renamed
+// tool would fall back to the default without anyone noticing.
+var toolBudgets = map[string]time.Duration{
+	"install_node":    nodered.InstallTimeout,
+	"uninstall_node":  nodered.InstallTimeout,
+	"set_flows":       nodered.SettingsStateTimeout,
+	"set_flows_state": nodered.SettingsStateTimeout,
+	"restore_backup":  nodered.SettingsStateTimeout,
+}
+
+// toolBudget returns the deadline one attempt of toolName gets.
+func toolBudget(toolName string) time.Duration {
+	if d, ok := toolBudgets[toolName]; ok {
+		return d
+	}
+	return toolTimeout
+}
 
 // maxRetries is the number of additional read attempts after the first call.
-// Each attempt has its own toolTimeout (45s total with no outer deadline).
+// Each attempt has its own budget (45s total with no outer deadline for a
+// tool on the default budget).
 const maxRetries = 2
 
 // withTimeoutRetry is reserved for side-effect-free read tools.
@@ -447,7 +476,7 @@ func (s *Server) withTimeoutRetry(toolName string, handler server.ToolHandlerFun
 func (s *Server) withTimeoutAttempts(toolName string, handler server.ToolHandlerFunc, attempts int) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		for attempt := 1; ; attempt++ {
-			callCtx, cancel := context.WithTimeout(ctx, toolTimeout)
+			callCtx, cancel := context.WithTimeout(ctx, toolBudget(toolName))
 			res, err := handler(callCtx, req)
 			cancel()
 			if !isTransportError(err) {

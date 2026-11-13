@@ -13,11 +13,17 @@ import (
 	"time"
 )
 
-// settingsStateTimeout bounds pause/resume (POST /flows/state) and full
-// deploys (POST /flows): they can stall a busy runtime for a few seconds,
-// longer than the read default of 30s. The 2-minute ceiling covers a slow
-// stop on a large flow without leaving the user waiting on a hung call.
-const settingsStateTimeout = 2 * time.Minute
+// SettingsStateTimeout bounds pause/resume (POST /flows/state), full
+// deploys (POST /flows) and backup restores (POST /flows): they can stall a
+// busy runtime for a few seconds, longer than the read default of 30s. The
+// 2-minute ceiling covers a slow stop on a large flow without leaving the
+// user waiting on a hung call.
+//
+// The MCP layer grants the same budget to set_flows, set_flows_state and
+// restore_backup: the wrapper's deadline is the parent of this one, and a
+// child context cannot extend its parent, so a shorter wrapper deadline
+// silently truncated the deploy (issue #339).
+const SettingsStateTimeout = 2 * time.Minute
 
 // searchTimeout bounds the npm registry search. The public endpoint is
 // fast (<1s) but we leave room for a slow network.
@@ -64,7 +70,7 @@ func (c *Client) SetFlowsState(ctx context.Context, state string) error {
 	default:
 		return fmt.Errorf("state must be \"start\" or \"stop\", got %q", state)
 	}
-	ctx, cancel := context.WithTimeout(ctx, settingsStateTimeout)
+	ctx, cancel := context.WithTimeout(ctx, SettingsStateTimeout)
 	defer cancel()
 
 	if _, err := c.snapshotFlows(ctx); err != nil {
@@ -136,7 +142,7 @@ func (c *Client) setFlows(ctx context.Context, flows []json.RawMessage, validate
 			return err
 		}
 	}
-	ctx, cancel := context.WithTimeout(ctx, settingsStateTimeout)
+	ctx, cancel := context.WithTimeout(ctx, SettingsStateTimeout)
 	defer cancel()
 
 	body, err := json.Marshal(flows)

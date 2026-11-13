@@ -63,7 +63,17 @@ flowchart LR
 
 ## Tool timeouts and retries
 
-The registration wrapper gives each tool attempt a 15-second context deadline.
+The registration wrapper gives each tool attempt a context deadline. The
+default is 15 seconds; the tools whose work legitimately outlasts it get
+their own budget: the palette operations (`install_node`, `uninstall_node`)
+get five minutes, because npm runs under the hood, and the full-deployment
+and runtime-state writes (`set_flows`, `set_flows_state`, `restore_backup`)
+get two minutes, because a full deploy or a runtime restart can stall a
+busy instance. The deadline the wrapper sets is the *parent* of the client's
+own, and a child context cannot extend its parent, so the wrapper has to
+grant at least what the client asks for — otherwise the client's budget never
+takes effect.
+
 Only read tools retry transport failures, up to three total attempts. The HTTP
 client marks failed exchanges with `TransportError`; MCP adapters preserve that
 error chain until the wrapper chooses a retry policy. Display text such as
@@ -75,6 +85,9 @@ a tool-error result stating that the outcome is indeterminate and that the
 caller must inspect the runtime before repeating the operation. Losing a
 response does not roll back the action. The backup-before-write and write-lock
 guards remain in place, but cannot undo runtime messages or hardware commands.
+A client that cancels a call aborts the request to the runtime, and the
+runtime may still be working on the operation the client walked away from —
+so a cancelled operation is never replayed either.
 
 ## Source tree
 

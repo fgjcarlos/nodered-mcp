@@ -8,6 +8,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Give the palette and runtime-state tools their own timeout budget
+  (#339). Every tool attempt ran under a flat 15-second deadline, and
+  the client asks for more on the slow paths: an npm install needs
+  five minutes, a full deploy or a runtime restart two. The deadline
+  the wrapper sets is the parent of the client's, and a child context
+  cannot extend its parent, so those budgets never took effect — an
+  `install_node` was cut at 15 seconds and reported an indeterminate
+  outcome while the runtime kept installing. `install_node`,
+  `uninstall_node`, `set_flows`, `set_flows_state` and `restore_backup`
+  now run under their own budget; every other tool keeps the 15
+  seconds. A cancelled call aborts the request to the runtime and is
+  never replayed.
 - Refuse `inject_node` with a `payload` on a node that is not of type
   `inject` (#338). The payload path skipped the type check, so a call on
   a comment node sent `POST /inject/:id` and reported "fired with
