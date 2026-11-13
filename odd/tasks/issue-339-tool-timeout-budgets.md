@@ -64,7 +64,7 @@ T1 | S1–S5 | inline | done | per-tool budget table in the MCP wrapper; palette
 T2 | S2–S4 | inline | done | five regressions: budgets per category, slow palette call completes once inside its budget, table keys match the registry, an expired install is not replayed, a write during a long install is refused cleanly | commit: 26ae462, e3ab1ca
 T3 | S4 | inline | done | docs/architecture.md, docs/tools.md, CHANGELOG.md updated | commit: 3d23a50
 T4 | S4 | inline | done | gofmt, go vet, full Go suite, race suite, complexity check all pass | commit: —
-T5 | S2–S4 | independent verifier + parent spot check | done | two gentle-ai-verify rounds: verdict met; findings F1–F6 applied and re-verified | commit: —
+T5 | S2–S4 | independent verifier + parent spot check | done | two gentle-ai-verify rounds (verdict met) plus the native RDD review, which approved the candidate with three non-blocking advisories | commit: —
 T6 | S5 | inline | done | work-unit commits on the feature branch, PR to main | commit: 26ae462, e3ab1ca, 3d23a50
 
 Slice boundaries (feature branch, one PR per issue):
@@ -186,9 +186,37 @@ L14. Checks on the final tree: `gofmt -l .` clean, `go vet ./...` clean,
 L15. Publication: four work-unit commits on
 `fix/issue-339-tool-timeout-budgets` (26ae462 behaviour, e3ab1ca guard
 regressions, 22597fe docs and this record, plus this commit), pushed and
-opened as PR #374 against main. Remote CI (run 43381990827) green on every
+opened as PR #374 against main. Remote CI (run 43382590827) green on every
 job: check, test on ubuntu/macos/windows, race, cross-build, docker-smoke,
 npm-wrapper on ubuntu/windows, release-snapshot, release-artifact-smoke on
 ubuntu/windows/macos, plus GitGuardian. The issue stays open pending the
 maintainer's review and merge: the PR body carries `Closes #339`, and the
 merge decision is the maintainer's.
+L16. Native RDD review (RDD was enabled after the PR was opened): lineage
+`review-b08962a450dd6d0d`, lineage target `sha256:6f1ceb8f...`, the reviewed
+tree `d386f0890e0f427a...` being exactly HEAD's tree. The R3 reliability lens
+approved the candidate and the acknowledgement burned the authority
+(`native-approved-acknowledgement-completed`, delivery left to ordinary
+repository policy). Three non-blocking advisories, none of which opens a
+correction and none of which reopens the review:
+- `internal/mcp/server.go:447-453` (WARNING, informational): the palette
+  budget equals the client's rather than exceeding it, so the wrapper's
+  deadline is the one that fires at the boundary. Accepted: the wrapper's
+  deadline is the parent, so it must not be shorter than the client's, and
+  equality is what makes the client's own budget effective.
+- `internal/mcp/timeout_budget_deploy_test.go:30-33` (SUGGESTION): the
+  comment above the queued-deploy test could name the budgets it scales.
+- `internal/mcp/timeout_budget_deploy_test.go:131-133` (SUGGESTION): the
+  slow-restore test asserts the POST count and the absence of an
+  indeterminate outcome, not the restored content.
+Two host-relay steps were needed before the capture was accepted: the
+provider's managed assets were outdated (`managed_assets_outdated`, whose
+continuation named the exact `gentle-ai sync --agent pi` to run), and the
+collect binding is compared canonically, so the artifact subject's schema
+identifier had to be the provider's exact `gentle-ai.review-artifact-subject/v2`
+rather than the URL form the public projection renders. The model run itself
+was confirmed by the user before it ran.
+L17. The advisories above are separate later work, not a reason to re-run
+review on this candidate, and they are left unfixed here on purpose: the
+review receipt stands for the tree that was reviewed, and the maintainer
+decides whether to take them.
