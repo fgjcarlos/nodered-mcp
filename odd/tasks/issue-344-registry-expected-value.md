@@ -19,6 +19,49 @@
 - T4 (S4) — Cablear `--expect` en la verificación de dist-tags y pinnearlo en el guard del workflow. Route: inline. Commit: —
 - T5 (S6, S7) — Comprobaciones y documentación. Route: inline. Commit: —
 
+## Delivery
+
+- Commit: `0538c83` — `fix(release): retry stale npm values until the expected value is visible (#344)`
+  (215 authored changed lines, one work-unit commit on
+  `fix/issue-344-registry-expected-value`).
+- Pull request: #380, against `main`, with `Closes #344`.
+
+Checks (all green):
+
+- `node bin/*_test.js` (the whole `bin/` suite): PASS
+- `go test ./...`: PASS; `go vet ./...`: clean; `gofmt -l .`: clean
+- `bash scripts/coverage-ratchet.sh` → 86.20% (baseline 81.20%)
+- `git diff --check`: clean; no CRLF in the touched text sources
+- Differential check of the helper (old vs. new, in a `mktemp -d` scratch
+  directory, never committed): for the three call sites that do **not**
+  use `--expect` (`npm view <pkg>@<version> dist.integrity`), stdout,
+  stderr and exit code are identical.
+
+No Go code changed, so `go test -race ./...` and the complexity check add
+no signal for this diff; CI runs them anyway.
+
+### Native review
+
+Lineage `review-bd0ec40c64b8b910`, tier high (two lenses: resilience,
+reliability), correction budget 108. The lineage was created and the
+authority is intact, but the reviewer capture never ran: every
+`gentle_review_capture` / `gentle_review_capture_group` call is rejected
+by the facade with `capture-route-registration-rejected` /
+`selector-mismatch` ("Provider collectBinding collides with a different
+registered route"), and the same error appears when the STATUS is read
+with the provider base tree or with the base commit instead of
+`origin/main`.
+
+The blocker is `authority-unavailable` / `provider-unavailable` in the
+harness's capture-route registration, not a finding about this change:
+the collect binding read from STATUS is byte-identical to the one
+submitted (canonical form, idempotent under re-canonicalisation), and
+the retained route's selector is the only field in conflict. The
+facade's own guidance for this state is to preserve the diagnostic and
+use the supported native continuation — never to reset or rebuild the
+authority locally — so no reviewer verdict exists for this candidate
+and none is claimed.
+
 ## Log
 
 - L1: Petición original: "Resuelve la issue #344" (2026-11-16).
@@ -43,3 +86,19 @@
     se consulta (S2).
   - El stderr del comando se descarta hoy (`2>/dev/null`): un `npm ERR!` real
     nunca llega al log del step (S3).
+- L5: Corrección aplicada. `scripts/wait-for-registry.sh` acepta `--expect
+  VALUE`: la lectura sólo se acepta cuando devuelve exactamente ese valor; un
+  valor obsoleto se reintenta como uno vacío y, al agotar el presupuesto, el
+  log nombra el valor esperado y el último observado. El stderr del comando se
+  captura a un archivo temporal y se reporta en el log de intentos y en el
+  fallo final, en vez de descartarse.
+- L6: El cableado usa `--expect` sólo donde el valor esperado se conoce de
+  antemano. `dist.integrity` de una versión exacta es impredecible (lo
+  genera el registro), así que las tres lecturas de integridad conservan el
+  contrato "primer valor no vacío". La lectura de `dist-tags.latest` sí
+  conoce el valor esperado (la versión promovida), y es exactamente la que
+  la issue describe.
+- L7: El check diferencial con el helper anterior detectó un falso positivo
+  propio (el estado del `npm` simulado no se borraba entre corridas) y, ya
+  corregido, confirma que stdout, stderr y exit code no cambian para los tres
+  call sites sin `--expect`.
