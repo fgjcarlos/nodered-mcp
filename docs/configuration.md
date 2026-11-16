@@ -39,6 +39,17 @@ in the error.
 | `NODERED_BACKUP_DIR` | `backups` | — | Where snapshots are written |
 | `NODERED_BACKUP_KEEP` | `50` | — | How many backup files to retain. Older ones are pruned after each new snapshot; `0` disables pruning entirely |
 
+In the container image the backup directory is `/var/lib/nodered-mcp/backups`
+(the image sets `NODERED_BACKUP_DIR` to it and runs as the `nonroot` user, so
+the path is writable). Mount a volume there to keep the snapshots when the
+container is recreated:
+
+```bash
+docker run --rm --name nodered-mcp \
+  --volume nodered-backups:/var/lib/nodered-mcp/backups \
+  ...
+```
+
 ## Server behaviour
 
 | Variable | Default | Flag | Description |

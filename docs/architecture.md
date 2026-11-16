@@ -270,7 +270,8 @@ Every mutating operation (`POST /flows`, `PUT /flow/:id`,
 `GET /flows` (the complete `flows.json`) and writes it to disk with
 a timestamp.
 
-- Directory: env `NODERED_BACKUP_DIR` (default `./backups` or OS temp).
+- Directory: env `NODERED_BACKUP_DIR` (default `./backups` or OS temp; the
+  container image sets it to `/var/lib/nodered-mcp/backups`).
 - Filename: `flows-<RFC3339>.json`.
 - Snapshots cover only the flow structure returned by `GET /flows`, not
   Node-RED's separate encrypted credential store or its keys/configuration.

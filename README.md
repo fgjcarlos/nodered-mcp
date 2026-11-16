@@ -99,6 +99,7 @@ export MCP_HTTP_TOKEN="$(openssl rand -hex 32)"
 
 docker run --rm --name nodered-mcp \
   --publish 127.0.0.1:8090:8090 \
+  --volume nodered-backups:/var/lib/nodered-mcp/backups \
   --env MCP_HTTP_TOKEN \
   --env NODERED_URL=http://host.docker.internal:1880 \
   ghcr.io/fgjcarlos/nodered-mcp:latest
@@ -117,6 +118,7 @@ that hostname:
 docker run --rm --name nodered-mcp \
   --add-host host.docker.internal:host-gateway \
   --publish 127.0.0.1:8090:8090 \
+  --volume nodered-backups:/var/lib/nodered-mcp/backups \
   --env MCP_HTTP_TOKEN \
   --env NODERED_URL=http://host.docker.internal:1880 \
   ghcr.io/fgjcarlos/nodered-mcp:latest
@@ -132,10 +134,17 @@ docker network connect nodered-mcp node-red
 docker run --rm --name nodered-mcp \
   --network nodered-mcp \
   --publish 127.0.0.1:8090:8090 \
+  --volume nodered-backups:/var/lib/nodered-mcp/backups \
   --env MCP_HTTP_TOKEN \
   --env NODERED_URL=http://node-red:1880 \
   ghcr.io/fgjcarlos/nodered-mcp:latest
 ```
+
+The `nodered-backups` volume is where the image writes the snapshot it takes
+before every mutating call (`NODERED_BACKUP_DIR`). Keep it mounted: without
+it the snapshots live in the container's writable layer and are lost when the
+container is recreated. `docker run --rm` removes the container, not the
+named volume, so recreating the container keeps the history of snapshots.
 
 Replace `node-red` with the actual container or Compose service name. Do not
 publish port `8090` beyond loopback unless the host firewall and transport
