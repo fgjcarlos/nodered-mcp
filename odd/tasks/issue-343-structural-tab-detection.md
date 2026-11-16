@@ -18,6 +18,31 @@
 - T4 (S4) — Observar RED contra la implementación histórica de fragmentos de bytes. Route: scratch. Commit: —
 - T5 (S5, S6) — Comprobaciones y documentación. Route: inline. Commit: —
 
+## Delivery
+
+- Commit: `be7caa1` — `test(nodered): pin the structural detection of tab entries (#343)`
+  (222 authored changed lines, one work-unit commit on
+  `fix/issue-343-structural-tab-detection`).
+- Pull request: #379, against `main`, with `Closes #343`.
+
+Checks (all green):
+
+- `go test ./...`, `go test -race ./...`
+- `go vet ./...`, `gofmt -l .` (clean), `git diff --check` (clean)
+- `bash scripts/coverage-ratchet.sh` → 86.20% (baseline 81.20%)
+- `bash scripts/complexity-check.sh` → OK (needs `GOPATH` exported;
+  the script looks for `$GOPATH/bin/gocyclo`, not `go env GOPATH`)
+
+No production code changed, so no differential check applies: the diff
+adds tests and documentation only.
+
+Native review: lineage `review-4e6eb04e0b12a76f`, tier medium, two
+lenses (readability, reliability). The two reviewer runs completed and
+the lineage closed **approved** (acknowledged, authority burned). One
+advisory finding, `R2-001` (readability, WARNING, informational), on
+the density of the L4 log entry of this file; non-blocking, no
+correction transition was offered.
+
 ## Log
 
 - L1: Petición original: "Ahora resuelve la issue #343" (2026-11-16).
