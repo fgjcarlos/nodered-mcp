@@ -8,6 +8,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Make the mutation lock waits cancelable, so a write whose context is
+  done gives up instead of waiting past its deadline (#347). The client
+  write lock was a plain `sync.Mutex`: a write that arrived while another
+  write held the guard stayed parked on `Lock()` until the holder
+  finished, so a canceled request waited past the timeout it was
+  promised and the write queue outlived the timeout. The wait is now
+  bound to the caller's context, the refusal ("waiting for write lock:
+  ...; no action was started") reaches the caller as a refusal instead of
+  an indeterminate outcome, and the context-aware mutex moved to
+  `internal/lock` so the server's context helper lock and the client
+  write lock share one implementation.
 - Give the container image an explicit, persistent backup directory, and
   prove the snapshot survives a container recreation (#346). The runtime
   stage inherited its working directory from the distroless base

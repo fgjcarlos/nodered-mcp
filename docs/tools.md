@@ -99,6 +99,16 @@ While a long palette operation holds the write lock, a write that arrives
 during it is refused once its own deadline passes. The refusal says that no
 action was started, and nothing reaches the runtime.
 
+Two locks guard a write, and both waits are cancelable: the server's own
+context-helper lock and the client write lock that serializes the mutating
+endpoints. A write that arrives while either one is held gives up when its
+context is done — canceled by the caller, or past its own deadline — and it
+gives up before it snapshots anything or contacts the runtime. The refusal
+names the lock it was waiting for:
+
+- `waiting for context helper lock: context canceled; no action was started`
+- `waiting for write lock: context canceled; no action was started`
+
 ## Backup recovery limits
 
 Automatic backups are **structural snapshots of `GET /flows`**, not full

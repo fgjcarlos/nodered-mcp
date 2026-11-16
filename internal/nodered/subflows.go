@@ -177,7 +177,11 @@ func (c *Client) GetSubflow(ctx context.Context, id string) (RawFlow, error) {
 // "create" idempotent in the operator-friendly direction: re-running
 // the same create by mistake is loud, not silent.
 func (c *Client) CreateSubflow(ctx context.Context, subflow json.RawMessage) (RawFlow, error) {
-	defer c.writeGuard()()
+	release, err := c.writeGuard(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	prepared, err := prepareSubflowForWrite(subflow)
 	if err != nil {
 		return nil, err
@@ -235,7 +239,11 @@ func (c *Client) CreateSubflow(ctx context.Context, subflow json.RawMessage) (Ra
 // the caller can distinguish "missing" from "no change" without
 // comparing snapshots.
 func (c *Client) UpdateSubflow(ctx context.Context, id string, subflow json.RawMessage) error {
-	defer c.writeGuard()()
+	release, err := c.writeGuard(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if id == "" {
 		return errors.New("subflow id is required")
 	}
@@ -805,7 +813,11 @@ func memberIsInstance(member map[string]json.RawMessage, wantType string) bool {
 // operator has to ask for explicitly, not a side effect of deleting
 // a definition.
 func (c *Client) DeleteSubflow(ctx context.Context, id string) error {
-	defer c.writeGuard()()
+	release, err := c.writeGuard(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if id == "" {
 		return errors.New("subflow id is required")
 	}

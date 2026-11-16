@@ -63,7 +63,11 @@ func (c *Client) GetFlowsState(ctx context.Context) (FlowsState, error) {
 // MUTATES the runtime. A backup of the current flow config is taken first
 // so the change can be rolled back.
 func (c *Client) SetFlowsState(ctx context.Context, state string) error {
-	defer c.writeGuard()()
+	release, err := c.writeGuard(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	switch state {
 	case "start", "stop":
 		// ok
@@ -109,7 +113,11 @@ func (c *Client) SetFlowsUnchecked(ctx context.Context, flows []json.RawMessage)
 // setFlows deploys a flow array as a full configuration. When validate is
 // false the references of the configuration are not checked.
 func (c *Client) setFlows(ctx context.Context, flows []json.RawMessage, validate bool) error {
-	defer c.writeGuard()()
+	release, err := c.writeGuard(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if len(flows) == 0 {
 		return errors.New("flows: at least one element is required")
 	}

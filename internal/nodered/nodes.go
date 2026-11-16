@@ -56,7 +56,11 @@ func (c *Client) GetNodeInfo(ctx context.Context, module string) (*InstallInfo, 
 // (POST /nodes). version is optional; empty installs the latest. This
 // mutates the runtime and can take minutes, so it gets a longer deadline.
 func (c *Client) InstallNode(ctx context.Context, module, version string) (*InstallInfo, error) {
-	defer c.writeGuard()()
+	release, err := c.writeGuard(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if module == "" {
 		return nil, errors.New("module name is required")
 	}
@@ -78,7 +82,11 @@ func (c *Client) InstallNode(ctx context.Context, module, version string) (*Inst
 // Node-RED refuses to remove a module whose nodes are still in use; that
 // error is surfaced verbatim to the caller.
 func (c *Client) UninstallNode(ctx context.Context, module string) error {
-	defer c.writeGuard()()
+	release, err := c.writeGuard(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if module == "" {
 		return errors.New("module name is required")
 	}
@@ -92,7 +100,11 @@ func (c *Client) UninstallNode(ctx context.Context, module string) error {
 // set within it when set is non-empty (PUT /nodes/:module[/:set]). Disabling
 // keeps the module installed but inert — useful to debug a broken palette.
 func (c *Client) SetNodeEnabled(ctx context.Context, module, set string, enabled bool) (*InstallInfo, error) {
-	defer c.writeGuard()()
+	release, err := c.writeGuard(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if module == "" {
 		return nil, errors.New("module name is required")
 	}

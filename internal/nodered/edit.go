@@ -38,7 +38,11 @@ import (
 // applied — but the window is one round trip rather than however long a
 // model takes to rewrite a whole tab.
 func (c *Client) editFlow(ctx context.Context, flowID string, edit func(RawFlow) (RawFlow, error)) error {
-	defer c.writeGuard()()
+	release, err := c.writeGuard(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if flowID == "" {
 		return errors.New("flow id is required")
 	}

@@ -482,6 +482,14 @@ func isTransportError(err error) bool {
 	if errors.As(err, &apiErr) {
 		return false
 	}
+	// A write that gave up waiting for the write lock did nothing at all
+	// (issue #347): it is not evidence of a partial action, so it is not an
+	// indeterminate outcome. The refusal wraps the context error, so it has
+	// to be recognized before the context errors below.
+	var refused *nodered.WriteLockRefusedError
+	if errors.As(err, &refused) {
+		return false
+	}
 	var transportErr *nodered.TransportError
 	var netErr *net.OpError
 	return errors.As(err, &transportErr) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.As(err, &netErr)

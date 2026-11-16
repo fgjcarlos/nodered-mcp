@@ -19,6 +19,19 @@
 #
 # History of deliberate bumps (most recent first):
 #
+#   2026-11-16  the #347 floors follow the cancelable guard  (issue #347)
+#     The write guard now acquires the client write lock with the caller's
+#     context: a canceled or expired writer gives up instead of waiting
+#     behind the current holder. The acquisition can fail, so every
+#     mutating method gains one branch — the one that returns the refusal
+#     before the runtime is contacted. Two of those methods are named in
+#     this file, so their floors move by one:
+#
+#       setFlows    internal/nodered/settings.go    9
+#       RestoreFlows    internal/nodered/flows.go    7
+#
+#     No floor is lowered, and the 15 threshold is untouched.
+#
 #   2026-10-26  new floors for the #334 guards  (PR #363, closes #334)
 #     The gate only checks the functions named here, so the guards this
 #     PR adds were not covered by it. Their floors are added with the
@@ -143,6 +156,6 @@ linksShapeIssues    internal/nodered/validate_deploy.go    4
 decodeConfigEntry    internal/nodered/validate_deploy.go    5
 effectiveConfigItems    internal/nodered/validate_deploy.go    5
 jsTruthy    internal/nodered/validate_deploy.go    6
-setFlows    internal/nodered/settings.go    8
+setFlows    internal/nodered/settings.go    9
 hasTabEntry    internal/nodered/settings.go    4
-RestoreFlows    internal/nodered/flows.go    6
+RestoreFlows    internal/nodered/flows.go    7
