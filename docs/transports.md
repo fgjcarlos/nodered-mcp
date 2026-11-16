@@ -83,5 +83,12 @@ issuer; `aud` must match the configured audience. Discovery happens
 once at boot, so a misconfigured URL fails fast rather than on the
 first authenticated call.
 
+The signing keys are cached for 15 minutes. A token whose `kid` is
+not in the cache triggers one extra fetch, because the identity
+provider may have rotated; that extra fetch happens at most once per
+minute and is shared by the requests that miss at the same time, so a
+burst of invalid tokens cannot become a burst of downloads against the
+identity provider.
+
 Configuring both `MCP_HTTP_TOKEN` and `MCP_OAUTH_ISSUER` is a
 configuration error and the server refuses to start.
