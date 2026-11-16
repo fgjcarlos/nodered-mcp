@@ -305,7 +305,7 @@ func TestHandleSearchNodes_RoundTrip(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, err := nodered.NewClient(nodered.Options{
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true,
 		BaseURL:       srv.URL,
 		BackupDir:     t.TempDir(),
 		SearchBaseURL: registry.URL,
@@ -339,7 +339,7 @@ func TestHandleSearchNodes_EmptyResults(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true,
 		BaseURL:       srv.URL,
 		BackupDir:     t.TempDir(),
 		SearchBaseURL: registry.URL,
@@ -399,7 +399,7 @@ func TestAPIError_AsWraps404(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	_, err := c.GetSettings(context.Background())
 	if err == nil {
 		t.Fatal("expected error from 404")

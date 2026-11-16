@@ -45,7 +45,7 @@ func TestImportFlow_HappyPath(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	s := New(c, Options{Version: "test"})
 
 	clipboard := "[" + sampleTab + "]"
@@ -76,7 +76,7 @@ func TestImportFlow_RejectsMultiTabClipboard(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	s := New(c, Options{Version: "test"})
 
 	multi := `[{"id":"a","type":"tab"},{"id":"b","type":"tab"}]`
@@ -103,7 +103,7 @@ func TestImportFlow_RejectsNonArrayClipboard(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	s := New(c, Options{Version: "test"})
 
 	res, err := s.handleImportFlow(context.Background(), mcp.CallToolRequest{
@@ -125,7 +125,7 @@ func TestImportFlow_RejectsInvalidJSON(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	s := New(c, Options{Version: "test"})
 
 	res, err := s.handleImportFlow(context.Background(), mcp.CallToolRequest{
@@ -155,7 +155,7 @@ func TestImportFlow_AcceptsRawArray(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	s := New(c, Options{Version: "test"})
 
 	clipboardArg := []any{
@@ -199,7 +199,7 @@ func TestImportFlow_PreservesWires(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	s := New(c, Options{Version: "test"})
 
 	clipboard := `[` + sampleTab + `]`

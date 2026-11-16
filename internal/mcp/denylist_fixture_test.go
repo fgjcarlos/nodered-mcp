@@ -78,7 +78,7 @@ func issue329FlatConfig(tab string, nodes ...string) string {
 // node types, wired to the given runtime stand-in.
 func issue329Server(t *testing.T, srv *httptest.Server, types ...string) *Server {
 	t.Helper()
-	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

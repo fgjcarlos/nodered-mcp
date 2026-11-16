@@ -159,7 +159,7 @@ func serverWithMockAndBackups(t *testing.T, h http.HandlerFunc) (*Server, string
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	dir := t.TempDir()
-	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: dir})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: dir})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

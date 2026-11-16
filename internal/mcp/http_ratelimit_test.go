@@ -17,7 +17,7 @@ import (
 )
 
 func TestRunHTTP_RateLimit_BurstThen429(t *testing.T) {
-	c, err := nodered.NewClient(nodered.Options{BaseURL: "http://127.0.0.1:1"})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: "http://127.0.0.1:1"})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestRunHTTP_RateLimit_PerSourceIP(t *testing.T) {
 }
 
 func TestRunHTTP_RateLimit_Disabled(t *testing.T) {
-	c, err := nodered.NewClient(nodered.Options{BaseURL: "http://127.0.0.1:1"})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: "http://127.0.0.1:1"})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

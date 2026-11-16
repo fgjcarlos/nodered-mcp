@@ -21,6 +21,22 @@ func serverWithMock(t *testing.T, h http.HandlerFunc) (*Server, *httptest.Server
 	t.Helper()
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
+	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir(), SkipVersionProbe: true})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	return New(c, Options{Version: "test"}), srv
+}
+
+// serverWithMockVersionProbe is serverWithMock for the fixtures that
+// exercise the Node-RED version detection: they mock GET /settings
+// and expect the probe to reach it. Every other fixture opts out of
+// the probe explicitly (issue #340), because a mock that records
+// every request would fail on the unexpected GET /settings.
+func serverWithMockVersionProbe(t *testing.T, h http.HandlerFunc) (*Server, *httptest.Server) {
+	t.Helper()
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
 	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)

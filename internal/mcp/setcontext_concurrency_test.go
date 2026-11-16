@@ -61,7 +61,7 @@ import (
 // Server at our controlled httptest fixture.
 func newTestServerAt(t *testing.T, baseURL, backupDir string) *Server {
 	t.Helper()
-	c, err := nodered.NewClient(nodered.Options{BaseURL: baseURL, BackupDir: backupDir})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: baseURL, BackupDir: backupDir})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

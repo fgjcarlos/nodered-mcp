@@ -122,7 +122,7 @@ func readHTTPResponse(t *testing.T, r *bufio.Reader) (int, http.Header, []byte) 
 // the operator or by a goroutine leak. The ceiling is 10s; we
 // allow up to 13s for scheduling jitter and shutdown overhead.
 func TestRunHTTP_SlowlorisIsDisconnected(t *testing.T) {
-	c, err := nodered.NewClient(nodered.Options{BaseURL: "http://127.0.0.1:1"})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: "http://127.0.0.1:1"})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestRunHTTP_SlowlorisIsDisconnected(t *testing.T) {
 // real JSON-RPC `initialize` over loopback, no bearer, must come
 // back with a 200 and a server-info payload.
 func TestRunHTTP_InitializeLoopbackNoAuth(t *testing.T) {
-	c, err := nodered.NewClient(nodered.Options{BaseURL: "http://127.0.0.1:1"})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: "http://127.0.0.1:1"})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestRunHTTP_InitializeLoopbackNoAuth(t *testing.T) {
 // half of the issue's acceptance: a bearer-less request against a
 // bearer-only server must come back 401.
 func TestRunHTTP_InitializeBearerRejectedWithoutToken(t *testing.T) {
-	c, err := nodered.NewClient(nodered.Options{BaseURL: "http://127.0.0.1:1"})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: "http://127.0.0.1:1"})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestRunHTTP_InitializeBearerRejectedWithoutToken(t *testing.T) {
 // TestRunHTTP_InitializeBearerAccepted covers the auth-OK half: a
 // bearer request with the configured token must pass the gate.
 func TestRunHTTP_InitializeBearerAccepted(t *testing.T) {
-	c, err := nodered.NewClient(nodered.Options{BaseURL: "http://127.0.0.1:1"})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: "http://127.0.0.1:1"})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

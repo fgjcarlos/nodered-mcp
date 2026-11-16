@@ -188,7 +188,7 @@ func serverWithBackupDir(t *testing.T, backupDir string, h http.HandlerFunc) *Se
 	t.Helper()
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: backupDir})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: backupDir})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

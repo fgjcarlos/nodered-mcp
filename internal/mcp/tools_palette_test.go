@@ -233,7 +233,7 @@ func TestHandleListBackups_ListsFiles(t *testing.T) {
 func backupServer(t *testing.T) (*Server, string) {
 	t.Helper()
 	dir := t.TempDir()
-	c, err := nodered.NewClient(nodered.Options{BaseURL: "http://127.0.0.1:1", BackupDir: dir})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: "http://127.0.0.1:1", BackupDir: dir})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestHandleDiffFlows_IdenticalReportsEqual(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	s := New(c, Options{Version: "test"})
 
 	res, err := s.handleDiffFlows(context.Background(), mcp.CallToolRequest{
@@ -293,7 +293,7 @@ func TestHandleDiffFlows_ChangedReportsDiff(t *testing.T) {
 	srv := httptest.NewServer(stub)
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	s := New(c, Options{Version: "test"})
 
 	res, _ := s.handleDiffFlows(context.Background(), mcp.CallToolRequest{
@@ -323,7 +323,7 @@ func TestHandleDiffFlows_DefaultToIsCurrent(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	s := New(c, Options{Version: "test"})
 
 	res, _ := s.handleDiffFlows(context.Background(), mcp.CallToolRequest{

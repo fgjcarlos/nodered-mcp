@@ -45,9 +45,15 @@ type Client struct {
 	writeMu sync.Mutex
 
 	// nrVersion caches the Node-RED version probe (see version.go).
-	// Atomic pointer so the cache survives concurrent reads without
-	// locking; the probe itself runs at most once per Client.
+	// The probe runs at most once per Client while it succeeds, and
+	// is retried after a bounded interval when it fails.
 	nrVersion versionCache
+
+	// skipVersionProbe disables the Node-RED version probe entirely.
+	// It is the explicit "this is a test fixture" switch that
+	// replaced the old loopback-URL heuristic (issue #340): a real
+	// local Node-RED on http://localhost:1880 must still be probed.
+	skipVersionProbe bool
 
 	// policy is the node-type policy consulted before any write is
 	// deployed (see policy.go). A nil policy allows every node type.
@@ -99,6 +105,12 @@ type Options struct {
 	// Defaults to "https://registry.npmjs.org" if empty. Set this to a
 	// private registry mirror (e.g. an internal Verdaccio) when needed.
 	SearchBaseURL string
+	// SkipVersionProbe disables the Node-RED version probe (GET
+	// /settings). Set it in tests whose mock records every request:
+	// the probe would show up as an unexpected path. Production
+	// clients leave it off - the probe is what makes the runtime
+	// version gate work against a local Node-RED (issue #340).
+	SkipVersionProbe bool
 }
 
 // NewClient builds a Client. Exactly one of (Token) or (Username+Password)
@@ -150,14 +162,15 @@ func NewClient(opts Options) (*Client, error) {
 		bk = defaultBackupKeep
 	}
 	return &Client{
-		baseURL:        opts.BaseURL,
-		httpClient:     httpClient,
-		auth:           auth,
-		backupDir:      opts.BackupDir,
-		backupKeep:     bk,
-		insecure:       opts.Insecure,
-		registryClient: registryClient,
-		searchBaseURL:  opts.SearchBaseURL,
+		baseURL:          opts.BaseURL,
+		httpClient:       httpClient,
+		auth:             auth,
+		backupDir:        opts.BackupDir,
+		backupKeep:       bk,
+		insecure:         opts.Insecure,
+		registryClient:   registryClient,
+		searchBaseURL:    opts.SearchBaseURL,
+		skipVersionProbe: opts.SkipVersionProbe,
 	}, nil
 }
 

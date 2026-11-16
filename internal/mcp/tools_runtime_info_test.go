@@ -37,7 +37,7 @@ func TestHandleGetRuntimeInfo_AlwaysReturnsJson(t *testing.T) {
 // classify everything as ok except the debug-stream tools
 // (debugStream is off in the default test server).
 func TestHandleGetRuntimeInfo_NR5FullOk(t *testing.T) {
-	s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+	s, _ := serverWithMockVersionProbe(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/settings":
 			_, _ = w.Write([]byte(`{"version":"5.0.1","runtimeState":{"enabled":true,"ui":false},"flowFile":"flows.json"}`))
@@ -71,7 +71,7 @@ func TestHandleGetRuntimeInfo_NR5FullOk(t *testing.T) {
 // TestHandleGetRuntimeInfo_NR3BelowFloor exercises the
 // version_too_low branch: a NR 3.0 mock with no /diagnostics.
 func TestHandleGetRuntimeInfo_NR3BelowFloor(t *testing.T) {
-	s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+	s, _ := serverWithMockVersionProbe(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/settings":
 			_, _ = w.Write([]byte(`{"version":"3.0.0"}`))
@@ -93,7 +93,7 @@ func TestHandleGetRuntimeInfo_NR3BelowFloor(t *testing.T) {
 // survives a complete /settings outage — every probe fails, but
 // the response still carries a (mostly empty) capability matrix.
 func TestHandleGetRuntimeInfo_NoProbesSucceeds(t *testing.T) {
-	s, _ := serverWithMock(t, func(w http.ResponseWriter, _ *http.Request) {
+	s, _ := serverWithMockVersionProbe(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"error":"nope"}`))
 	})
@@ -116,7 +116,7 @@ func TestHandleGetRuntimeInfo_NoProbesSucceeds(t *testing.T) {
 // gated tool — 3.1.0 for get_diagnostics, 5.0.0 for set_context and
 // inject_node — and a remedy that says "upgrade Node-RED".
 func TestHandleGetRuntimeInfo_CapabilityGuidanceOldRuntime(t *testing.T) {
-	s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+	s, _ := serverWithMockVersionProbe(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/settings":
 			_, _ = w.Write([]byte(`{"version":"3.0.0"}`))
@@ -156,7 +156,7 @@ func TestHandleGetRuntimeInfo_CapabilityGuidanceOldRuntime(t *testing.T) {
 // the actual setting path (settings.runtimeState.enabled), not a
 // generic "feature off" string.
 func TestHandleGetRuntimeInfo_CapabilityGuidanceSettingDisabled(t *testing.T) {
-	s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+	s, _ := serverWithMockVersionProbe(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/settings":
 			_, _ = w.Write([]byte(`{"version":"5.0.1","runtimeState":{"enabled":false}}`))
@@ -182,7 +182,7 @@ func TestHandleGetRuntimeInfo_CapabilityGuidanceSettingDisabled(t *testing.T) {
 // returns 404, and the guidance must say so and mention the local
 // log fallback.
 func TestHandleGetRuntimeInfo_CapabilityGuidanceEndpointNotMounted(t *testing.T) {
-	s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+	s, _ := serverWithMockVersionProbe(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/settings":
 			_, _ = w.Write([]byte(`{"version":"5.0.1"}`))
@@ -208,7 +208,7 @@ func TestHandleGetRuntimeInfo_CapabilityGuidanceEndpointNotMounted(t *testing.T)
 // is unreachable the reason is the unknown copy, NOT a
 // smoothed-over "probably fine".
 func TestHandleGetRuntimeInfo_CapabilityGuidanceUnknownRuntime(t *testing.T) {
-	s, _ := serverWithMock(t, func(w http.ResponseWriter, _ *http.Request) {
+	s, _ := serverWithMockVersionProbe(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	})
 	res, _ := call(t, s.handleGetRuntimeInfo, map[string]any{})
@@ -234,7 +234,7 @@ func TestHandleGetRuntimeInfo_CapabilityGuidanceUnknownRuntime(t *testing.T) {
 // on must NOT add a guidance entry for ok tools. Existing
 // capabilityMatrix consumers see no change.
 func TestHandleGetRuntimeInfo_CapabilityGuidanceOkCarriesNothing(t *testing.T) {
-	s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+	s, _ := serverWithMockVersionProbe(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/settings":
 			_, _ = w.Write([]byte(`{"version":"5.0.1","runtimeState":{"enabled":true}}`))

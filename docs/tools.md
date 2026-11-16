@@ -324,6 +324,30 @@ those clients. This is not a distributed transaction or a cross-process singleto
 |---|---|
 | `explain_flow` | Describe what a flow does, its triggers, and external dependencies |
 | `generate_flow` | Build a flow from a plain-English description |
+## Node-RED version detection
+
+A few tools need a minimum Node-RED version: `set_context` and
+`inject_node` with a payload need 5.0.0, `get_diagnostics` needs
+3.1.0. Those calls are gated on the version of the runtime this MCP
+is connected to. The MCP reads it from `GET /settings` at start-up
+and resolves it again before every gated operation, so the check does
+not depend on an earlier call having warmed the cache.
+
+Two properties are worth knowing:
+
+- **A local runtime is detected like any other.** The address of the
+  runtime (`http://localhost:1880` is the default) does not change
+  the check.
+- **A failed probe is not final.** If the runtime is not reachable
+  when the MCP starts, the version stays unknown until the next
+  attempt, and a later gated operation probes again.
+
+When the version cannot be detected the call is **not** refused: the
+absence of evidence is not evidence of an old runtime. The success
+message then carries the suffix "Node-RED version was not detected;
+this call was not verified against the minimum version", and
+`get_runtime_info` reports the capability as `unknown`.
+
 ## Reading `get_runtime_info`
 
 The response carries two maps. `capabilityMatrix` is the state of every

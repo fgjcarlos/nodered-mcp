@@ -49,7 +49,7 @@ func TestLogRequests_PreservesStreamingCapabilities(t *testing.T) {
 // unsupported") and a server notification arrives flushed while the
 // stream is still open.
 func TestRunHTTP_StreamingGETDeliversEvents(t *testing.T) {
-	c, err := nodered.NewClient(nodered.Options{BaseURL: "http://127.0.0.1:1"})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: "http://127.0.0.1:1"})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

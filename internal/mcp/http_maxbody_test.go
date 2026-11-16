@@ -22,7 +22,7 @@ import (
 // handler reads the body, so the test does not have to actually
 // deliver the bytes — Go's http.Server is asked only to read headers.
 func TestRunHTTP_MaxBody_OversizedRequestRejected(t *testing.T) {
-	c, err := nodered.NewClient(nodered.Options{BaseURL: "http://127.0.0.1:1"})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: "http://127.0.0.1:1"})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestRunHTTP_MaxBody_OversizedRequestRejected(t *testing.T) {
 // with the server identity in the response. Same 1 KiB cap so the
 // contrast with the oversized test is just the body size.
 func TestRunHTTP_MaxBody_AcceptsBodyUnderLimit(t *testing.T) {
-	c, err := nodered.NewClient(nodered.Options{BaseURL: "http://127.0.0.1:1"})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: "http://127.0.0.1:1"})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestRunHTTP_MaxBody_AcceptsBodyUnderLimit(t *testing.T) {
 // did not crash on the zero value and that requests below 32 MiB keep
 // flowing.
 func TestRunHTTP_MaxBody_DefaultsApplied(t *testing.T) {
-	c, err := nodered.NewClient(nodered.Options{BaseURL: "http://127.0.0.1:1"})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: "http://127.0.0.1:1"})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
