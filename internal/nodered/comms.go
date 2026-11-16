@@ -76,7 +76,12 @@ type DebugTail struct {
 	filled    bool
 	received  int
 	connected bool
-	lastErr   string
+	// everConnected records that a session was established at least
+	// once. Without it a silent drop is indistinguishable from a tail
+	// that never dialled, and the capability matrix would report a
+	// working stream as "not observed yet" (issue #341).
+	everConnected bool
+	lastErr       string
 }
 
 // NewDebugTail builds a tail for the instance the client is configured against.
@@ -313,11 +318,24 @@ func (t *DebugTail) setState(connected bool, err error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.connected = connected
+	if connected {
+		t.everConnected = true
+	}
 	if err != nil {
 		t.lastErr = err.Error()
 	} else if connected {
 		t.lastErr = ""
 	}
+}
+
+// State reports the tail's observed connection state, whether it ever
+// connected, and the last error, without copying the buffer. The
+// capability matrix needs only this; Snapshot would copy every buffered
+// message (issue #341).
+func (t *DebugTail) State() (connected, everConnected bool, lastError string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.connected, t.everConnected, t.lastErr
 }
 
 // Snapshot returns the buffered messages, oldest first, optionally limited to

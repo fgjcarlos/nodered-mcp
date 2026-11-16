@@ -102,39 +102,26 @@ func TestCapabilityGuidance_EndpointNotMountedNamesLogs(t *testing.T) {
 	}
 }
 
-// Stream-disabled reason must name the MCP-side flag in the REMEDY, not
-// blame Node-RED settings — DebugStreamEnabled is s.debugStream, set by
+// Stream-disabled reason must name the MCP-side opt-in, not blame
+// Node-RED settings — DebugStreamEnabled is s.debugStream, set by
 // MCP_DEBUG_STREAM.
 //
-// It must also NOT claim the flag is off. The matrix assigns
-// stream_disabled unconditionally (no classifier reads
-// p.DebugStreamEnabled), so the flag's state is not evidence about the
-// cause: asserting "the flag is off" would send an operator who already
-// set it after a remedy that changes nothing.
+// Issue #341: the matrix no longer assigns stream_disabled
+// unconditionally. It classifies stream_disabled only when the opt-in
+// is off, so the flag IS the evidence behind the state and the reason
+// may say so. The old contract (one reason for both flag states, no
+// claim about the flag) is what the issue calls out.
 func TestCapabilityGuidance_StreamDisabledNamesMCPFlag(t *testing.T) {
-	// Both flag states must produce the same reason, because the matrix
-	// does not consult the flag.
-	on := RuntimeProbe{DebugStreamEnabled: true}
 	off := RuntimeProbe{DebugStreamEnabled: false}
 
 	for _, tool := range []string{"get_node_status", "get_debug_messages"} {
-		r, m := capabilityGuidance(tool, CapStreamDisabled, on)
-		rOff, _ := capabilityGuidance(tool, CapStreamDisabled, off)
+		r, m := capabilityGuidance(tool, CapStreamDisabled, off)
 
 		if r == "" {
 			t.Errorf("%s reason should be non-empty", tool)
 		}
-		if r != rOff {
-			t.Errorf("%s reason must not depend on the debug-stream flag "+
-				"(the matrix ignores it): on=%q off=%q", tool, r, rOff)
-		}
-		// Must not assert a cause the probe never checked.
-		lower := strings.ToLower(r)
-		for _, claim := range []string{"is off", "is disabled", "is not connected", "not connected"} {
-			if strings.Contains(lower, claim) {
-				t.Errorf("%s reason asserts %q, but the matrix classifies "+
-					"stream_disabled regardless of the flag: %q", tool, claim, r)
-			}
+		if !strings.Contains(strings.ToLower(r), "mcp_debug_stream") {
+			t.Errorf("%s reason should name MCP_DEBUG_STREAM, got %q", tool, r)
 		}
 		// The remedy points at the MCP-side flag.
 		if !strings.Contains(strings.ToLower(m), "mcp_debug_stream") {

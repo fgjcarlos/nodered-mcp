@@ -852,7 +852,12 @@ func (s *Server) registerTools() {
 				"gate, the debug-stream setting, and a per-tool capability "+
 				"matrix classifying each registered tool as ok, "+
 				"version_too_low, endpoint_not_mounted, setting_disabled, "+
-				"stream_disabled, or unknown.\n\n"+
+				"stream_disabled, stream_disconnected, stream_unavailable, "+
+				"stream_unknown, or unknown.\n\n"+
+				"The two /comms tools (get_node_status, get_debug_messages) "+
+				"are classified from the MCP_DEBUG_STREAM opt-in plus what "+
+				"the MCP observed of the WebSocket: an enabled flag alone is "+
+				"never reported as ok.\n\n"+
 				"This is the single tool to call when an LLM session starts "+
 				"on an unfamiliar runtime: it tells the model which tools "+
 				"will work and which will fail before the first call is made. "+
