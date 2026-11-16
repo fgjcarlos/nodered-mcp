@@ -8,6 +8,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Bound and coalesce the JWKS refreshes for unknown key IDs, so an
+  invalid token cannot make the server download the key set once per
+  request (#348). The `kid` travels in an unverified token header and
+  the requester chooses it, but every miss forced a fresh download of
+  the whole document, and simultaneous misses each fetched their own
+  copy. The refreshes are now serialised (the callers that miss at the
+  same time share one download) and a miss-driven refresh happens at
+  most once per minute, while a rotation is still picked up as soon as
+  the window opens. A failed attempt is shared with the callers that
+  were waiting for it, so an unreachable identity provider does not
+  turn into a queue of downloads.
 - Make the mutation lock waits cancelable, so a write whose context is
   done gives up instead of waiting past its deadline (#347). The client
   write lock was a plain `sync.Mutex`: a write that arrived while another

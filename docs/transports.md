@@ -83,5 +83,19 @@ issuer; `aud` must match the configured audience. Discovery happens
 once at boot, so a misconfigured URL fails fast rather than on the
 first authenticated call.
 
+The signing keys are cached for 15 minutes. A token whose `kid` is
+not in the cache triggers one extra fetch, because the identity
+provider may have rotated; that extra fetch happens at most once per
+minute and is shared by the requests that miss at the same time, so a
+burst of invalid tokens cannot become a burst of downloads against the
+identity provider. A rotated key is therefore picked up as soon as the
+window opens, which can be up to a minute after the rotation.
+
+The window is per process, so a fleet of replicas allows one refresh
+per replica and minute. While the identity provider is unreachable and
+the cache has expired, every request that arrives after a failed fetch
+tries again on its own; the requests that were waiting when it failed
+share that outcome instead of queueing behind it.
+
 Configuring both `MCP_HTTP_TOKEN` and `MCP_OAUTH_ISSUER` is a
 configuration error and the server refuses to start.
