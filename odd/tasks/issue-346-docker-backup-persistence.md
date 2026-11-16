@@ -36,7 +36,7 @@ lineage cerró **escalated** (no aprobado), con `unknown_causality` sobre
   cuando el código escribe `flows-<YYYYMMDD-HHMMSS.NNNNNNNNN>-<seq>.json`
   (UTC). El doc estaba equivocado: **corregido**.
 - `R3-volume-root-ownership` (reliability, CRITICAL, causalidad
-  desconocida) — el reviewerministrador afirma que un volumen nombrado
+  desconocida) — el reviewer afirma que un volumen nombrado
   vacío montado sobre el path de la imagen deja una raíz propiedad de
   root y que el usuario nonroot no puede escribir. **No se reproduce**:
   Docker copia el directorio de la imagen —con su propiedad— al volumen
@@ -44,6 +44,36 @@ lineage cerró **escalated** (no aprobado), con `unknown_causality` sobre
   contenedor (Docker 29.8.1, observado). La garantía queda escrita en
   `docs/configuration.md` y `docs/troubleshooting.md` para que sea legible
   sin Docker, y el smoke la comprueba en cada corrida.
+
+Lineage `review-d4d41e31226ed94b` (3 lentes: resilience, readability,
+reliability) sobre el candidato corregido `5cbfc67b…` (286 líneas): los
+tres reviewer corrieron y el lineage cerró **approved**; el
+`acknowledge-approved` quemó la autoridad
+(`gentle-ai.review-acknowledged/v1`, delivery bajo política ordinary del
+repo). Once hallazgos aditivos, ninguno bloqueante (WARNING/SUGGESTION,
+informational): reagrupan el acoplamiento del smoke al texto de la
+respuesta, la dependencia de una imagen externa por digest, la espera de
+readiness del stub, el nombre del volumen documentado y la falta de
+timeout en las requests del smoke. Quedan como trabajo aparte; ninguno
+abrió una corrección ni reabre esta revisión.
+
+## Delivery
+
+- Commits en `fix/issue-346-docker-backup-persistence`:
+  - `23e2607` — `fix(docker): give the image an explicit, persistent backup directory (#346)`
+  - `eae1826` — `docs(docker): document the persistent backup volume (#346)`
+  - `2fa07a2` — `fix(docker): extract the snapshot name exactly and correct its documented format`
+- Pull request: #381, contra `main`, con `Closes #346`.
+
+Checks (todos verdes):
+
+- `bash scripts/docker-smoke.sh` — verde con la imagen nueva
+  (deployment real, snapshot escrito y supervivencia al recrear el
+  contenedor).
+- El mismo smoke contra el `Dockerfile` de `main` — **falla** con exit 1
+  y `No backups saved yet.` (RED observado antes del GREEN).
+- `go test ./...` — verde.
+- `node bin/*_test.js` — verde.
 
 ## Log
 
