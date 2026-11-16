@@ -105,7 +105,7 @@ func TestReadTransportRetriesRemain(t *testing.T) {
 				}))
 				defer fixture.Close()
 				dir := t.TempDir()
-				c, err := nodered.NewClient(nodered.Options{BaseURL: fixture.URL, SearchBaseURL: fixture.URL, BackupDir: dir})
+				c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: fixture.URL, SearchBaseURL: fixture.URL, BackupDir: dir})
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -3,7 +3,9 @@ package mcp
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -46,7 +48,7 @@ func TestDegradedTools_UnknownVersionIsZero(t *testing.T) {
 // degraded tools; the banner reports zero. Verifies the count
 // component end-to-end via the same code path the banner uses.
 func TestStartupBanner_NR5NoDegraded(t *testing.T) {
-	s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+	s, _ := serverWithMockVersionProbe(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/settings" {
 			_, _ = w.Write([]byte(`{"version":"5.0.1"}`))
 			return
@@ -65,7 +67,7 @@ func TestStartupBanner_NR5NoDegraded(t *testing.T) {
 // TestStartupBanner_NR3FlagsThree — a NR 3.0 mock should report
 // 3 degraded tools (the three in nodered_min_version_for).
 func TestStartupBanner_NR3FlagsThree(t *testing.T) {
-	s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+	s, _ := serverWithMockVersionProbe(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/settings" {
 			_, _ = w.Write([]byte(`{"version":"3.0.0"}`))
 			return
@@ -82,31 +84,36 @@ func TestStartupBanner_NR3FlagsThree(t *testing.T) {
 	}
 }
 
-// TestIsLoopbackTestFixture pins the heuristic so a future
-// httptest port change does not silently flip production
-// behaviour. Production deployments use real hostnames; the
-// helper must return false for them.
-func TestIsLoopbackTestFixture(t *testing.T) {
-	// httptest binds these prefixes by default.
-	for _, url := range []string{
-		"http://127.0.0.1:54321",
-		"http://localhost:8080",
-		"http://[::1]:3000",
-	} {
-		c, _ := nodered.NewClient(nodered.Options{BaseURL: url})
-		if !isLoopbackTestFixture(c) {
-			t.Errorf("isLoopbackTestFixture(%q) = false, want true", url)
+// TestLoopbackURLIsNotAFixture pins the issue #340 behaviour: a
+// loopback URL is not a test fixture. The shipped default
+// (http://localhost:1880) is a real local Node-RED and must be
+// probed; only the explicit nodered.Options.SkipVersionProbe switch
+// marks a client as a fixture.
+//
+// The old heuristic keyed off the URL, so a real local install was
+// never probed and the runtime version gate never engaged there.
+func TestLoopbackURLIsNotAFixture(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/settings" {
+			atomic.AddInt32(&hits, 1)
+			_, _ = w.Write([]byte(`{"version":"5.0.8"}`))
+			return
 		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
 	}
-	// Production-style URLs are not loopback.
-	for _, url := range []string{
-		"https://nodered.example.com",
-		"http://10.0.0.5:1880",
-	} {
-		c, _ := nodered.NewClient(nodered.Options{BaseURL: url})
-		if isLoopbackTestFixture(c) {
-			t.Errorf("isLoopbackTestFixture(%q) = true, want false", url)
-		}
+	v := c.NodeRedVersion(context.Background())
+	if !v.Known || v.String() != "5.0.8" {
+		t.Fatalf("loopback runtime must be probed, got %+v", v)
+	}
+	if atomic.LoadInt32(&hits) == 0 {
+		t.Errorf("expected the probe to hit /settings")
 	}
 }
 

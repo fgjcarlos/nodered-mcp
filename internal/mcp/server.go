@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -284,31 +283,28 @@ func New(nrClient *nodered.Client, opts Options) *Server {
 	srv.registerPrompts()
 
 	// Probe the Node-RED version asynchronously so the boot path is
-	// not blocked by a slow or unreachable runtime. Skipped entirely
-	// when the configured BaseURL points at a loopback test fixture
-	// (httptest binds 127.0.0.1), because the probe would race the
-	// test's strict mock handler and mark the test as failed for an
-	// unexpected path.
+	// not blocked by a slow or unreachable runtime.
 	//
-	// ponytail: the loopback heuristic is the smallest thing that
-	// keeps production probes on and test fixtures quiet; a future
-	// "options.NoBannerProbe" toggle is the clean upgrade path.
-	if !isLoopbackTestFixture(srv.nrClient) {
-		go func() {
-			probeCtx, cancel := context.WithTimeout(context.Background(), bannerProbeTimeout)
-			defer cancel()
-			v := srv.nrClient.NodeRedVersion(probeCtx)
-			if !v.Known {
-				slog.Warn("could not detect Node-RED version; tools may fail with version-gated errors")
-				return
-			}
-			degraded := degradedTools(v, srv.tools)
-			slog.Info("Node-RED version detected",
-				"node_red_version", v.String(),
-				"degraded_tools", degraded,
-			)
-		}()
-	}
+	// Issue #340: the probe used to be skipped for any loopback URL,
+	// which also skipped the shipped default (http://localhost:1880)
+	// — a real local Node-RED. The fixture case is now an explicit
+	// option on the client (nodered.Options.SkipVersionProbe), so a
+	// mock that must not see GET /settings opts out instead of being
+	// recognised by its address.
+	go func() {
+		probeCtx, cancel := context.WithTimeout(context.Background(), versionProbeTimeout)
+		defer cancel()
+		v := srv.nrClient.NodeRedVersion(probeCtx)
+		if !v.Known {
+			slog.Warn("could not detect Node-RED version; tools may fail with version-gated errors")
+			return
+		}
+		degraded := degradedTools(v, srv.tools)
+		slog.Info("Node-RED version detected",
+			"node_red_version", v.String(),
+			"degraded_tools", degraded,
+		)
+	}()
 
 	slog.Info("MCP server initialized",
 		"tools", len(srv.tools),
@@ -318,37 +314,6 @@ func New(nrClient *nodered.Client, opts Options) *Server {
 	)
 
 	return srv
-}
-
-// bannerProbeTimeout bounds the async NR version probe. The probe
-// itself is best-effort: a slow or unreachable runtime just leaves
-// the cache empty, which surfaces as a follow-up WARN line.
-const bannerProbeTimeout = 5 * time.Second
-
-// isLoopbackTestFixture returns true when the Client's BaseURL
-// resolves to a 127.0.0.1 / ::1 address — the httptest default.
-//
-// Read the next lines before trusting this to mean "test": the
-// shipped default for NODERED_URL is http://localhost:1880
-// (internal/config/config.go), so an ordinary local Node-RED
-// install ALSO matches and skips the probe. That is a production
-// shape being treated as a test fixture, and it means the #316
-// version gate never engages there unless something else already
-// warmed the cache (for example a prior get_runtime_info call).
-//
-// The gate stays fail-open by design, and a call that passes
-// without a version check carries UnknownVersionNotice so the
-// caller is told no guarantee was applied. ponytail: invert this
-// into an explicit Options.NoBannerProbe the tests opt into — a
-// string match on a user-supplied URL cannot tell a fixture from
-// a real local install.
-func isLoopbackTestFixture(c *nodered.Client) bool {
-	if c == nil {
-		return true
-	}
-	return strings.HasPrefix(c.BaseURL(), "http://127.0.0.1") ||
-		strings.HasPrefix(c.BaseURL(), "http://localhost") ||
-		strings.HasPrefix(c.BaseURL(), "http://[::1]")
 }
 
 // degradedTools counts how many registered tools the running

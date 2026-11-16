@@ -114,7 +114,12 @@ func (s *Server) handleSetContext(ctx context.Context, req mcp.CallToolRequest) 
 	// scope validation stay above the gate so a caller who
 	// forgot a required field still sees a field error rather
 	// than a misleading version error.
-	if refuse, msg := RefuseForVersion("set_context", s.nrClient.CachedNodeRedVersion()); refuse {
+	//
+	// Issue #340: the gate resolves the version itself (a
+	// read-only probe) instead of reading a cold cache, so an
+	// old runtime is refused on the first call rather than on
+	// whichever later call happened to warm the cache.
+	if refuse, msg := RefuseForVersion("set_context", s.resolveVersion(ctx)); refuse {
 		return mcp.NewToolResultError(msg), nil
 	}
 

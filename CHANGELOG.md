@@ -8,6 +8,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Detect the Node-RED version against a local runtime, and recover
+  from a failed probe (#340). The version probe was skipped for every
+  loopback URL, which also skipped the shipped default
+  (`http://localhost:1880`): a real local Node-RED was never probed,
+  so the runtime version gate stayed inactive until some other
+  operation happened to warm the cache, and `set_context` reported an
+  unknown version on a runtime it could have checked. A fixture is
+  now an explicit option instead of a URL shape, the gate resolves the
+  version before the operation that depends on it (refusing an
+  incompatible runtime without side effects), and a failed probe is
+  retried instead of being memoized for the whole session.
 - Give the palette and runtime-state tools their own timeout budget
   (#339). Every tool attempt ran under a flat 15-second deadline, and
   the client asks for more on the slow paths: an npm install needs

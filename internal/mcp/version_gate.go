@@ -1,10 +1,39 @@
 package mcp
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	"github.com/fgjcarlos/nodered-mcp/internal/nodered"
 )
+
+// versionProbeTimeout bounds the version probe the gate runs before
+// a version-dependent operation (issue #340). The probe is a
+// read-only GET /settings; a runtime that does not answer within
+// this budget leaves the version unknown and the gate fails open,
+// exactly as it did before the gate started probing.
+const versionProbeTimeout = 5 * time.Second
+
+// resolveVersion returns the Node-RED version the gate must judge
+// the call against.
+//
+// Issue #340: the gate used to read the cached version, which on a
+// cold cache meant "could not tell" and no refusal at all — the
+// incompatible runtime was only caught once some other operation
+// happened to warm the cache. Now the gate resolves the version
+// itself: the probe is read-only and runs BEFORE the dependent
+// operation, so refusing an incompatible runtime has no side
+// effects.
+//
+// A client built with nodered.Options.SkipVersionProbe never
+// probes and keeps reporting "unknown" — that is the explicit
+// fixture opt-out.
+func (s *Server) resolveVersion(ctx context.Context) nodered.Version {
+	probeCtx, cancel := context.WithTimeout(ctx, versionProbeTimeout)
+	defer cancel()
+	return s.nrClient.NodeRedVersion(probeCtx)
+}
 
 // nodered_min_version_for maps a tool name to the Node-RED version
 // that first shipped the behaviour the tool relies on. The map is

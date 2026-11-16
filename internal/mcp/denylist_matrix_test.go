@@ -134,7 +134,7 @@ func TestIssue329_RestoreBackupRefusesDeniedType(t *testing.T) {
 	}
 
 	srv, seen := issue329Runtime(t, nil)
-	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: backupDir})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: backupDir})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

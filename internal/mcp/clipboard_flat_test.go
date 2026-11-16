@@ -39,7 +39,7 @@ func newFakeRuntime(t *testing.T, flat string) (*fakeRuntime, *Server) {
 	}
 	srv := httptest.NewServer(http.HandlerFunc(rt.serve))
 	t.Cleanup(srv.Close)
-	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

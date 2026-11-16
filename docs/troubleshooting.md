@@ -10,6 +10,15 @@ path for you. If it must fall back to the command name, make sure
 required scope. With `adminAuth` enabled, generate a token with
 write permission on flows.
 
+**"Node-RED version was not detected".** The MCP reads the runtime
+version from `GET /settings`. When that read fails — the runtime is
+down, `/settings` needs admin auth the token does not carry, or a
+proxy strips the path — the version stays unknown and the version-gated
+tools (`set_context`, `inject_node` with a payload) proceed without a
+version check, saying so in the result. The MCP retries the probe on
+later operations, so a runtime that comes up after start-up is picked
+up without a restart.
+
 **No log output.** Logs are written to stderr; stdout is reserved
 for JSON-RPC frames on the stdio transport. Increase verbosity with
 `--log-level debug`.

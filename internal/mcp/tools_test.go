@@ -115,7 +115,7 @@ const totalTools = 44
 
 func newTestServer(t *testing.T, readOnly bool) *Server {
 	t.Helper()
-	c, err := nodered.NewClient(nodered.Options{BaseURL: "http://localhost:1880"})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: "http://localhost:1880"})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestReadOnlyKeepsResourcesAndPrompts(t *testing.T) {
 }
 func newTestServerDebugStream(t *testing.T, readOnly, debugStream bool) *Server {
 	t.Helper()
-	c, err := nodered.NewClient(nodered.Options{BaseURL: "http://localhost:1880"})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: "http://localhost:1880"})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -589,7 +589,7 @@ func TestNormalizeFlowDoc_FlatArray(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -734,7 +734,7 @@ func TestSetContext_HappyPathAndHelperReuse(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -856,7 +856,7 @@ func TestSetContext_RetriesOnFirstCall404(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -953,7 +953,7 @@ func TestSetContext_NoRetryWhenHelperAlreadyProvisioned(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -1032,7 +1032,7 @@ func TestRestoreBackup_ClearsSetContextHelper(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: backupDir})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: backupDir})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -1088,7 +1088,7 @@ func TestSetContext_RejectsBadScope(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	srv2 := New(c, Options{Version: "test"})
 
 	res, err := srv2.handleSetContext(context.Background(), mcp.CallToolRequest{
@@ -1124,7 +1124,7 @@ func TestSetContext_RejectsBadJSONValue(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	srv2 := New(c, Options{Version: "test"})
 
 	res, err := srv2.handleSetContext(context.Background(), mcp.CallToolRequest{
@@ -1163,7 +1163,7 @@ func TestSetContext_RequiresIdForFlow(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	srv2 := New(c, Options{Version: "test"})
 	srv2.ctxHelper = &setContextHelper{
 		flowID:     "runtime_helper_tab",
@@ -1212,7 +1212,7 @@ func TestSetContext_FlowScopeRejectsForeignId(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	srv2 := New(c, Options{Version: "test"})
 	srv2.ctxHelper = &setContextHelper{
 		flowID:     "runtime_helper_tab",
@@ -1265,7 +1265,7 @@ func TestSetContext_AcceptsRealRuntimeId(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	s := New(c, Options{Version: "test"})
 	s.ctxHelper = &setContextHelper{
 		flowID:     "d23de851e7ed4098",
@@ -1312,7 +1312,7 @@ func TestSetContext_WithheldInReadOnly(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	ro := New(c, Options{Version: "test", ReadOnly: true})
 
 	names := toolNames(ro)
@@ -1335,7 +1335,7 @@ func TestGetRuntimeLogs_NotFoundSurfacesActionableHint(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	s := New(c, Options{Version: "test"})
 
 	res, err := s.handleGetRuntimeLogs(context.Background(), mcp.CallToolRequest{})
@@ -1375,7 +1375,7 @@ func TestGetRuntimeLogs_ReturnsLines(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	s := New(c, Options{Version: "test"})
 
 	res, err := s.handleGetRuntimeLogs(context.Background(), mcp.CallToolRequest{})
@@ -1405,7 +1405,7 @@ func TestGetRuntimeLogs_FilterByLevel(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	s := New(c, Options{Version: "test"})
 
 	res, _ := s.handleGetRuntimeLogs(context.Background(), mcp.CallToolRequest{
@@ -1430,7 +1430,7 @@ func TestGetRuntimeLogs_RejectsBadLevel(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	s := New(c, Options{Version: "test"})
 
 	res, _ := s.handleGetRuntimeLogs(context.Background(), mcp.CallToolRequest{
@@ -1458,7 +1458,7 @@ func TestGetRuntimeLogs_LineOffset(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	s := New(c, Options{Version: "test"})
 
 	res, _ := s.handleGetRuntimeLogs(context.Background(), mcp.CallToolRequest{
@@ -1482,7 +1482,7 @@ func TestGetRuntimeLogs_RejectsBadSince(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	s := New(c, Options{Version: "test"})
 
 	for _, bad := range []string{"not-a-date", "-abc", "0", "-0", "yesterday"} {
@@ -1583,7 +1583,7 @@ func TestGetNodeStatus_ConnectedNode(t *testing.T) {
 		// when debugStream is true with a localhost URL
 		// (it cannot derive /comms for "http://localhost:1880").
 		// We need a server that does, so build a real one.
-		c, err := nodered.NewClient(nodered.Options{BaseURL: "http://127.0.0.1:1"})
+		c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: "http://127.0.0.1:1"})
 		if err != nil {
 			t.Fatalf("NewClient: %v", err)
 		}
@@ -1618,7 +1618,7 @@ func TestGetNodeStatus_ConnectedNode(t *testing.T) {
 // to connected, so an operator who asks "why was this red?"
 // after the node has come back to green still gets the answer.
 func TestGetNodeStatus_ErroredNodeWithLastError(t *testing.T) {
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: "http://127.0.0.1:1"})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: "http://127.0.0.1:1"})
 	tail, _ := nodered.NewStatusTail(c)
 	tail.ConsumeForTest([]byte(
 		`[{"topic":"status/n1","data":{"text":"broker unreachable","fill":"red","shape":"dot"}}]`,
@@ -1673,7 +1673,7 @@ func serverWithDenylist(t *testing.T, types ...string) (*Server, *httptest.Serve
 	}))
 	t.Cleanup(srv.Close)
 
-	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -1736,7 +1736,7 @@ func TestCreateFlow_AllowsNonDeniedNodeType(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	s := New(c, Options{Version: "test", NodeDenylist: []string{"exec"}})
 
 	res, err := s.handleCreateFlow(context.Background(), mcp.CallToolRequest{
@@ -1778,7 +1778,7 @@ func TestCreateFlow_EmptyDenylistAllowsExec(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	// Empty (non-nil) NodeDenylist = "opt out" — every type is allowed.
 	s := New(c, Options{Version: "test", NodeDenylist: []string{}})
 
@@ -1926,7 +1926,7 @@ func TestRestoreBackup_RejectsDeniedNodeType(t *testing.T) {
 				t.Fatalf("write backup: %v", err)
 			}
 
-			c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: backupDir})
+			c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: backupDir})
 			if err != nil {
 				t.Fatalf("NewClient: %v", err)
 			}
@@ -1994,7 +1994,7 @@ func TestRestoreBackup_AllowsNonDeniedNodeType(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: backupDir})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: backupDir})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -2025,7 +2025,7 @@ func TestHandleSetFlows_NonTabOnlyRejected(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -2298,7 +2298,7 @@ func TestHandleGetContext_NonExistentNodeId(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -2347,7 +2347,7 @@ func TestHandleGetContext_ExistingNodeWithNoContext(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -2406,7 +2406,7 @@ func newListFlowsServer(t *testing.T, flows []byte, threshold int) *Server {
 		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 	}))
 	t.Cleanup(nrSrv.Close)
-	c, err := nodered.NewClient(nodered.Options{BaseURL: nrSrv.URL})
+	c, err := nodered.NewClient(nodered.Options{BaseURL: nrSrv.URL, SkipVersionProbe: true})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -2591,7 +2591,7 @@ func TestCreateFlow_NullDocumentIsRefusedNotPanic(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -2630,7 +2630,7 @@ func TestUpdateFlow_NullDocumentIsRefusedNotPanic(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -2665,7 +2665,7 @@ func TestImportFlow_NullClipboardElementIsRefusedNotPanic(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

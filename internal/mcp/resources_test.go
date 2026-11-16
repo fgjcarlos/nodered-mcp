@@ -18,7 +18,7 @@ import (
 // fails the test. The list lives next to registerResources for easy
 // diffing.
 func TestResources_Registered(t *testing.T) {
-	c, err := nodered.NewClient(nodered.Options{BaseURL: "http://127.0.0.1:1"})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: "http://127.0.0.1:1"})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestResources_AllFlows(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL})
 	s := New(c, Options{Version: "test"})
 
 	got, err := s.handleFlowsResource(context.Background(), mcp.ReadResourceRequest{})
@@ -96,7 +96,7 @@ func TestResources_AllFlows_EmptyReturnsArray(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL})
 	s := New(c, Options{Version: "test"})
 
 	got, err := s.handleFlowsResource(context.Background(), mcp.ReadResourceRequest{})
@@ -116,7 +116,7 @@ func TestResources_AllFlows_PropagatesError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL})
 	s := New(c, Options{Version: "test"})
 
 	if _, err := s.handleFlowsResource(context.Background(), mcp.ReadResourceRequest{}); err == nil {
@@ -134,7 +134,7 @@ func TestResources_Settings(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL})
 	s := New(c, Options{Version: "test"})
 
 	got, err := s.handleSettingsResource(context.Background(), mcp.ReadResourceRequest{})
@@ -163,7 +163,7 @@ func TestResources_FlowsState(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL})
 	s := New(c, Options{Version: "test"})
 
 	got, err := s.handleFlowsStateResource(context.Background(), mcp.ReadResourceRequest{})

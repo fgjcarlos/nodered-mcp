@@ -23,7 +23,7 @@ import (
 // prose without listing every one, which is fine; missing entries
 // from docs/tools.md is the drift we care about.
 func TestReadmeSyncWithRegistry(t *testing.T) {
-	c, err := nodered.NewClient(nodered.Options{BaseURL: "http://127.0.0.1:1"})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: "http://127.0.0.1:1"})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -99,7 +99,7 @@ var countClaimDocs = []string{
 // user-facing docs to the live registry, so the totals cannot drift
 // away from the catalogue the way they did between v0.5 and v0.6.
 func TestDocsToolCountsMatchRegistry(t *testing.T) {
-	c, err := nodered.NewClient(nodered.Options{BaseURL: "http://127.0.0.1:1"})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: "http://127.0.0.1:1"})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

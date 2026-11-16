@@ -31,7 +31,7 @@ func injectServer(t *testing.T, h http.HandlerFunc) (*Server, *capture) {
 		h(w, r)
 	}))
 	t.Cleanup(srv.Close)
-	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir(), SkipVersionProbe: true})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestHandleInjectNode_EmptyID(t *testing.T) {
 		t.Errorf("server should not be called for empty id, got %s %s", r.Method, r.URL.Path)
 	}))
 	t.Cleanup(srv.Close)
-	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir(), SkipVersionProbe: true})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

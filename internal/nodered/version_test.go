@@ -3,9 +3,12 @@ package nodered
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestParseVersion_Stable(t *testing.T) {
@@ -237,5 +240,89 @@ func TestCachedNodeRedVersion_ConcurrentWithProbe(t *testing.T) {
 	want := c.NodeRedVersion(context.Background())
 	if got := c.CachedNodeRedVersion(); got != want {
 		t.Errorf("cached read disagrees with the probe: got %+v, want %+v", got, want)
+	}
+}
+
+// TestNodeRedVersion_RetriesAfterFailedProbe is the issue #340
+// regression for the one-shot cache: a failed probe must NOT be
+// memoized for the life of the client. The old sync.Once kept the
+// first failure forever, so a runtime that was not up yet when the
+// server booted stayed "unknown" for the whole session.
+//
+// The retry interval is shortened here so the test does not have to
+// wait half a minute for the next attempt.
+func TestNodeRedVersion_RetriesAfterFailedProbe(t *testing.T) {
+	old := versionRetryInterval
+	versionRetryInterval = 20 * time.Millisecond
+	t.Cleanup(func() { versionRetryInterval = old })
+
+	var hits int32
+	var up atomic.Bool
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/settings" {
+			atomic.AddInt32(&hits, 1)
+			if !up.Load() {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			_, _ = w.Write([]byte(`{"version":"5.0.8"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	if v := client.NodeRedVersion(context.Background()); v.Known {
+		t.Fatalf("expected an unknown version while the runtime is down, got %+v", v)
+	}
+	// Inside the retry interval the failure is reused: one probe only.
+	if v := client.NodeRedVersion(context.Background()); v.Known {
+		t.Fatalf("expected the cached failure inside the retry interval, got %+v", v)
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Fatalf("expected exactly 1 probe inside the retry interval, got %d", got)
+	}
+
+	// The runtime comes up. After the interval the next call probes
+	// again and picks the version up.
+	up.Store(true)
+	time.Sleep(30 * time.Millisecond)
+	v := client.NodeRedVersion(context.Background())
+	if !v.Known || v.String() != "5.0.8" {
+		t.Fatalf("expected the version to be detected on the retry, got %+v", v)
+	}
+	if got := atomic.LoadInt32(&hits); got != 2 {
+		t.Errorf("expected 2 probes (one failed, one retry), got %d", got)
+	}
+	// A successful probe is cached for good.
+	_ = client.NodeRedVersion(context.Background())
+	if got := atomic.LoadInt32(&hits); got != 2 {
+		t.Errorf("a successful probe must not be repeated, got %d hits", got)
+	}
+}
+
+// TestNodeRedVersion_SkipOptionNeverProbes proves the explicit
+// fixture switch (issue #340): a client built with
+// Options.SkipVersionProbe never touches /settings and keeps
+// reporting "unknown", so a strict mock never sees the request.
+func TestNodeRedVersion_SkipOptionNeverProbes(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		_, _ = w.Write([]byte(`{"version":"5.0.8"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewClient(Options{BaseURL: srv.URL, SkipVersionProbe: true})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if v := client.NodeRedVersion(context.Background()); v.Known {
+		t.Errorf("the skip option must report an unknown version, got %+v", v)
+	}
+	if v := client.CachedNodeRedVersion(); v.Known {
+		t.Errorf("the skip option must report an unknown cached version, got %+v", v)
+	}
+	if got := atomic.LoadInt32(&hits); got != 0 {
+		t.Errorf("the skip option must not probe, got %d hits", got)
 	}
 }

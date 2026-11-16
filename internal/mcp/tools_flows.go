@@ -473,7 +473,11 @@ func (s *Server) handleInjectNode(ctx context.Context, req mcp.CallToolRequest) 
 	// no-payload regression test will need to flip its expected
 	// outcome.
 	if hasPayload && rawPayload != nil {
-		if refuse, msg := RefuseForVersion("inject_node", s.nrClient.CachedNodeRedVersion()); refuse {
+		// Issue #340: resolve the version here instead of reading a
+		// cold cache, so the refusal lands on the first call. The
+		// probe is read-only and sits above the lookup probe, so a
+		// refused call still reaches nothing but GET /settings.
+		if refuse, msg := RefuseForVersion("inject_node", s.resolveVersion(ctx)); refuse {
 			return mcp.NewToolResultError(msg), nil
 		}
 	}

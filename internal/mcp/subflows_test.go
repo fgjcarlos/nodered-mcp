@@ -36,7 +36,7 @@ func TestInjectNode_WithoutPayloadCallsOriginal(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	srv2 := New(c, Options{Version: "test"})
 	res, err := srv2.handleInjectNode(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{Arguments: map[string]any{"id": "n1"}},
@@ -75,7 +75,7 @@ func TestInjectNode_WithPayloadCallsBody(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	srv2 := New(c, Options{Version: "test"})
 	res, err := srv2.handleInjectNode(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{Arguments: map[string]any{
@@ -117,7 +117,7 @@ func TestInjectNode_RejectsInvalidPayloadString(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	srv2 := New(c, Options{Version: "test"})
 	res, err := srv2.handleInjectNode(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{Arguments: map[string]any{
@@ -149,7 +149,7 @@ func TestListSubflows_EmptyResult(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, _ := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, _ := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	srv2 := New(c, Options{Version: "test"})
 	res, err := srv2.handleListSubflows(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{Arguments: map[string]any{}},
@@ -197,7 +197,7 @@ func TestDeleteSubflow_InUseSubflowIsRefusedNotReplayed(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, err := nodered.NewClient(nodered.Options{BaseURL: srv.URL, BackupDir: t.TempDir()})
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: srv.URL, BackupDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
