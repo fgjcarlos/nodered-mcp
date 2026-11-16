@@ -42,39 +42,39 @@ no signal for this diff; CI runs them anyway.
 
 ### Native review
 
-Two lineages were created for this work, both stuck at the same point:
+Three lineages were opened for this work and all three were abandoned with
+a committed `review-reclaim-record/v1` (`operator_disposition`, actor
+`fgjcarlos`), because the reviewer capture never completed. The three
+abandoned lineages were `review-bd0ec40c64b8b910` (work-unit commit
+`0538c83`), `review-562246593b41056b` (candidate `9642e94`) and
+`review-56f3a88b9b68d99e` (candidate `67b8877`).
 
-- `review-bd0ec40c64b8b910` — the work-unit commit `0538c83` (215 lines).
-- `review-562246593b41056b` — the candidate after the delivery commit
-  `9642e94` (274 lines), started with the provider's own `base-ref`
-  (`7dd195f9a572856d471274383907dd8b2879e629`) and read with the
-  provider's own base tree (`e4aa39b47673c66b9307509dbc57bd2e8dd13995`),
-  exactly as the provider's transitions offered.
+The capture was blocked twice, and **both causes were in the calling
+session, not in the harness**:
 
-Both reached `state: reviewing`, tier high, lenses resilience +
-reliability, correction budget 137, and both offer the two materialize
-reviewer slots. **No reviewer ever ran**: every
-`gentle_review_capture` and `gentle_review_capture_group` call is
-rejected by the facade with `capture-route-registration-rejected` /
-`selector-mismatch` ("Provider collectBinding collides with a different
-registered route"). The same rejection appears when STATUS is read with
-the base tree, with the base commit, or with `origin/main`.
+1. **Selector mismatch.** The capture path re-registers its retained
+   route with the selector derived from the candidate projection
+   (`providerBaseTree ?? baseCommit`), so the STATUS read and the capture
+   must use the same one. Reading STATUS with the provider base tree
+   (`e4aa39b4…`) or with a symbolic ref (`origin/main`) collides with
+   that selector and the capture is rejected with
+   `capture-route-registration-rejected` / `selector-mismatch`. Reading
+   STATUS with the base **commit** (`7dd195f9…`, the same selector the
+   START used) is the selector that matches, and the rejection moves to
+   the binding comparison.
+2. **A mistranscribed binding.** The binding read from STATUS carries
+   `artifactSubject.schema = "gentle-ai.review-artifact-subject/v2"`. The
+   binding submitted to the capture carried
+   `"gentle-ai.dev/review-artifact-subject/v2"` — one token off. Compared
+   programmatically against the session transcript (no hand
+   transcription), that single field was the *only* difference in every
+   lineage, which is why the capture reported
+   `collectBinding is missing or stale for current STATUS` and
+   `collectBindings must be the complete distinct current reviewer group
+   in exact provider order`.
 
-The blocker is `authority-unavailable` / `provider-unavailable` in the
-harness's capture-route registration, not a finding about this change:
-
-- the collect binding read from STATUS is byte-identical to the one
-  submitted (canonical form, idempotent under re-canonicalisation);
-- the only field in conflict is the retained route's selector, which the
-  capture path does not reproduce;
-- it reproduces on both lineages, on both reviewer slots, and with the
-  group and single-capture tools.
-
-The facade's own guidance for this state is to preserve the diagnostic
-and use the supported native continuation — never to reset or rebuild the
-authority locally — so no reviewer verdict exists for this candidate and
-none is claimed. Both lineages were left in `reviewing`; abandoning them
-needs the maintainer's explicit decision.
+Lesson for the next run: read STATUS with the same base commit the START
+used, and submit the binding bytes exactly as STATUS returned them.
 
 ## Log
 
