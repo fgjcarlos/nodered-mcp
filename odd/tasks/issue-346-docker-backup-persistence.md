@@ -17,6 +17,33 @@
 - T2 (S3, S4) — Smoke real: edición de flows contra un Node-RED stub, comprobar el backup escrito y su supervivencia al recrear el contenedor. Route: inline. Commit: —
 - T3 (S2, S6) — Documentar el montaje persistente en los ejemplos de Docker y sus límites. Route: inline. Commit: —
 - T4 (S4, S5, S6) — Comprobaciones, regresión y cierre. Route: inline. Commit: —
+- T5 (S3, S4, S6) — Corrección de los hallazgos de la revisión nativa. Route: inline. Commit: —
+
+## Native review
+
+Lineage `review-3a629f3f13170519`, tier high, 4 lentes (risk, resilience,
+readability, reliability), candidato `0f369fb8…` (243 líneas, 9 paths).
+Los cuatro reviewer corrieron y el refuter чеquearon los hallazgos; el
+lineage cerró **escalated** (no aprobado), con `unknown_causality` sobre
+`R3-volume-root-ownership`:
+
+- `R4-RFC3339-EXTRACTION` (resilience, CRITICAL, corroborado por el
+  refuter) — el smoke extraía el nombre del snapshot con un patrón
+  genérico y, si no había coincidencia, `grep -q ""` haría que la
+  comprobación de persistencia fuera vacua. **Corregido**: el patrón
+  ahora es el del formato real y un nombre vacío corta el smoke. El
+  refuter se apoyó en `docs/architecture.md`, que decía `flows-<RFC3339>.json`
+  cuando el código escribe `flows-<YYYYMMDD-HHMMSS.NNNNNNNNN>-<seq>.json`
+  (UTC). El doc estaba equivocado: **corregido**.
+- `R3-volume-root-ownership` (reliability, CRITICAL, causalidad
+  desconocida) — el reviewerministrador afirma que un volumen nombrado
+  vacío montado sobre el path de la imagen deja una raíz propiedad de
+  root y que el usuario nonroot no puede escribir. **No se reproduce**:
+  Docker copia el directorio de la imagen —con su propiedad— al volumen
+  vacío, y el snapshot se escribió ahí y sobrevivió a la recreación del
+  contenedor (Docker 29.8.1, observado). La garantía queda escrita en
+  `docs/configuration.md` y `docs/troubleshooting.md` para que sea legible
+  sin Docker, y el smoke la comprueba en cada corrida.
 
 ## Log
 

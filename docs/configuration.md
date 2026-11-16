@@ -41,8 +41,9 @@ in the error.
 
 In the container image the backup directory is `/var/lib/nodered-mcp/backups`
 (the image sets `NODERED_BACKUP_DIR` to it and runs as the `nonroot` user, so
-the path is writable). Mount a volume there to keep the snapshots when the
-container is recreated:
+the path is writable). The image ships that directory with the `nonroot`
+user's ownership, so a volume mounted on it inherits that ownership. Mount
+a volume there to keep the snapshots when the container is recreated:
 
 ```bash
 docker run --rm --name nodered-mcp \

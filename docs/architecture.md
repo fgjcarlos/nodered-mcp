@@ -272,7 +272,9 @@ a timestamp.
 
 - Directory: env `NODERED_BACKUP_DIR` (default `./backups` or OS temp; the
   container image sets it to `/var/lib/nodered-mcp/backups`).
-- Filename: `flows-<RFC3339>.json`.
+- Filename: `flows-<YYYYMMDD-HHMMSS.NNNNNNNNN>-<seq>.json` (UTC, plus a
+  per-process counter that keeps two snapshots in the same nanosecond
+  apart).
 - Snapshots cover only the flow structure returned by `GET /flows`, not
   Node-RED's separate encrypted credential store or its keys/configuration.
 - Enables structural recovery via `list_backups` / `restore_backup`, not

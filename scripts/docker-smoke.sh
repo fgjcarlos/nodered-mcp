@@ -146,7 +146,11 @@ if [[ "$status" != "200" ]] || grep -q '"isError":true' "$workdir/backups.json" 
   exit 1
 fi
 
-backup="$(grep -o 'flows-[0-9.-]*-[0-9]*\.json' "$workdir/backups.json" | head -1)"
+backup="$(grep -o 'flows-[0-9]\{8\}-[0-9]\{6\}\.[0-9]\{9\}-[0-9]\{6\}\.json' "$workdir/backups.json" | head -1 || true)"
+if [[ -z "$backup" ]]; then
+  printf 'expected a backup file name in %s\n' "$(cat "$workdir/backups.json")" >&2
+  exit 1
+fi
 
 # Recreating the container must not take the snapshot with it: the
 # backup lives in the mounted volume, not in the container's layer.
