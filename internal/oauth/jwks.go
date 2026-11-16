@@ -161,6 +161,13 @@ func FetchJWKS(jwksURI string) ([]*Key, error) {
 	return parseKeys(raw)
 }
 
+// defaultMissWindow is the minimum gap between two refreshes triggered by
+// an unknown kid. The kid comes from an unverified token header, so the
+// requester chooses it: without a window, every invalid token costs a
+// JWKS download. One minute still lets a rotation be picked up promptly,
+// because the first miss after the window opens refreshes again.
+const defaultMissWindow = time.Minute
+
 // Keyset is a TTL-bounded cache around a JWKS fetch. The verifier hits it
 // once per request, so the lock is held briefly and contention is not a
 // concern at the volumes MCP generates.
@@ -173,7 +180,17 @@ type Keyset struct {
 	mu        sync.RWMutex
 	keys      []*Key
 	fetchedAt time.Time
+	gen       uint64
 	ttl       time.Duration
+
+	// refreshMu serialises the refresh attempts: at most one download is
+	// in flight, and the callers that wait for it share its result.
+	refreshMu sync.Mutex
+	// lastMiss is when the last refresh triggered by an unknown kid was
+	// attempted. It bounds how often a miss may reach the IdP.
+	lastMiss time.Time
+	// missWindow is the minimum gap between two miss-triggered refreshes.
+	missWindow time.Duration
 
 	// now lets tests freeze time without dragging in a clock package.
 	now func() time.Time
@@ -181,15 +198,31 @@ type Keyset struct {
 
 // NewKeyset constructs a Keyset that re-fetches at most every ttl. A ttl
 // of zero disables caching: every KeyByID call refetches. Use that for
-// tests; in production 15 minutes matches typical IdP key-rotation windows.
+// tests; in production 15 minutes matches typical IdP key-rotation
+// windows.
+//
+// A refresh triggered by an unknown kid is bounded by the miss window
+// (one minute): the kid comes from an unverified token header, so the
+// requester chooses how often the IdP is contacted.
 func NewKeyset(jwksURI string, ttl time.Duration) *Keyset {
-	return &Keyset{jwksURI: jwksURI, ttl: ttl, now: time.Now}
+	return &Keyset{jwksURI: jwksURI, ttl: ttl, missWindow: defaultMissWindow, now: time.Now}
 }
 
-// refresh pulls a fresh JWKS and replaces the cache. Errors are returned
+// snapshot returns the cached keys, the generation they belong to and the
+// time they were fetched at. The generation changes on every successful
+// refresh, so a caller can tell whether somebody else refreshed while it
+// was not looking.
+func (k *Keyset) snapshot() ([]*Key, uint64, time.Time) {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	return k.keys, k.gen, k.fetchedAt
+}
+
+// fetch downloads the JWKS and replaces the cache. The caller holds
+// refreshMu, so only one download runs at a time. Errors are returned
 // without disturbing the existing cache, so a transient failure does not
 // lock everyone out for the TTL window.
-func (k *Keyset) refresh() error {
+func (k *Keyset) fetch() error {
 	keys, err := FetchJWKS(k.jwksURI)
 	if err != nil {
 		return err
@@ -197,50 +230,92 @@ func (k *Keyset) refresh() error {
 	k.mu.Lock()
 	k.keys = keys
 	k.fetchedAt = k.now()
+	k.gen++
 	k.mu.Unlock()
 	return nil
 }
 
+// refresh replaces the cache with a fresh download. The observed
+// generation is the one the caller read before it queued: if somebody
+// else refreshed in the meantime, that refresh is shared instead of
+// starting a second download.
+func (k *Keyset) refresh(observed uint64) error {
+	k.refreshMu.Lock()
+	defer k.refreshMu.Unlock()
+
+	k.mu.RLock()
+	gen := k.gen
+	k.mu.RUnlock()
+	if gen != observed {
+		return nil
+	}
+	return k.fetch()
+}
+
+// refreshOnMiss replaces the cache after an unknown kid, but at most once
+// per miss window. Inside the window the cached keys are good enough, and
+// the IdP does not get to be a download amplifier.
+func (k *Keyset) refreshOnMiss(observed uint64) error {
+	k.refreshMu.Lock()
+	defer k.refreshMu.Unlock()
+
+	k.mu.RLock()
+	gen := k.gen
+	k.mu.RUnlock()
+	if gen != observed {
+		// Somebody else already refreshed for this miss.
+		return nil
+	}
+	if k.now().Sub(k.lastMiss) < k.missWindow {
+		return nil
+	}
+	k.lastMiss = k.now()
+	return k.fetch()
+}
+
 // KeyByID returns the key with the matching kid, refetching if the cache
 // has expired (or if the requested kid is missing from a still-fresh
-// cache — the common case when an IdP has just rotated).
+// cache — the common case when an IdP has just rotated). The refresh
+// triggered by a missing kid is bounded by the miss window, and the
+// callers that miss at the same time share one download.
 func (k *Keyset) KeyByID(kid string) (*Key, error) {
 	if kid == "" {
 		return nil, errors.New("oauth: empty kid")
 	}
 
-	k.mu.RLock()
-	keys := k.keys
-	stale := k.now().Sub(k.fetchedAt) > k.ttl
-	k.mu.RUnlock()
-
-	if len(keys) == 0 || stale {
-		if err := k.refresh(); err != nil {
+	keys, gen, fetchedAt := k.snapshot()
+	if len(keys) == 0 || k.now().Sub(fetchedAt) > k.ttl {
+		if err := k.refresh(gen); err != nil {
 			return nil, err
 		}
-		k.mu.RLock()
-		keys = k.keys
-		k.mu.RUnlock()
+		keys, gen, _ = k.snapshot()
 	}
 
-	for _, key := range keys {
-		if key.ID == kid {
-			return key, nil
-		}
+	if key := findKey(keys, kid); key != nil {
+		return key, nil
 	}
-	// The kid isn't in a still-fresh cache. Treat that as a rotation
-	// signal: one more fetch, and give up if the key is still missing.
-	// # ponytail: one refetch per unknown kid; under sustained rotation
-	// every request could trigger this. Acceptable — rotations are rare.
-	if err := k.refresh(); err != nil {
+
+	// The kid isn't in the cache. Treat that as a rotation signal: one
+	// more fetch, and give up if the key is still missing. The kid comes
+	// from an unverified token header and the requester chooses it, so
+	// the refresh is bounded (one per window) and shared by the callers
+	// that miss at the same time.
+	if err := k.refreshOnMiss(gen); err != nil {
 		return nil, err
 	}
-	k.mu.RLock()
-	defer k.mu.RUnlock()
-	for _, key := range k.keys {
-		if key.ID == kid {
-			return key, nil
-		}
+	keys, _, _ = k.snapshot()
+	if key := findKey(keys, kid); key != nil {
+		return key, nil
 	}
 	return nil, fmt.Errorf("oauth: kid %q not found in JWKS", kid)
+}
+
+// findKey returns the key with the matching kid, or nil.
+func findKey(keys []*Key, kid string) *Key {
+	for _, key := range keys {
+		if key.ID == kid {
+			return key
+		}
+	}
+	return nil
 }
