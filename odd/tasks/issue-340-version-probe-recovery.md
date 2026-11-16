@@ -78,9 +78,35 @@ the client). They cannot be a separate commit, because without them
 the suite fails the moment the production code starts probing a
 fixture — the opt-out and the behaviour it guards are one unit.
 
-Strategy: single commit, single PR. The native review was assessed
-(`gentle_review assess`, base `origin/main`) as medium risk with
-`reviewDue: false` ("under_budget"), so no review lineage was started.
+Strategy: single commit, single PR.
+
+Native review: `gentle_review assess` (base `origin/main`) reported
+medium risk and `reviewDue: false` ("under_budget"), so the review was
+not due on the plan. The receipt-driven-development switch then
+required a review for this target, so a lineage was started anyway
+(`review-6c896f1973019f7a`, tier medium, three lenses: risk,
+resilience, reliability).
+
+The collect step is **blocked**: the facade's capture validator rejects
+the provider-issued collect bindings it just handed over, in every
+documented input form (inner object, serialized inner string, the
+STATUS wrapper object, the serialized wrapper, with and without
+`reviewerRunAcknowledged`, single slot and complete group). The
+diagnostic is always the same:
+
+    capture-binding-rejected / capture-group-rejected
+    "collectBinding is missing or stale for current STATUS"
+
+`mutation_performed: false` on every attempt: no authority was
+burned, no verdict was produced, and the lineage is still in
+`reviewing` with the same three slots re-offered by a fresh STATUS.
+The candidate itself is not implicated - the validator cannot match
+the binding, so no reviewer ever ran.
+
+This needs the maintainer or the host runtime: either the facade
+validates the binding it issues, or the review is run out of band and
+the outcome is recorded here. Until then this candidate has **no
+native review verdict**.
 
 ## Log
 - L1 (2026-10-19, user): "Resuelve la issue #340" — issue #340 "[P2][A13] detect local Node-RED versions and recover from failed probes" (audit-2026-10-19 · A13 · P2), labels bug/qa. Working tree clean at 4d78ed3.
