@@ -8,6 +8,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Decide the "at least one tab" rule of a deployment structurally, and
+  pin it with regressions (#343). The rule decodes the `type` of every
+  entry instead of searching the payload for the bytes `"type":"tab"`,
+  so the same document behaves the same whether it arrives compact,
+  indented or as objects, and a tab mentioned inside a property is not
+  a tab.
 - Redact the sensitive parts of the Node-RED URL from the HTTP errors
   (#342). `getRaw` recorded the whole joined URL in `APIError.Path`, so
   a 404 on `/flow/global` carried the base URL's query string — and
