@@ -47,10 +47,22 @@ function test(name, fn) {
 // with empty stdout when the field is absent, E404 with stderr when
 // the package itself is absent — the helper masks both into "empty
 // stdout" for retry purposes, see the helper's comment).
+//
+// A step of the form "err:<message>" makes the fake exit non-zero
+// with that message on stderr, the way a real `npm view` reports a
+// registry error (#344).
 function makeFakeNpm(schedule) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wait-for-registry-test-'));
   const script = path.join(dir, 'npm');
   const lines = schedule.map((step, i) => `step${i}='${step}'`).join('\n');
+  const failStep = (step, index) =>
+    step.startsWith('err:')
+      ? `  ${index}) printf '%s' "${step.slice(4)}" >&2; exit 1;;`
+      : `  ${index}) printf '%s' "$step${index - 1}";;`;
+  const last = schedule[schedule.length - 1];
+  const fallback = last.startsWith('err:')
+    ? `  *) printf '%s' "${last.slice(4)}" >&2; exit 1;;`
+    : `  *) printf '%s' "$step${schedule.length - 1}";;`;
   fs.writeFileSync(
     script,
     `#!/usr/bin/env bash
@@ -64,10 +76,8 @@ calls=$(( $(cat "$state_dir/calls" 2>/dev/null || echo 0) + 1 ))
 echo "$calls" > "$state_dir/calls"
 ${lines}
 case "$calls" in
-${schedule
-  .map((_, i) => `  ${i + 1}) printf '%s' "$step${i}";;`)
-  .join('\n')}
-  *) printf '%s' "$step${schedule.length - 1}";;
+${schedule.map((step, i) => failStep(step, i + 1)).join('\n')}
+${fallback}
 esac
 `,
   );
@@ -123,6 +133,58 @@ test('fails closed after the retry budget with no value', () => {
   assert.equal(r.status, 1, `expected exit 1, got ${r.status}\nstderr: ${r.stderr}`);
   assert.match(r.stderr, /gave up after 3 attempts/);
   assert.equal(r.stdout, '');
+});
+
+// #344: after `npm dist-tag add`, the registry can answer with the
+// previous version of the tag. That answer is non-empty, so the
+// "first non-empty value wins" rule accepted it and the caller's own
+// comparison failed without a retry. `--expect` moves the comparison
+// inside the loop: a stale value is retried like an empty one.
+test('retries a stale value until the expected value appears', () => {
+  const { dir, script } = makeFakeNpm(['0.7.2', '0.7.3']);
+  const r = runHelper(
+    ['--expect', '0.7.3', '--attempts', '5', '--base-sleep', '1', '--', script, 'dist-tags.latest'],
+    fakeEnv(script),
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+  assert.equal(r.status, 0, `expected exit 0, got ${r.status}\nstderr: ${r.stderr}`);
+  assert.equal(r.stdout, '0.7.3');
+  assert.match(r.stderr, /stale value '0\.7\.2'/);
+});
+
+test('fails closed when the value never reaches the expectation', () => {
+  const { dir, script } = makeFakeNpm(['0.7.2']);
+  const r = runHelper(
+    ['--expect', '0.7.3', '--attempts', '3', '--base-sleep', '1', '--', script, 'dist-tags.latest'],
+    fakeEnv(script),
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+  assert.equal(r.status, 1, `expected exit 1, got ${r.status}\nstderr: ${r.stderr}`);
+  assert.match(r.stderr, /gave up after 3 attempts/);
+  assert.match(r.stderr, /expected '0\.7\.3', last value '0\.7\.2'/);
+  assert.equal(r.stdout, '');
+});
+
+test('an empty read still reaches the expected value', () => {
+  const { dir, script } = makeFakeNpm(['', '', '0.7.3']);
+  const r = runHelper(
+    ['--expect', '0.7.3', '--attempts', '5', '--base-sleep', '1', '--', script, 'dist-tags.latest'],
+    fakeEnv(script),
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+  assert.equal(r.status, 0, `expected exit 0, got ${r.status}\nstderr: ${r.stderr}`);
+  assert.equal(r.stdout, '0.7.3');
+});
+
+test('reports the real command error instead of swallowing it', () => {
+  const { dir, script } = makeFakeNpm(['err:npm ERR! code E404']);
+  const r = runHelper(
+    ['--attempts', '2', '--base-sleep', '1', '--', script, 'dist-tags.latest'],
+    fakeEnv(script),
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+  assert.equal(r.status, 1, `expected exit 1, got ${r.status}\nstderr: ${r.stderr}`);
+  assert.match(r.stderr, /npm ERR! code E404/);
 });
 
 test('rejects unknown flags with exit 2', () => {

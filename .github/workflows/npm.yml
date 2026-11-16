@@ -421,6 +421,12 @@ jobs:
         # `latest` value before the promotion had propagated; the
         # helper bounds the retry so the recovery rerun is the
         # exception, not the rule.
+        #
+        # A stale `latest` is non-empty, so the helper would accept
+        # it as "the first non-empty value" and the comparison below
+        # would fail without a retry (#344). `--expect` moves the
+        # comparison inside the helper's loop: the read is retried
+        # until the promoted version is the one the registry shows.
         env:
           VERSION: ${{ env.TAG }}
         run: |
@@ -434,7 +440,7 @@ jobs:
             @fgjcarlos/nodered-mcp-darwin-x64 \
             @fgjcarlos/nodered-mcp-darwin-arm64 \
             @fgjcarlos/nodered-mcp; do
-            latest=$(scripts/wait-for-registry.sh -- npm view "$scope" dist-tags.latest)
+            latest=$(scripts/wait-for-registry.sh --expect "$version" -- npm view "$scope" dist-tags.latest)
             if [ "$latest" != "$version" ]; then
               echo "${scope} latest tag is $latest, expected $version"
               exit 1

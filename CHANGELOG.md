@@ -8,6 +8,15 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Keep reading the npm registry until it shows the expected value
+  (#344). `scripts/wait-for-registry.sh` accepted the first non-empty
+  stdout, but right after `npm dist-tag add` the registry can answer
+  with the version the tag pointed at before the promotion — a value
+  that is non-empty, so the helper reported success and the release
+  workflow's own comparison failed without a retry. The helper now
+  takes `--expect VALUE` and retries a stale value like an empty one,
+  and it reports the command's real error instead of discarding its
+  stderr.
 - Decide the "at least one tab" rule of a deployment structurally, and
   pin it with regressions (#343). The rule decodes the `type` of every
   entry instead of searching the payload for the bytes `"type":"tab"`,
