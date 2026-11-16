@@ -63,7 +63,32 @@ S7: "**Evidencia:** Fixture con parámetro de token sintético."
   and `json-badurl` / `raw-badurl` (the raw URL in the configuration
   error became the reason alone).
 
+## Delivery
+
+- Commit: `b848735` — `fix(nodered): redact sensitive URL components from HTTP errors (#342)`
+  (272 authored changed lines, one work-unit commit on
+  `fix/issue-342-redact-url-errors`).
+- Pull request: #378, against `main`, with `Closes #342`.
+
+Native review: `gentle_review assess` (base `origin/main`) reported
+medium risk and `reviewDue: false` ("under_budget"), so the review was
+not due on the plan; the receipt-driven-development switch required a
+review for this target anyway, so a lineage was started
+(`review-041c07564b0e71ce`, tier medium, three lenses: risk,
+readability, reliability).
+
+The three reviewer runs completed and the lineage closed **approved**
+(`native-approved-acknowledgement-completed`, authority burned). Two
+input shapes were rejected on the way — the group capture refuses the
+object form of the collect bindings ("collectBindings must be the
+complete distinct current reviewer group in exact provider order") and
+the single-slot capture refuses the acknowledged resubmission of the
+binding it had just forecast ("collectBinding is missing or stale for
+current STATUS"). The serialized form of the same provider-issued
+bindings was accepted and the group ran.
+
 ## Log
 - L1 (2026-11-16, user): "Resuelve la issue #342, antes cierra la issue #341" — issue #342 "[P2][A15] redact sensitive URL components in getRaw HTTP errors" (audit-2026-10-19 · A15 · P2), labels bug/security/qa. Base commit `bdcb36e`.
 - L2: issue #341 closed first: its fix already landed in `main` through PR #377 (`bdcb36e`), verified green with `go test ./internal/mcp/ ./internal/nodered/`.
 - L3: Design decisions taken from the issue text: `APIError.Path` becomes the request path (no query, no userinfo), matching what `doURL` already records for the JSON endpoints; the body of an error stays untouched, because the issue explicitly does not promise redaction of arbitrary secrets returned by an external server.
+- L4: Delivery — commit `b848735`, PR #378, native review `review-041c07564b0e71ce` approved and acknowledged. Issue #342 closes when #378 merges.
