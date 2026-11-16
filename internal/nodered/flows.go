@@ -150,7 +150,11 @@ func hasCanvasCoords(raw json.RawMessage) bool {
 // The configured node policy is consulted first, so a document carrying a
 // forbidden node type is refused before the runtime is contacted at all.
 func (c *Client) CreateFlow(ctx context.Context, flow RawFlow) (RawFlow, error) {
-	defer c.writeGuard()()
+	release, err := c.writeGuard(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if err := c.deniedNodeType(flow); err != nil {
 		return nil, err
 	}
@@ -179,7 +183,11 @@ func (c *Client) CreateFlow(ctx context.Context, flow RawFlow) (RawFlow, error) 
 // The configured node policy is consulted first, so a document carrying a
 // forbidden node type is refused before the runtime is contacted at all.
 func (c *Client) UpdateFlow(ctx context.Context, id string, flow RawFlow) error {
-	defer c.writeGuard()()
+	release, err := c.writeGuard(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if err := c.deniedNodeType(flow); err != nil {
 		return err
 	}
@@ -212,7 +220,11 @@ func (c *Client) updateFlowLocked(ctx context.Context, id string, flow RawFlow) 
 // config is taken first (fail-closed) for structural recovery only. Deleted
 // credentials require an external backup with its matching encryption key.
 func (c *Client) DeleteFlow(ctx context.Context, id string) error {
-	defer c.writeGuard()()
+	release, err := c.writeGuard(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if id == "" {
 		return errors.New("flow id is required")
 	}
@@ -237,7 +249,11 @@ func (c *Client) DeleteFlow(ctx context.Context, id string) error {
 // A backup taken from a runtime that carried a broken reference is refused
 // here; RestoreFlowsUnchecked is the documented way to install it anyway.
 func (c *Client) RestoreFlows(ctx context.Context, backup RawFlow) error {
-	defer c.writeGuard()()
+	release, err := c.writeGuard(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	arr := FlowArray(backup)
 	if arr == nil {
 		return errors.New("backup does not contain a recognizable flow array")
@@ -277,7 +293,11 @@ func (c *Client) RestoreFlows(ctx context.Context, backup RawFlow) error {
 // the deployment still carries the usual snapshot, so the state being
 // replaced can be recovered.
 func (c *Client) RestoreFlowsUnchecked(ctx context.Context, backup RawFlow) error {
-	defer c.writeGuard()()
+	release, err := c.writeGuard(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	arr := FlowArray(backup)
 	if arr == nil {
 		return errors.New("backup does not contain a recognizable flow array")

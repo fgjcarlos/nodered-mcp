@@ -12,8 +12,9 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/fgjcarlos/nodered-mcp/internal/lock"
 )
 
 // Client talks to a Node-RED instance via its admin HTTP API.
@@ -42,7 +43,11 @@ type Client struct {
 	// each handler read the flow, mutated its in-memory copy, and wrote it
 	// back; the last writer won and earlier mutations were silently lost.
 	// ponytail: global lock, per-flow locks if throughput matters.
-	writeMu sync.Mutex
+	//
+	// The wait is cancelable (issue #347): a caller whose context is
+	// canceled or whose deadline passes gives up instead of staying parked
+	// on the lock until the current holder finishes.
+	writeMu lock.CtxMutex
 
 	// nrVersion caches the Node-RED version probe (see version.go).
 	// The probe runs at most once per Client while it succeeds, and
@@ -201,16 +206,22 @@ func (e *APIError) Error() string {
 // deadline of its own. Long operations (npm installs) pass a longer deadline.
 const defaultTimeout = 30 * time.Second
 
-// writeGuard returns a release function the caller defers, so every
-// mutating endpoint takes writeMu under the same pattern and the lock is
-// always released on every path (error or success).
+// writeGuard takes writeMu and returns a release function the caller defers,
+// so every mutating endpoint takes the lock under the same pattern and the
+// lock is always released on every path (error or success).
+//
+// The wait is bound to ctx (issue #347): when the caller's context is done
+// the acquisition is abandoned and the refusal says that no action was
+// started, so a canceled write does not sit in the queue past its deadline.
 //
 // Reads (GET endpoints, /context, /settings, etc.) deliberately do NOT
 // take this lock — concurrency between a read and a write is fine and
 // protects the path from a deadlock against the runtime's own reads.
-func (c *Client) writeGuard() func() {
-	c.writeMu.Lock()
-	return c.writeMu.Unlock
+func (c *Client) writeGuard(ctx context.Context) (func(), error) {
+	if err := c.writeMu.LockContext(ctx); err != nil {
+		return nil, fmt.Errorf("waiting for write lock: %w; no action was started", err)
+	}
+	return c.writeMu.Unlock, nil
 }
 
 // do performs an HTTP request and decodes the JSON response into out (if

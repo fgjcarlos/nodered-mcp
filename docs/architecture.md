@@ -261,6 +261,9 @@ Other registered write tools use the same mutex, with the existing client write
 lock acquired second. `restore_backup` retains its handler-level locking and
 cache invalidation. External clients do not share these process-local locks.
 Edited or partial helpers are preserved, not treated as trusted executable code.
+Both locks wait with the caller's context: a write whose context is canceled or
+whose deadline passes gives up instead of staying queued, and it gives up
+before it snapshots anything or contacts the runtime (issue #347).
 See [Context helper recovery](tools.md#context-helper-recovery) for operator limits.
 
 ## Safety: backup before every write (v0.1 guardrail)
