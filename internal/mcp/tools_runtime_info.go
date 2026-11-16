@@ -94,17 +94,18 @@ func (s *Server) handleGetRuntimeInfo(ctx context.Context, _ mcp.CallToolRequest
 	return mcp.NewToolResultText("```json\n" + prettyJSON(mustMarshal(info)) + "\n```"), nil
 }
 
-// runtimeProbe runs the four I/O probes the matrix needs and
-// packages them into a RuntimeProbe. Each probe uses its own
-// deadline so a slow Node-RED cannot stall the others.
+// runtimeProbe runs the I/O probes the matrix needs and packages them
+// into a RuntimeProbe, together with what the /comms tails observed.
+// Each probe uses its own deadline so a slow Node-RED cannot stall the
+// others.
 func (s *Server) runtimeProbe(ctx context.Context) RuntimeProbe {
 	p := RuntimeProbe{DebugStreamEnabled: s.debugStream}
 
-	// 0. What did the /comms tails actually do? The opt-in above is
+	// What did the /comms tails actually do? The opt-in above is
 	// configuration; this is the observation the matrix classifies
 	// from (issue #341).
-	p.DebugStream = s.debugStreamState()
-	p.StatusStream = s.statusStreamState()
+	p.DebugStream = s.debugStreamObservation()
+	p.StatusStream = s.statusStreamObservation()
 
 	// 1. NR version. Use the cached probe — that already handles
 	// its own deadline via the default GET timeout, and we do not

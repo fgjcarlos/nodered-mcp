@@ -380,12 +380,11 @@ explains the non-`ok` ones.
 tool works, so a client only has to read the map when something is
 degraded.
 
-`unknown` is a real state, not a euphemism: it means the capability is
-genuinely undetermined. For a version-gated tool that means the Node-RED
-version could not be detected; for a `/comms` tool it means the tail
-has not reported a connection yet. It carries a reason, and a remedy
-only where one exists — the version case deliberately has **no** remedy,
-because there is no known fix to recommend.
+`unknown` is a real state, not a euphemism: it means the Node-RED version
+could not be detected, so the capability is genuinely undetermined. It
+carries a reason and deliberately **no** remedy, because there is no
+known fix to recommend. A `/comms` tool that has not been observed yet
+reports `stream_unknown` instead, so each state keeps one meaning.
 
 Every reason is derived from a probe the handler already ran. Nothing
 here is inferred, and no mutating endpoint is touched to produce it. The
@@ -405,13 +404,17 @@ the WebSocket (availability). An enabled flag on its own is never
 reported as `ok`:
 
 - `stream_disabled` — the opt-in is off: `MCP_DEBUG_STREAM` was not set.
-- `ok` — the tail is connected right now.
-- `stream_disconnected` — the tail dialled and failed; the reason
-  carries the last error.
+- `ok` — the tail's last observed connection was successful.
+- `stream_disconnected` — the tail dialled and failed, or a connection
+  it had was lost; the reason carries the last error.
 - `stream_unavailable` — no tail exists: the `/comms` endpoint could
   not be derived from the configured Node-RED URL.
-- `unknown` — the tail has not reported a connection yet (it may still
-  be connecting).
+- `stream_unknown` — the tail has not reported a connection yet: it is
+  still dialling, or the dial is hanging against an unreachable host.
 
 Each of the two tools is classified from its own tail, so one can be
 `ok` while the other is `stream_disconnected`.
+
+`ok` is the last thing the MCP observed, not a liveness check: a
+network partition can leave a half-open socket that still looks
+connected.

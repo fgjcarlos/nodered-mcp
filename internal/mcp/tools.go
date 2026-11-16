@@ -853,7 +853,7 @@ func (s *Server) registerTools() {
 				"matrix classifying each registered tool as ok, "+
 				"version_too_low, endpoint_not_mounted, setting_disabled, "+
 				"stream_disabled, stream_disconnected, stream_unavailable, "+
-				"or unknown.\n\n"+
+				"stream_unknown, or unknown.\n\n"+
 				"The two /comms tools (get_node_status, get_debug_messages) "+
 				"are classified from the MCP_DEBUG_STREAM opt-in plus what "+
 				"the MCP observed of the WebSocket: an enabled flag alone is "+

@@ -187,7 +187,11 @@ type StatusTail struct {
 	mu        sync.Mutex
 	entries   map[string]StatusEntry
 	connected bool
-	lastErr   string
+	// everConnected records that a session was established at least
+	// once, so a silent drop is not read as "never connected"
+	// (issue #341).
+	everConnected bool
+	lastErr       string
 }
 
 // NewStatusTail builds a tail for the instance the client is
@@ -446,6 +450,9 @@ func (t *StatusTail) setState(connected bool, err error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.connected = connected
+	if connected {
+		t.everConnected = true
+	}
 	if err != nil {
 		t.lastErr = err.Error()
 	} else if connected {
@@ -466,13 +473,14 @@ func (t *StatusTail) Lookup(nodeID string) (StatusEntry, bool) {
 	return e, ok
 }
 
-// State reports the tail's observed connection state and the last error,
-// without copying the cache. The capability matrix needs only this;
-// Snapshot would copy every cached entry (issue #341).
-func (t *StatusTail) State() (connected bool, lastError string) {
+// State reports the tail's observed connection state, whether it ever
+// connected, and the last error, without copying the cache. The
+// capability matrix needs only this; Snapshot would copy every cached
+// entry (issue #341).
+func (t *StatusTail) State() (connected, everConnected bool, lastError string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.connected, t.lastErr
+	return t.connected, t.everConnected, t.lastErr
 }
 
 // Snapshot returns the connection report plus a slice of entries

@@ -53,7 +53,7 @@ func TestCapabilityMatrix_StreamToolsFollowObservation(t *testing.T) {
 			enabled: true,
 			debug:   StreamObservation{State: StreamStateUnknown},
 			status:  StreamObservation{State: StreamStateUnknown},
-			want:    CapUnavailableUnknown,
+			want:    CapStreamUnknown,
 		},
 		{
 			name:    "no tail at all is unavailable",
@@ -127,7 +127,7 @@ func TestCapabilityGuidance_StreamStatesAreCoherent(t *testing.T) {
 				StatusStream:       StreamObservation{State: StreamStateDisconnected, LastError: "connection refused"},
 			},
 			wantReason: []string{"connection refused"},
-			wantRemedy: []string{"MCP_LOG_LEVEL=debug"},
+			wantRemedy: []string{"get_runtime_info"},
 		},
 		{
 			name: "unavailable names the configured URL",
@@ -142,7 +142,7 @@ func TestCapabilityGuidance_StreamStatesAreCoherent(t *testing.T) {
 		},
 		{
 			name: "unknown does not claim a fact about availability",
-			cap:  CapUnavailableUnknown,
+			cap:  CapStreamUnknown,
 			probe: RuntimeProbe{
 				DebugStreamEnabled: true,
 				DebugStream:        StreamObservation{State: StreamStateUnknown},
@@ -190,7 +190,7 @@ func TestCapabilityGuidance_StreamUnknownIsNotAVerdict(t *testing.T) {
 		StatusStream:       StreamObservation{State: StreamStateUnknown},
 	}
 	for _, tool := range []string{"get_debug_messages", "get_node_status"} {
-		r, _ := capabilityGuidance(tool, CapUnavailableUnknown, p)
+		r, _ := capabilityGuidance(tool, CapStreamUnknown, p)
 		lower := strings.ToLower(r)
 		for _, claim := range []string{"is available", "not available", "unavailable", "is ok"} {
 			if strings.Contains(lower, claim) {
@@ -257,7 +257,7 @@ func TestRuntimeProbe_ConnectedStreamIsAvailable(t *testing.T) {
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		if connected, _ := tail.State(); connected {
+		if connected, _, _ := tail.State(); connected {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -274,5 +274,87 @@ func TestRuntimeProbe_ConnectedStreamIsAvailable(t *testing.T) {
 	m := noderedCapabilityMatrix(p)
 	if got := m["get_node_status"]; got != CapOK {
 		t.Errorf("get_node_status with a connected stream = %q, want ok", got)
+	}
+}
+
+// Each /comms tool is classified from its OWN tail: a connected debug
+// tail and a failed status tail must not be confused. Without this,
+// swapping the two observations in the matrix, in the probe or in the
+// guidance would pass every other test here.
+func TestCapabilityMatrix_EachToolUsesItsOwnTail(t *testing.T) {
+	p := RuntimeProbe{
+		NodeRedVersion:      v(5, 0, 1),
+		RuntimeStateEnabled: true,
+		DebugStreamEnabled:  true,
+		DebugStream:         StreamObservation{State: StreamStateConnected},
+		StatusStream:        StreamObservation{State: StreamStateDisconnected, LastError: "status tail refused the token"},
+	}
+	m := noderedCapabilityMatrix(p)
+	if got := m["get_debug_messages"]; got != CapOK {
+		t.Errorf("get_debug_messages with a connected debug tail = %q, want ok", got)
+	}
+	if got := m["get_node_status"]; got != CapStreamDisconnected {
+		t.Errorf("get_node_status with a failed status tail = %q, want stream_disconnected", got)
+	}
+
+	// The error belongs to the tool whose tail reported it.
+	debugReason, _ := capabilityGuidance("get_debug_messages", m["get_debug_messages"], p)
+	statusReason, _ := capabilityGuidance("get_node_status", m["get_node_status"], p)
+	if strings.Contains(debugReason, "status tail refused the token") {
+		t.Errorf("the debug tool must not carry the status tail's error: %q", debugReason)
+	}
+	if !strings.Contains(statusReason, "status tail refused the token") {
+		t.Errorf("the status tool must carry its own tail's error: %q", statusReason)
+	}
+}
+
+// observeTail maps three different situations onto the matrix's
+// vocabulary; only the first one means "working".
+func TestObserveTail_MapsEverySituation(t *testing.T) {
+	cases := []struct {
+		name          string
+		connected     bool
+		everConnected bool
+		lastError     string
+		want          StreamState
+	}{
+		{name: "connected", connected: true, want: StreamStateConnected},
+		{name: "never connected, no error", want: StreamStateUnknown},
+		{name: "dial failed", lastError: "connection refused", want: StreamStateDisconnected},
+		{name: "was connected and dropped silently", everConnected: true, want: StreamStateDisconnected},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := observeTail(tc.connected, tc.everConnected, tc.lastError)
+			if got.State != tc.want {
+				t.Errorf("observeTail = %q, want %q", got.State, tc.want)
+			}
+			if tc.lastError != "" && got.LastError != tc.lastError {
+				t.Errorf("observeTail lost the error: %q", got.LastError)
+			}
+		})
+	}
+}
+
+// A tail that was built but never dialled has no observation: the
+// matrix must say "not observed yet", not "working".
+func TestRuntimeProbe_BuiltButNeverRunTailIsUnknown(t *testing.T) {
+	c, err := nodered.NewClient(nodered.Options{SkipVersionProbe: true, BaseURL: "http://127.0.0.1:1"})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	tail, err := nodered.NewStatusTail(c)
+	if err != nil {
+		t.Fatalf("NewStatusTail: %v", err)
+	}
+	s := &Server{nrClient: c, debugStream: true, statusTail: tail}
+
+	p := s.runtimeProbe(context.Background())
+	if p.StatusStream.State != StreamStateUnknown {
+		t.Errorf("status stream state = %q, want unknown (the tail never dialled)", p.StatusStream.State)
+	}
+	m := noderedCapabilityMatrix(p)
+	if got := m["get_node_status"]; got != CapStreamUnknown {
+		t.Errorf("get_node_status with a never-run tail = %q, want stream_unknown", got)
 	}
 }

@@ -554,24 +554,25 @@ func (s *Server) startDebugTail(ctx context.Context) {
 	}
 }
 
-// debugStreamState reports what the MCP observed of the debug tail.
-// A nil tail means no /comms endpoint could be derived from the
+// debugStreamObservation reports what the MCP observed of the debug
+// tail. A nil tail means no /comms endpoint could be derived from the
 // configured Node-RED URL (issue #341).
-func (s *Server) debugStreamState() StreamObservation {
+func (s *Server) debugStreamObservation() StreamObservation {
 	if s.debugTail == nil {
 		return StreamObservation{State: StreamStateUnavailable}
 	}
-	connected, lastErr := s.debugTail.State()
-	return streamObservation(connected, lastErr)
+	connected, everConnected, lastErr := s.debugTail.State()
+	return observeTail(connected, everConnected, lastErr)
 }
 
-// statusStreamState mirrors debugStreamState for the status tail.
-func (s *Server) statusStreamState() StreamObservation {
+// statusStreamObservation mirrors debugStreamObservation for the status
+// tail.
+func (s *Server) statusStreamObservation() StreamObservation {
 	if s.statusTail == nil {
 		return StreamObservation{State: StreamStateUnavailable}
 	}
-	connected, lastErr := s.statusTail.State()
-	return streamObservation(connected, lastErr)
+	connected, everConnected, lastErr := s.statusTail.State()
+	return observeTail(connected, everConnected, lastErr)
 }
 
 // Run starts the server over stdio and blocks until the client
