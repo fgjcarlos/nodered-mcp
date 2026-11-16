@@ -244,6 +244,14 @@ func (k *Keyset) fetch() error {
 	return err
 }
 
+// cacheUsable reports whether the cached keys can still be served: they
+// exist and the TTL has not passed.
+func (k *Keyset) cacheUsable() bool {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	return len(k.keys) > 0 && k.now().Sub(k.fetchedAt) <= k.ttl
+}
+
 // refresh replaces the cache with a fresh download. The observed attempt
 // count is the one the caller read before it queued: if somebody else
 // attempted a refresh in the meantime, that attempt is shared — its
@@ -259,6 +267,12 @@ func (k *Keyset) refresh(observed uint64) error {
 	lastErr := k.lastErr
 	k.mu.RUnlock()
 	if attempt != observed {
+		// Somebody attempted a refresh while we were queued. If the
+		// cached keys are usable, they answer the request: their owner
+		// may have succeeded before the attempt that failed afterwards.
+		if k.cacheUsable() {
+			return nil
+		}
 		return lastErr
 	}
 	return k.fetch()
@@ -277,6 +291,9 @@ func (k *Keyset) refreshOnMiss(observed uint64) error {
 	lastErr := k.lastErr
 	k.mu.RUnlock()
 	if attempt != observed {
+		if k.cacheUsable() {
+			return nil
+		}
 		return lastErr
 	}
 	if k.now().Sub(k.lastMiss) < k.missWindow {

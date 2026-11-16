@@ -164,6 +164,47 @@ func TestKeyByIDSharesFailedRefreshWithWaiters(t *testing.T) {
 	}
 }
 
+// The callers that keep arriving during an outage must not queue behind
+// each other either: each one waits for one attempt, not for all of them.
+func TestKeyByIDOutageDoesNotQueueArrivingCallers(t *testing.T) {
+	const delay = 200 * time.Millisecond
+	var downloads atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		downloads.Add(1)
+		time.Sleep(delay)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+
+	ks := NewKeyset(srv.URL, 15*time.Minute)
+	const callers = 20
+	var wg sync.WaitGroup
+	var slowest atomic.Int64
+	for i := 0; i < callers; i++ {
+		time.Sleep(delay / 8)
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			started := time.Now()
+			if _, err := ks.KeyByID(fmt.Sprintf("u%d", i)); err == nil {
+				t.Error("want an error while the IdP is down")
+			}
+			if waited := int64(time.Since(started)); waited > slowest.Load() {
+				slowest.Store(waited)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	if waited := time.Duration(slowest.Load()); waited > 3*delay {
+		t.Errorf("slowest caller waited %v against a failing IdP, want under %v", waited, 3*delay)
+	}
+	// One attempt per arrival that is not covered by another one.
+	if got := downloads.Load(); got > callers/8+2 {
+		t.Errorf("%d arriving callers against a failing IdP caused %d downloads, want at most %d", callers, got, callers/8+2)
+	}
+}
+
 // A failed miss refresh consumes the window too: a failing IdP must not
 // turn the miss path into a download per request, and the cached keys must
 // survive the failure.
