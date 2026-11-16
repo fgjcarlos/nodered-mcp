@@ -47,5 +47,14 @@ func (m *CtxMutex) LockContext(ctx context.Context) error {
 // callers that have no context to give up on.
 func (m *CtxMutex) Lock() { _ = m.LockContext(context.Background()) }
 
-// Unlock releases the mutex.
-func (m *CtxMutex) Unlock() { m.init(); m.token <- struct{}{} }
+// Unlock releases the mutex. Unlocking a mutex that is not held is a
+// programming error and panics, the way sync.Mutex does: a silent no-op
+// would let two writers hold the lock at once.
+func (m *CtxMutex) Unlock() {
+	m.init()
+	select {
+	case m.token <- struct{}{}:
+	default:
+		panic("lock: unlock of unlocked CtxMutex")
+	}
+}

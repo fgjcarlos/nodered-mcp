@@ -219,7 +219,7 @@ const defaultTimeout = 30 * time.Second
 // protects the path from a deadlock against the runtime's own reads.
 func (c *Client) writeGuard(ctx context.Context) (func(), error) {
 	if err := c.writeMu.LockContext(ctx); err != nil {
-		return nil, fmt.Errorf("waiting for write lock: %w; no action was started", err)
+		return nil, &WriteLockRefusedError{Cause: err}
 	}
 	return c.writeMu.Unlock, nil
 }

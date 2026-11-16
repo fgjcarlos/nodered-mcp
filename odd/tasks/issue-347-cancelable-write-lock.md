@@ -25,7 +25,7 @@ T1 | S1-S2 | inline (RED test at the client layer) | done | `internal/nodered/wr
 T2 | S2-S3 | inline (cancelable acquisition) | done | `internal/lock.CtxMutex` (shared), `internal/mcp.helperMutex` is now an alias of it, `Client.writeGuard(ctx)` returns `(release, error)` and all 14 mutating entry points acquire with the caller's context.
 T3 | S3 | inline (already-fixed half verified) | done | `ctxHelperMu` and the restore path already use `LockContext(ctx)`; unchanged, and `internal/mcp/setcontext_review_test.go` still pins the helper-lock refusal.
 T4 | S4 | inline (docs + checks) | done | docs/tools.md names both refusals; docs/architecture.md states that both waits honor the caller's context. Full suite, vet, race, coverage ratchet (86.10% >= 81.20%), complexity gate, gofmt and `git diff --check` all pass.
-T5 | S4 | independent verification (concurrency risk) | pending | `gentle-ai-verify` on the diff; risk item 4 (concurrency).
+T5 | S4 | independent verification (concurrency risk) | done | `gentle-ai-verify` on the diff (task mwjkqukd-2-2afj): no blocker, three findings (F1 indeterminate-outcome classification, F2 error precedence, F3 double unlock); F1 and F3 corrected, F2 accepted and documented.
 
 ## Log
 
@@ -48,3 +48,13 @@ L8. GREEN: focused regressions exit 0; `go test ./...` exit 0; `go test -race ./
 L9. Complexity gate: the cancelable acquisition adds one branch to every mutating method, so `setFlows` (8 -> 9) and `RestoreFlows` (6 -> 7) — the two named in scripts/complexity-baseline.txt — moved by one. The bump is a deliberate, documented entry in that file: no floor is lowered and the threshold of 15 is untouched. The alternative (refactoring unrelated validation to keep a number down) was rejected as out of scope.
 
 L10. Known limits: the locks are process-local, so two MCP servers in one process that share a client are serialized by the client lock but not by the helper lock; external processes are not synchronized at all. The MCP half of the finding was already fixed on main, so this change adds the client half only; it does not make the helper lock cover anything it did not cover before.
+
+L11. Independent verification (`gentle-ai-verify`, task mwjkqukd-2-2afj, risk item 4) found no blocker: every mutating entry point takes the lock exactly once, a refused acquisition reaches neither the runtime nor the backup folder, the token accounting survives 64 goroutines with random cancellations under `-race`, and there is no lock-order inversion between `ctxHelperMu` and the client write lock. Three findings came out of it:
+
+- F1 (follow-up, corrected): through MCP, a refused client-lock wait was reported as "outcome is indeterminate ... The action may already have executed", because `isTransportError` treats any wrapped context error as a transport failure. That contradicts the refusal the docs promise.
+- F2 (observation, accepted): with a canceled context the lock refusal now precedes the argument validation error (`DeleteFlow(ctx, "")`, `InstallNode(ctx, "", "")`, `SetFlowsState(ctx, "bogus")`). The MCP handlers validate their arguments before they call the client, so no tool sees it. A canceled request is refused before it is validated; that is the truthful order.
+- F3 (observation, corrected): `Unlock` on a lock nobody holds used to block; `sync.Mutex` panics. The client lock used to be a `sync.Mutex`, so `Unlock` now panics instead of hanging.
+
+L12. Corrections: `nodered.WriteLockRefusedError` (typed, keeps `Unwrap`) is what `writeGuard` returns; `isTransportError` recognizes it before the context errors, so the refusal is reported as a refusal and not as an indeterminate outcome; `internal/lock`'s `Unlock` panics on a double unlock. The new regression `internal/mcp/write_lock_refusal_test.go` holds the client write lock with a direct client call and checks that the tool reports the refusal. RED without the classification fix ("outcome is indeterminate: calling Node-RED: waiting for write lock: ..."), GREEN with it.
+
+L13. Delivery shape: the implementation slice is 509 authored changed lines (452 added, 57 removed), over the ~400-line advisory slice; 228 of those lines are the two regressions. The branch carries one PR: the behavior (cancelable write waits) and the corrections from its verification are one reviewable unit, and the second commit is small and confined to the findings above.
