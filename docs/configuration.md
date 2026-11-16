@@ -13,6 +13,25 @@ flag; the rest are env-only. Precedence: **flag > env > default.**
 | `NODERED_PASSWORD` | *(empty)* | — | Basic auth (alternative) |
 | `NODERED_INSECURE` | `false` | — | Skip TLS verify |
 
+### Tokens in the URL
+
+`NODERED_URL` may carry a token in its query string
+(`http://node-red:1880?token=…`). The MCP never echoes the query
+string or the userinfo of that URL: a log line names the redacted URL,
+and an HTTP error names the request path only —
+
+```
+nodered GET /flow/global: HTTP 404: Cannot GET /flow/global
+```
+
+A configuration error (an unparsable base URL, a URL that could not
+be joined, a request that could not be built) names the reason it
+failed on, not the URL it failed on.
+
+The **body** of an error is the one Node-RED returned and is not
+redacted: a runtime that echoes a secret in its response body puts it
+in the error.
+
 ## Backups
 
 | Variable | Default | Flag | Description |

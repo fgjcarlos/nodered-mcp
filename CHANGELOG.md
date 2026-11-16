@@ -8,6 +8,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Redact the sensitive parts of the Node-RED URL from the HTTP errors
+  (#342). `getRaw` recorded the whole joined URL in `APIError.Path`, so
+  a 404 on `/flow/global` carried the base URL's query string — and
+  with it any token the operator had embedded there — into the error,
+  the logs and the MCP client. The error now names the request path
+  only (`nodered GET /flow/global: HTTP 404`), like the JSON endpoints
+  already did, and a configuration error (an unparsable base URL, a
+  URL that could not be joined, a request that could not be built)
+  names the reason it failed on instead of the URL it failed on. The
+  body of an error is still the one Node-RED returned.
 - Report the debug and node-status stream capabilities from what the
   MCP observed, instead of a constant (#341). `get_node_status` and
   `get_debug_messages` were classified as `stream_disabled` no matter
