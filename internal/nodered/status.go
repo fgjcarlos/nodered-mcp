@@ -466,6 +466,15 @@ func (t *StatusTail) Lookup(nodeID string) (StatusEntry, bool) {
 	return e, ok
 }
 
+// State reports the tail's observed connection state and the last error,
+// without copying the cache. The capability matrix needs only this;
+// Snapshot would copy every cached entry (issue #341).
+func (t *StatusTail) State() (connected bool, lastError string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.connected, t.lastErr
+}
+
 // Snapshot returns the connection report plus a slice of entries
 // (the whole cache when nodeIDs is empty, or only the requested
 // ids when nodeIDs is non-empty). The Tracked counter is always

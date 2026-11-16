@@ -380,10 +380,12 @@ explains the non-`ok` ones.
 tool works, so a client only has to read the map when something is
 degraded.
 
-`unknown` is a real state, not a euphemism: it means the Node-RED version
-could not be detected, so the capability is genuinely undetermined. It
-carries a reason and deliberately **no** remedy, because there is no
-known fix to recommend.
+`unknown` is a real state, not a euphemism: it means the capability is
+genuinely undetermined. For a version-gated tool that means the Node-RED
+version could not be detected; for a `/comms` tool it means the tail
+has not reported a connection yet. It carries a reason, and a remedy
+only where one exists — the version case deliberately has **no** remedy,
+because there is no known fix to recommend.
 
 Every reason is derived from a probe the handler already ran. Nothing
 here is inferred, and no mutating endpoint is touched to produce it. The
@@ -394,7 +396,22 @@ different advice.
 Some states have more than one possible cause and the probes cannot tell
 them apart, so the reason states the observation rather than a verdict.
 `setting_disabled` covers an operator-closed gate, a missing setting
-key, and an unreadable `/settings` alike. `stream_disabled` is reported
-without naming a cause, because the capability is classified regardless
-of the `MCP_DEBUG_STREAM` flag — the remedy is the flag, not a
-diagnosis.
+key, and an unreadable `/settings` alike.
+
+The two tools that read the `/comms` WebSocket — `get_node_status` and
+`get_debug_messages` — are classified from **two** things: the
+`MCP_DEBUG_STREAM` opt-in (configuration) and what the MCP observed of
+the WebSocket (availability). An enabled flag on its own is never
+reported as `ok`:
+
+- `stream_disabled` — the opt-in is off: `MCP_DEBUG_STREAM` was not set.
+- `ok` — the tail is connected right now.
+- `stream_disconnected` — the tail dialled and failed; the reason
+  carries the last error.
+- `stream_unavailable` — no tail exists: the `/comms` endpoint could
+  not be derived from the configured Node-RED URL.
+- `unknown` — the tail has not reported a connection yet (it may still
+  be connecting).
+
+Each of the two tools is classified from its own tail, so one can be
+`ok` while the other is `stream_disconnected`.

@@ -17,8 +17,36 @@ const (
 	CapEndpointNotMounted Capability = "endpoint_not_mounted"
 	CapSettingDisabled    Capability = "setting_disabled"
 	CapStreamDisabled     Capability = "stream_disabled"
+	CapStreamDisconnected Capability = "stream_disconnected"
+	CapStreamUnavailable  Capability = "stream_unavailable"
 	CapUnavailableUnknown Capability = "unknown" // NR version not detected
 )
+
+// StreamState is what the MCP observed about one /comms WebSocket
+// tail. It is an observation, not a setting: the MCP_DEBUG_STREAM
+// opt-in says the operator asked for the stream, this says whether it
+// works (issue #341).
+type StreamState string
+
+const (
+	// StreamStateConnected: the tail is connected right now.
+	StreamStateConnected StreamState = "connected"
+	// StreamStateDisconnected: the tail dialled and failed — the last
+	// error is known.
+	StreamStateDisconnected StreamState = "disconnected"
+	// StreamStateUnknown: the tail has not reported a connection yet.
+	// It may be still connecting, or the runtime may be unreachable.
+	StreamStateUnknown StreamState = "unknown"
+	// StreamStateUnavailable: no tail exists at all — the /comms
+	// endpoint could not be derived from the configured Node-RED URL.
+	StreamStateUnavailable StreamState = "unavailable"
+)
+
+// StreamObservation is one tail's observed state at probe time.
+type StreamObservation struct {
+	State     StreamState
+	LastError string
+}
 
 // RuntimeProbe is the slice of runtime state get_runtime_info
 // needs to classify each tool. Populate it once per tool call —
@@ -33,9 +61,17 @@ const (
 type RuntimeProbe struct {
 	NodeRedVersion      nodered.Version
 	RuntimeStateEnabled bool
-	DebugStreamEnabled  bool // s.debugStream
-	RuntimeLogsMounted  bool // GET /logs did not 404
-	DiagnosticsMounted  bool // GET /diagnostics did not 404/403
+	// DebugStreamEnabled is the operator's opt-in (MCP_DEBUG_STREAM):
+	// configuration, not evidence that the stream works.
+	DebugStreamEnabled bool
+	// DebugStream and StatusStream are what the MCP observed of the two
+	// /comms tails — the debug one behind get_debug_messages and the
+	// status one behind get_node_status. They are separate tails with
+	// separate lifetimes, so they can differ.
+	DebugStream        StreamObservation
+	StatusStream       StreamObservation
+	RuntimeLogsMounted bool // GET /logs did not 404
+	DiagnosticsMounted bool // GET /diagnostics did not 404/403
 }
 
 // noderedCapabilityMatrix classifies every tool in the MCP against
@@ -56,8 +92,8 @@ func noderedCapabilityMatrix(p RuntimeProbe) map[string]Capability {
 	// tools, then the rest.
 	matrix["get_flows_state"] = classifySettingTool(p.RuntimeStateEnabled)
 	matrix["set_flows_state"] = classifySettingTool(p.RuntimeStateEnabled)
-	matrix["get_node_status"] = CapStreamDisabled
-	matrix["get_debug_messages"] = CapStreamDisabled
+	matrix["get_node_status"] = classifyStreamTool(p, p.StatusStream)
+	matrix["get_debug_messages"] = classifyStreamTool(p, p.DebugStream)
 	matrix["get_runtime_logs"] = classifyRuntimeLogsTool(p)
 
 	return matrix
@@ -83,6 +119,10 @@ func capabilityGuidance(tool string, cap Capability, p RuntimeProbe) (reason, re
 	case CapOK:
 		return "", ""
 	case CapUnavailableUnknown:
+		if isStreamTool(tool) {
+			return "the /comms WebSocket has not reported a connection yet",
+				"Give the stream a few seconds after the MCP started and call get_runtime_info again"
+		}
 		return "Node-RED version was not detected; capability is unknown until the runtime's version is visible to the MCP", ""
 	case CapVersionTooLow:
 		min, ok := MinVersionForKnown(tool)
@@ -101,14 +141,22 @@ func capabilityGuidance(tool string, cap Capability, p RuntimeProbe) (reason, re
 		return "the runtime-state setting did not read as enabled; settings.runtimeState.enabled was false, absent, or /settings was unreadable",
 			"Set settings.runtimeState.enabled to true in settings.js (or via the runtime settings UI) and restart Node-RED"
 	case CapStreamDisabled:
-		// The matrix assigns stream_disabled to these tools
-		// unconditionally — no classifier consults
-		// p.DebugStreamEnabled, so the flag's real state is not
-		// evidence about the cause. Do not assert a cause the probe
-		// never checked; an operator who already set the flag would
-		// otherwise follow a remedy that changes nothing.
-		return "the /comms debug stream is not available to this tool",
-			"Enable it with MCP_DEBUG_STREAM=on (or --debug-stream) and restart the MCP; some Node-RED versions are unstable on this WebSocket"
+		// The matrix assigns stream_disabled only when the opt-in is
+		// off, so the flag is the evidence behind the state (issue
+		// #341). It used to be assigned unconditionally, which is why
+		// the reason could not name the flag back then.
+		return "the /comms stream is disabled: MCP_DEBUG_STREAM is off",
+			"Set MCP_DEBUG_STREAM=on (or pass --debug-stream) and restart the MCP; some Node-RED versions are unstable on this WebSocket"
+	case CapStreamDisconnected:
+		reason := "the /comms WebSocket is not connected to Node-RED"
+		if err := streamObservationFor(tool, p).LastError; err != "" {
+			reason += ": " + err
+		}
+		return reason,
+			"Check the MCP log (MCP_LOG_LEVEL=debug) for the /comms dial error, and retry once Node-RED is reachable again"
+	case CapStreamUnavailable:
+		return "the /comms WebSocket endpoint could not be derived from the configured Node-RED URL",
+			"Point the Node-RED base URL at an http/https address (it becomes the ws/wss /comms endpoint) and restart the MCP"
 	case CapEndpointNotMounted:
 		if !p.RuntimeLogsMounted {
 			return "GET /logs is not mounted on this Node-RED (stock 5.x removed the admin endpoint)",
@@ -119,6 +167,57 @@ func capabilityGuidance(tool string, cap Capability, p RuntimeProbe) (reason, re
 	default:
 		return "capability " + string(cap) + " is not currently available", ""
 	}
+}
+
+// classifyStreamTool classifies one /comms-backed tool from the
+// operator's opt-in plus what the MCP observed of that tool's tail.
+// The opt-in alone never yields ok: an enabled flag says the stream
+// was asked for, not that it works (issue #341).
+func classifyStreamTool(p RuntimeProbe, observed StreamObservation) Capability {
+	if !p.DebugStreamEnabled {
+		return CapStreamDisabled
+	}
+	switch observed.State {
+	case StreamStateConnected:
+		return CapOK
+	case StreamStateDisconnected:
+		return CapStreamDisconnected
+	case StreamStateUnavailable:
+		return CapStreamUnavailable
+	default:
+		return CapUnavailableUnknown
+	}
+}
+
+// streamObservation maps a tail's raw observation onto the matrix's
+// vocabulary. A tail that never dialled and a tail whose dial failed
+// are different situations: the first is "we do not know yet", the
+// second is "we tried and it failed".
+func streamObservation(connected bool, lastError string) StreamObservation {
+	switch {
+	case connected:
+		return StreamObservation{State: StreamStateConnected}
+	case lastError != "":
+		return StreamObservation{State: StreamStateDisconnected, LastError: lastError}
+	default:
+		return StreamObservation{State: StreamStateUnknown}
+	}
+}
+
+// isStreamTool reports whether a tool reads the /comms WebSocket.
+func isStreamTool(tool string) bool {
+	return tool == "get_node_status" || tool == "get_debug_messages"
+}
+
+// streamObservationFor returns the observation that belongs to a tool.
+func streamObservationFor(tool string, p RuntimeProbe) StreamObservation {
+	switch tool {
+	case "get_node_status":
+		return p.StatusStream
+	case "get_debug_messages":
+		return p.DebugStream
+	}
+	return StreamObservation{}
 }
 
 // classifyVersionedTool picks version_too_low when the running

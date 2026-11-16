@@ -100,6 +100,12 @@ func (s *Server) handleGetRuntimeInfo(ctx context.Context, _ mcp.CallToolRequest
 func (s *Server) runtimeProbe(ctx context.Context) RuntimeProbe {
 	p := RuntimeProbe{DebugStreamEnabled: s.debugStream}
 
+	// 0. What did the /comms tails actually do? The opt-in above is
+	// configuration; this is the observation the matrix classifies
+	// from (issue #341).
+	p.DebugStream = s.debugStreamState()
+	p.StatusStream = s.statusStreamState()
+
 	// 1. NR version. Use the cached probe — that already handles
 	// its own deadline via the default GET timeout, and we do not
 	// need a second probe here.

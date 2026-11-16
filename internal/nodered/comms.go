@@ -320,6 +320,15 @@ func (t *DebugTail) setState(connected bool, err error) {
 	}
 }
 
+// State reports the tail's observed connection state and the last error,
+// without copying the buffer. The capability matrix needs only this;
+// Snapshot would copy every buffered message (issue #341).
+func (t *DebugTail) State() (connected bool, lastError string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.connected, t.lastErr
+}
+
 // Snapshot returns the buffered messages, oldest first, optionally limited to
 // the newest limit entries and to those received after since.
 func (t *DebugTail) Snapshot(limit int, since time.Time) DebugSnapshot {

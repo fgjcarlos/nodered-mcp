@@ -8,6 +8,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Report the debug and node-status stream capabilities from what the
+  MCP observed, instead of a constant (#341). `get_node_status` and
+  `get_debug_messages` were classified as `stream_disabled` no matter
+  what, even with `MCP_DEBUG_STREAM=on` and the `/comms` WebSocket
+  connected — the guide then told an operator to enable a flag they
+  had already enabled. The matrix now combines the opt-in (the
+  operator's configuration) with the observed connection: `ok` when the
+  tail is connected, `stream_disabled` when the opt-in is off,
+  `stream_disconnected` when the dial failed, `stream_unavailable`
+  when no `/comms` endpoint could be derived, and `unknown` while the
+  tail has not reported a connection yet. An enabled flag alone is
+  never reported as `ok`.
 - Detect the Node-RED version against a local runtime, and recover
   from a failed probe (#340). The version probe was skipped for every
   loopback URL, which also skipped the shipped default
