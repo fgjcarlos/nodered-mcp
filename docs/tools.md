@@ -232,6 +232,12 @@ must leave at least one tab are **not** skipped by it — they are not
 about the references of the configuration but about what a deployment
 may do to the runtime.
 
+That tab rule is decided by decoding the `type` of every entry, not by
+searching the payload for text. The same document behaves the same
+whether it arrives as a compact string, as an indented string or as an
+array of objects, and a `type: "tab"` mentioned inside a property — a
+nested object, or a piece of text — is not a tab.
+
 `update_flow` writes a single tab, and it is judged in the context of
 the whole configuration: the entries of the tab it writes are the
 caller's, and the rules that need the whole configuration (an instance
