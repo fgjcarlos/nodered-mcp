@@ -224,7 +224,7 @@ func (c *Client) do(ctx context.Context, method, path string, body interface{}, 
 
 	u, err := url.JoinPath(c.baseURL, path)
 	if err != nil {
-		return fmt.Errorf("building URL: %w", err)
+		return fmt.Errorf("building URL: %w", urlErrorReason(err))
 	}
 	return c.doURL(ctx, method, u, path, body, out, reqOpts...)
 }
@@ -251,7 +251,7 @@ func (c *Client) doURL(ctx context.Context, method, u, errorPath string, body in
 
 	req, err := http.NewRequestWithContext(ctx, method, u, reqBody)
 	if err != nil {
-		return fmt.Errorf("building request: %w", err)
+		return fmt.Errorf("building request: %w", urlErrorReason(err))
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -305,6 +305,10 @@ func (c *Client) doURL(ctx context.Context, method, u, errorPath string, body in
 // with url.Values and it is split off and reattached to the joined URL
 // without being percent-encoded into the path. A 4xx/5xx still
 // surfaces as *APIError, just like do.
+//
+// No error carries the query string or the userinfo of the configured
+// URL: APIError.Path records the request path only, and a configuration
+// error names the reason instead of the URL it failed on. Issue #342.
 func (c *Client) getRaw(ctx context.Context, path string) ([]byte, error) {
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
@@ -314,7 +318,7 @@ func (c *Client) getRaw(ctx context.Context, path string) ([]byte, error) {
 
 	u, err := url.Parse(c.baseURL)
 	if err != nil {
-		return nil, fmt.Errorf("parsing base URL: %w", err)
+		return nil, fmt.Errorf("parsing base URL: %w", urlErrorReason(err))
 	}
 	// Split off the query so we can re-stitch it after joining the
 	// path. url.JoinPath would percent-encode the '?'.
@@ -325,14 +329,14 @@ func (c *Client) getRaw(ctx context.Context, path string) ([]byte, error) {
 	}
 	joined, err := url.JoinPath(strings.TrimRight(u.String(), "/"), path)
 	if err != nil {
-		return nil, fmt.Errorf("building URL: %w", err)
+		return nil, fmt.Errorf("building URL: %w", urlErrorReason(err))
 	}
 	if query != "" {
 		// Re-parse the joined URL so we can set RawQuery without
 		// re-encoding (the query is already encoded by the caller).
 		ju, err := url.Parse(joined)
 		if err != nil {
-			return nil, fmt.Errorf("parsing joined URL: %w", err)
+			return nil, fmt.Errorf("parsing joined URL: %w", urlErrorReason(err))
 		}
 		ju.RawQuery = query
 		joined = ju.String()
@@ -340,7 +344,7 @@ func (c *Client) getRaw(ctx context.Context, path string) ([]byte, error) {
 
 	req, err := http.NewRequestWithContext(ctx, "GET", joined, nil)
 	if err != nil {
-		return nil, fmt.Errorf("building request: %w", err)
+		return nil, fmt.Errorf("building request: %w", urlErrorReason(err))
 	}
 	req.Header.Set("Accept", "application/json, text/plain")
 	c.auth.apply(req)
@@ -365,11 +369,39 @@ func (c *Client) getRaw(ctx context.Context, path string) ([]byte, error) {
 		return nil, &APIError{
 			StatusCode: resp.StatusCode,
 			Method:     "GET",
-			Path:       joined,
+			Path:       redactedPath(joined),
 			Body:       string(respBody),
 		}
 	}
 	return respBody, nil
+}
+
+// urlErrorReason drops the URL-bearing wrapper from a *url.Error, so the
+// rendered message never echoes the URL it failed on: that URL can carry
+// a token in its query string or in its userinfo. The inner reason is
+// kept, so the message still says what went wrong. Issue #342.
+func urlErrorReason(err error) error {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return urlErr.Err
+	}
+	return err
+}
+
+// redactedPath returns the path of a URL without its query string, its
+// userinfo or its fragment — the form an error may carry. It returns
+// "[unparseable URL]" when the input cannot be parsed, so an unparsable
+// URL is never echoed back. Issue #342.
+func redactedPath(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "[unparseable URL]"
+	}
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
+	parsed.User = nil
+	parsed.Fragment = ""
+	return parsed.Path
 }
 
 // BaseURL returns the BaseURL the Client was configured with. Used
