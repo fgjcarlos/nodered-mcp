@@ -91,4 +91,15 @@ for (const step of retrySteps) {
   );
 }
 
+// Regression guard for #344: the `dist-tags.latest` read must ask the
+// helper for the expected value. A stale `latest` (the version the
+// tag pointed at before the promotion) is non-empty, so the helper
+// would accept it as the first non-empty value and the step's own
+// comparison would fail without a retry.
+const latestStep = stepRunBlock(workflow, 'verify all latest tags resolve to the release');
+assert.ok(
+  /wait-for-registry\.sh\s+--expect\s+"\$version"/.test(latestStep),
+  'verify all latest tags resolve to the release must pass --expect "$version" to scripts/wait-for-registry.sh (issue #344)',
+);
+
 console.log('npm_workflow_order_test: PASS');
