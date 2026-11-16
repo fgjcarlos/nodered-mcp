@@ -30,6 +30,20 @@ set and that the `--http-addr` port is free.
 by design: if the snapshot cannot be written, the write does not
 proceed. Check that `NODERED_BACKUP_DIR` exists and is writable.
 
+In the container image the directory is `/var/lib/nodered-mcp/backups`
+and the server runs as the `nonroot` user (uid 65532), so a bind mount
+whose permissions do not allow that user to write makes every mutating
+call fail with a backup error. Mount a volume there instead
+(`--volume nodered-backups:/var/lib/nodered-mcp/backups`) and keep it
+mounted across recreations.
+
+The image ships that directory with the `nonroot` user's ownership, and
+Docker copies an image directory — its content and its ownership — into
+an empty named volume, so the container can write the snapshot into the
+volume it is mounted on. A volume that already holds root-owned files
+(one created by another image, or written to as root) keeps that
+ownership: empty it or recreate it.
+
 **Windows: orphaned npm shims (legacy).** A `npm i -g
 @fgjcarlos/nodered-mcp` from a version before 0.5.16 could leave three
 launcher files (`nodered-mcp`, `.cmd`, `.ps1`) in `%APPDATA%\npm\` that

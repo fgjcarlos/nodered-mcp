@@ -8,6 +8,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Give the container image an explicit, persistent backup directory, and
+  prove the snapshot survives a container recreation (#346). The runtime
+  stage inherited its working directory from the distroless base
+  (`/home/nonroot`), so the `backups` default landed in the container's
+  writable layer: the snapshots were lost when the container was
+  recreated, and no Docker example mounted a volume to keep them. The
+  image now sets a working directory it owns and points
+  `NODERED_BACKUP_DIR` at `/var/lib/nodered-mcp/backups`, the Docker
+  examples mount a volume there, and the smoke test performs a real
+  deployment and checks that the snapshot is still there after the
+  container is recreated.
 - Keep reading the npm registry until it shows the expected value
   (#344). `scripts/wait-for-registry.sh` accepted the first non-empty
   stdout, but right after `npm dist-tag add` the registry can answer

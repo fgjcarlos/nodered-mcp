@@ -102,6 +102,7 @@ export MCP_HTTP_TOKEN="$(openssl rand -hex 32)"
 
 docker run --rm --name nodered-mcp \
   --publish 127.0.0.1:8090:8090 \
+  --volume nodered-backups:/var/lib/nodered-mcp/backups \
   --env MCP_HTTP_TOKEN \
   --env NODERED_URL=http://host.docker.internal:1880 \
   ghcr.io/fgjcarlos/nodered-mcp:latest
@@ -120,6 +121,7 @@ usar ese hostname:
 docker run --rm --name nodered-mcp \
   --add-host host.docker.internal:host-gateway \
   --publish 127.0.0.1:8090:8090 \
+  --volume nodered-backups:/var/lib/nodered-mcp/backups \
   --env MCP_HTTP_TOKEN \
   --env NODERED_URL=http://host.docker.internal:1880 \
   ghcr.io/fgjcarlos/nodered-mcp:latest
@@ -135,10 +137,17 @@ docker network connect nodered-mcp node-red
 docker run --rm --name nodered-mcp \
   --network nodered-mcp \
   --publish 127.0.0.1:8090:8090 \
+  --volume nodered-backups:/var/lib/nodered-mcp/backups \
   --env MCP_HTTP_TOKEN \
   --env NODERED_URL=http://node-red:1880 \
   ghcr.io/fgjcarlos/nodered-mcp:latest
 ```
+
+El volumen `nodered-backups` es donde la imagen escribe la copia que toma
+antes de cada llamada que muta (`NODERED_BACKUP_DIR`). Mantenelo montado: sin
+el, las copias viven en la capa escribible del contenedor y se pierden cuando
+se recrea. `docker run --rm` borra el contenedor, no el volumen con nombre,
+así que recrear el contenedor conserva el historial de copias.
 
 Sustituye `node-red` por el nombre real del contenedor o servicio de Compose.
 No publiques el puerto `8090` más allá de loopback salvo que el firewall del
