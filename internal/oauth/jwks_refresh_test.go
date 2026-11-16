@@ -125,3 +125,67 @@ func TestKeyByIDRefreshesAgainAfterMissWindow(t *testing.T) {
 		t.Errorf("kid = %q, want k3", got.ID)
 	}
 }
+
+// The callers that queue behind a refresh share its outcome. Against a
+// failing IdP they must not each download their own copy: the queue would
+// grow with every request and the last caller would wait for all of them.
+func TestKeyByIDSharesFailedRefreshWithWaiters(t *testing.T) {
+	const delay = 400 * time.Millisecond
+	var downloads atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		downloads.Add(1)
+		time.Sleep(delay)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+
+	ks := NewKeyset(srv.URL, 15*time.Minute)
+	const callers = 6
+	start := time.Now()
+	var wg sync.WaitGroup
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := ks.KeyByID("k1"); err == nil {
+				t.Error("want an error while the IdP is down")
+			}
+		}()
+	}
+	wg.Wait()
+
+	// One attempt serves the whole queue. Two are tolerated: a caller
+	// that arrives after the failure retries on its own.
+	if got := downloads.Load(); got > 2 {
+		t.Errorf("%d callers against a failing IdP caused %d downloads, want at most 2", callers, got)
+	}
+	if elapsed := time.Since(start); elapsed > 3*delay {
+		t.Errorf("%d callers against a failing IdP took %v, want under %v", callers, elapsed, 3*delay)
+	}
+}
+
+// A failed miss refresh consumes the window too: a failing IdP must not
+// turn the miss path into a download per request, and the cached keys must
+// survive the failure.
+func TestKeyByIDMissWindowHoldsWhileRefreshFails(t *testing.T) {
+	key := makeRSAKey(t)
+	srv := newCountingJWKSServer(t, encodeJWK(t, "k1", key))
+	ks := NewKeyset(srv.URL, 15*time.Minute)
+
+	if _, err := ks.KeyByID("k1"); err != nil {
+		t.Fatalf("prime: %v", err)
+	}
+	srv.serve("not json")
+
+	for i := 0; i < 20; i++ {
+		if _, err := ks.KeyByID(fmt.Sprintf("unknown-%d", i)); err == nil {
+			t.Fatalf("unknown kid %d must fail", i)
+		}
+	}
+	if got := srv.downloadsCount(); got > 2 {
+		t.Errorf("20 unknown kids against a failing IdP caused %d downloads, want at most 2", got)
+	}
+	if _, err := ks.KeyByID("k1"); err != nil {
+		t.Errorf("cached key lost after a failed refresh: %v", err)
+	}
+}

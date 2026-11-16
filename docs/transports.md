@@ -88,7 +88,8 @@ not in the cache triggers one extra fetch, because the identity
 provider may have rotated; that extra fetch happens at most once per
 minute and is shared by the requests that miss at the same time, so a
 burst of invalid tokens cannot become a burst of downloads against the
-identity provider.
+identity provider. A rotated key is therefore picked up as soon as the
+window opens, which can be up to a minute after the rotation.
 
 Configuring both `MCP_HTTP_TOKEN` and `MCP_OAUTH_ISSUER` is a
 configuration error and the server refuses to start.

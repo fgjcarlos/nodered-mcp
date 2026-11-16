@@ -180,8 +180,12 @@ type Keyset struct {
 	mu        sync.RWMutex
 	keys      []*Key
 	fetchedAt time.Time
-	gen       uint64
-	ttl       time.Duration
+	// attempt counts the refresh attempts, successful or not, and lastErr
+	// holds the error of the last failed one. A caller that queues behind
+	// an attempt shares its outcome instead of starting its own download.
+	attempt uint64
+	lastErr error
+	ttl     time.Duration
 
 	// refreshMu serialises the refresh attempts: at most one download is
 	// in flight, and the callers that wait for it share its result.
@@ -199,23 +203,26 @@ type Keyset struct {
 // NewKeyset constructs a Keyset that re-fetches at most every ttl. A ttl
 // of zero disables caching: every KeyByID call refetches. Use that for
 // tests; in production 15 minutes matches typical IdP key-rotation
-// windows.
+// windows. Simultaneous calls share one download, so a ttl of zero means
+// one download per call that is not already covered by another one.
 //
 // A refresh triggered by an unknown kid is bounded by the miss window
 // (one minute): the kid comes from an unverified token header, so the
-// requester chooses how often the IdP is contacted.
+// requester chooses how often the IdP is contacted. A rotation is picked
+// up as soon as the window opens, so a new key can be accepted up to one
+// window late.
 func NewKeyset(jwksURI string, ttl time.Duration) *Keyset {
 	return &Keyset{jwksURI: jwksURI, ttl: ttl, missWindow: defaultMissWindow, now: time.Now}
 }
 
-// snapshot returns the cached keys, the generation they belong to and the
-// time they were fetched at. The generation changes on every successful
-// refresh, so a caller can tell whether somebody else refreshed while it
-// was not looking.
+// snapshot returns the cached keys, the number of refresh attempts made so
+// far and the time the keys were fetched at. The attempt counter changes on
+// every attempt, successful or not, so a caller can tell whether somebody
+// else tried a refresh while it was not looking.
 func (k *Keyset) snapshot() ([]*Key, uint64, time.Time) {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
-	return k.keys, k.gen, k.fetchedAt
+	return k.keys, k.attempt, k.fetchedAt
 }
 
 // fetch downloads the JWKS and replaces the cache. The caller holds
@@ -224,47 +231,53 @@ func (k *Keyset) snapshot() ([]*Key, uint64, time.Time) {
 // lock everyone out for the TTL window.
 func (k *Keyset) fetch() error {
 	keys, err := FetchJWKS(k.jwksURI)
-	if err != nil {
-		return err
-	}
 	k.mu.Lock()
-	k.keys = keys
-	k.fetchedAt = k.now()
-	k.gen++
+	k.attempt++
+	if err != nil {
+		k.lastErr = err
+	} else {
+		k.keys = keys
+		k.fetchedAt = k.now()
+		k.lastErr = nil
+	}
 	k.mu.Unlock()
-	return nil
+	return err
 }
 
-// refresh replaces the cache with a fresh download. The observed
-// generation is the one the caller read before it queued: if somebody
-// else refreshed in the meantime, that refresh is shared instead of
-// starting a second download.
+// refresh replaces the cache with a fresh download. The observed attempt
+// count is the one the caller read before it queued: if somebody else
+// attempted a refresh in the meantime, that attempt is shared — its
+// result and, when it failed, its error — instead of starting a second
+// download. Without that, an unreachable IdP would make the queued
+// callers wait for one download each.
 func (k *Keyset) refresh(observed uint64) error {
 	k.refreshMu.Lock()
 	defer k.refreshMu.Unlock()
 
 	k.mu.RLock()
-	gen := k.gen
+	attempt := k.attempt
+	lastErr := k.lastErr
 	k.mu.RUnlock()
-	if gen != observed {
-		return nil
+	if attempt != observed {
+		return lastErr
 	}
 	return k.fetch()
 }
 
 // refreshOnMiss replaces the cache after an unknown kid, but at most once
 // per miss window. Inside the window the cached keys are good enough, and
-// the IdP does not get to be a download amplifier.
+// the IdP does not get to be a download amplifier. Like refresh, it shares
+// the outcome of an attempt that happened while the caller was queued.
 func (k *Keyset) refreshOnMiss(observed uint64) error {
 	k.refreshMu.Lock()
 	defer k.refreshMu.Unlock()
 
 	k.mu.RLock()
-	gen := k.gen
+	attempt := k.attempt
+	lastErr := k.lastErr
 	k.mu.RUnlock()
-	if gen != observed {
-		// Somebody else already refreshed for this miss.
-		return nil
+	if attempt != observed {
+		return lastErr
 	}
 	if k.now().Sub(k.lastMiss) < k.missWindow {
 		return nil
@@ -283,12 +296,12 @@ func (k *Keyset) KeyByID(kid string) (*Key, error) {
 		return nil, errors.New("oauth: empty kid")
 	}
 
-	keys, gen, fetchedAt := k.snapshot()
+	keys, attempt, fetchedAt := k.snapshot()
 	if len(keys) == 0 || k.now().Sub(fetchedAt) > k.ttl {
-		if err := k.refresh(gen); err != nil {
+		if err := k.refresh(attempt); err != nil {
 			return nil, err
 		}
-		keys, gen, _ = k.snapshot()
+		keys, attempt, _ = k.snapshot()
 	}
 
 	if key := findKey(keys, kid); key != nil {
@@ -300,7 +313,7 @@ func (k *Keyset) KeyByID(kid string) (*Key, error) {
 	// from an unverified token header and the requester chooses it, so
 	// the refresh is bounded (one per window) and shared by the callers
 	// that miss at the same time.
-	if err := k.refreshOnMiss(gen); err != nil {
+	if err := k.refreshOnMiss(attempt); err != nil {
 		return nil, err
 	}
 	keys, _, _ = k.snapshot()
