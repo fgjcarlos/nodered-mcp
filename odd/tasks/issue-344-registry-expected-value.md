@@ -42,15 +42,30 @@ no signal for this diff; CI runs them anyway.
 
 ### Native review
 
-Three lineages were opened for this work and all three were abandoned with
-a committed `review-reclaim-record/v1` (`operator_disposition`, actor
-`fgjcarlos`), because the reviewer capture never completed. The three
-abandoned lineages were `review-bd0ec40c64b8b910` (work-unit commit
-`0538c83`), `review-562246593b41056b` (candidate `9642e94`) and
-`review-56f3a88b9b68d99e` (candidate `67b8877`).
+Lineage `review-56d705c5ba7fb125`, tier high, lenses resilience +
+reliability, candidate `d108a5c2…` (the final tree, commit `654f96a`).
+The two materialize reviewer runs completed (`minimax/MiniMax-M3.1-Flash`,
+2 runs, 32.5 KB prompts) and the lineage closed **approved**; the exact
+`acknowledge-approved` binding burned the authority
+(`gentle-ai.review-acknowledged/v1`, delivery under ordinary repository
+policy).
 
-The capture was blocked twice, and **both causes were in the calling
-session, not in the harness**:
+One advisory finding, `R3-EXPECT-MISSING-VALUE` (reliability, WARNING,
+informational), at `scripts/wait-for-registry.sh:58`: `--expect` without
+a value makes `"$2"` unbound, so `set -u` aborts with exit 1 instead of
+the documented exit 2 for an argument error. The pre-existing
+`--attempts` and `--base-sleep` flags behave the same way, so the
+helper is consistent; the closure is explicit that this finding is
+separate later work and never a reason to re-run the review on this
+candidate.
+
+Three earlier lineages were opened and abandoned with a committed
+`review-reclaim-record/v1` (`operator_disposition`, actor `fgjcarlos`):
+`review-bd0ec40c64b8b910` (work-unit commit `0538c83`),
+`review-562246593b41056b` (candidate `9642e94`) and
+`review-56f3a88b9b68d99e` (candidate `67b8877`). The capture was
+blocked in all three, and **both causes were in the calling session,
+not in the harness**:
 
 1. **Selector mismatch.** The capture path re-registers its retained
    route with the selector derived from the candidate projection
@@ -60,8 +75,7 @@ session, not in the harness**:
    that selector and the capture is rejected with
    `capture-route-registration-rejected` / `selector-mismatch`. Reading
    STATUS with the base **commit** (`7dd195f9…`, the same selector the
-   START used) is the selector that matches, and the rejection moves to
-   the binding comparison.
+   START used) is the selector that matches.
 2. **A mistranscribed binding.** The binding read from STATUS carries
    `artifactSubject.schema = "gentle-ai.review-artifact-subject/v2"`. The
    binding submitted to the capture carried
@@ -73,8 +87,9 @@ session, not in the harness**:
    `collectBindings must be the complete distinct current reviewer group
    in exact provider order`.
 
-Lesson for the next run: read STATUS with the same base commit the START
-used, and submit the binding bytes exactly as STATUS returned them.
+Recipe for the next run: read STATUS with the same base commit the START
+used, and submit the binding bytes exactly as STATUS returned them —
+verified against the session transcript before sending, not retyped.
 
 ## Log
 
