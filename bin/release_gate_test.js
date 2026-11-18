@@ -380,6 +380,23 @@ test('the guard steps read the tag from the environment', () => {
   }
 });
 
+test('the job that promotes the latest release asks for write access', () => {
+  // Marking a release as latest is a write. The workflow default is
+  // `contents: read`, so the job that runs it has to declare the
+  // write access itself instead of relying on another job's grant.
+  const jobs = parseJobs(release);
+  const promoter = Object.entries(jobs).find(([, job]) =>
+    job.body.some((line) => line.includes('gh release edit')),
+  );
+  assert.ok(promoter, 'no job runs gh release edit');
+  const [name] = promoter;
+  assert.match(
+    jobs[name].body.join('\n'),
+    /permissions:\s*\n\s*contents: write/,
+    `${name} does not declare contents: write`,
+  );
+});
+
 if (failed > 0) {
   console.error(`release_gate_test: ${failed} failed, ${passed} passed`);
   process.exit(1);

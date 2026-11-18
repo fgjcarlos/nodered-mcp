@@ -120,12 +120,32 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Issue #349: goreleaser never marks the release as "latest" on
-      # its own (make_latest: false in .goreleaser.yaml). The moving
-      # channel is decided by the shared guard: only a stable tag that
-      # is the newest stable version in the repository takes it. A
-      # prerelease or a re-run of an older tag keeps its release and
-      # leaves the previous latest release alone.
+  # Issue #349: goreleaser never marks the release as "latest" on
+  # its own (make_latest: false in .goreleaser.yaml). The moving
+  # channel is decided by the shared guard: only a stable tag that
+  # is the newest stable version in the repository takes it. A
+  # prerelease or a re-run of an older tag keeps its release and
+  # leaves the previous latest release alone.
+  #
+  # The promotion lives in its own job, and that job asks for write
+  # access to the release explicitly: the workflow default is
+  # `contents: read`, and marking a release as latest is a write.
+  promote-latest:
+    needs: goreleaser
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # The guard reads the repository tag list to decide whether
+          # this tag may take the moving `latest` release.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: 18
+
       - name: decide the latest release
         id: guard
         # The tag travels as an environment variable, never as text
