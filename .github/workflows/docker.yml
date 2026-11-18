@@ -13,11 +13,33 @@ permissions:
   contents: read
   packages: write
 
+# One image build per tag.
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  # Issue #349: the CI suite of the tagged commit is the gate for the
+  # image push, exactly as it is for the GitHub Release. ci.yml is
+  # called as a reusable workflow, so it runs against this run's
+  # github.sha — the tagged commit — and a failing test, race or vet
+  # publishes no image at all.
+  gate:
+    uses: ./.github/workflows/ci.yml
+
   build:
+    needs: gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # The guard below reads the repository tag list to decide
+          # whether this tag may take the moving `latest` tag.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: 18
 
       # Multi-arch needs QEMU under buildx; without it the runner only
       # builds linux/amd64.
@@ -34,21 +56,37 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Issue #349: the moving `latest` image tag follows the same rule
+      # as the other channels — only a stable tag that is the newest
+      # stable version in the repository takes it. A prerelease or a
+      # re-run of an older tag still publishes its versioned image and
+      # leaves `latest` where it is.
+      - name: decide the latest image tag
+        id: guard
+        # The tag travels as an environment variable, never as text
+        # interpolated into the shell command: a tag name may contain
+        # characters the shell would expand.
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/release-latest-guard.js --tag "$RELEASE_TAG"
+
       - name: extract metadata
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6.2.0
         with:
           images: ghcr.io/${{ github.repository }}
-          # The default tag set covers the typical "I want the latest"
-          # case (`:latest`), the "I want the latest 0.5" case
-          # (`:0.5`), the "I want this exact version" case (`:0.5.0`),
-          # and the SHA-pinned case (`:v0.5.0`). One image, four
-          # references.
+          # `latest=false` turns off metadata-action's own automatic
+          # latest tag: the floating channel is decided by the shared
+          # guard above, not by metadata-action's semver analysis.
+          flavor: |
+            latest=false
+          # The versioned references (:0.8.0, :0.8, :0) plus the
+          # moving :latest, which only the newest stable tag gets.
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ steps.guard.outputs.promote == 'true' }}
 
       - name: build and push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0

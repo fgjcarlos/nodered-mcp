@@ -8,6 +8,23 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Gate every publication channel on the test suite of the tagged commit
+  (#349). The CI workflow only ran for `main` and pull requests, so a
+  tag push produced no test run at all: the release workflow published
+  the GitHub Release from its own artifact checks, the Docker workflow
+  pushed the image from a single unguarded job, and a tag whose commit
+  had never passed the functional, race or vet checks could still
+  publish one of the channels. The CI workflow is now callable as a
+  reusable workflow and also runs for tags, and both publishing
+  workflows call it as a gate that every publishing job depends on, so
+  a failing test publishes nothing. The npm channel publishes the
+  exact commit the gated release run built and verifies that the tag
+  resolves to it. The moving `latest` reference — the GitHub "Latest
+  release" badge, the `:latest` image tag and the `latest` npm
+  dist-tag — now follows one rule in all three channels: only a stable
+  tag that is the newest stable version takes it, so a prerelease or a
+  re-run of an older tag publishes its exact version without taking
+  `latest` away from a newer stable release.
 - Bound and coalesce the JWKS refreshes for unknown key IDs, so an
   invalid token cannot make the server download the key set once per
   request (#348). The `kid` travels in an unverified token header and

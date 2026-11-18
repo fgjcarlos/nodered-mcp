@@ -115,18 +115,24 @@ following by hand once per release:
 2. Push the commit to `main`.
 3. `git tag -a vX.Y.Z` and `git push origin vX.Y.Z`.
 
-Three GitHub Actions fire on the tag. `release.yml` and
-`docker.yml` run in parallel; `npm.yml` is gated on `release.yml`'s
-success and runs only after the GitHub Release has been verified.
+Four GitHub Actions fire on the tag, and none of them publishes
+anything until the tagged commit has passed the test suite.
 
-- `release.yml` — goreleaser publishes the six binaries, six SBOMs
+- `ci.yml` — runs for the tag as well as for `main` and pull
+  requests, so the tagged commit has a CI run of its own.
+- `release.yml` — starts with a `gate` job that calls `ci.yml` as a
+  reusable workflow. The gate runs against the tagged commit (the
+  caller's `github.sha`) and every job that publishes hangs from it
+  through `needs`, so a failing test, race or vet publishes nothing.
+  After the gate, goreleaser publishes the six binaries, six SBOMs
   and `checksums.txt` to the GitHub release.
-- `docker.yml` — multi-arch image is pushed to
-  `ghcr.io/fgjcarlos/nodered-mcp`. Independent of release.yml and
-  npm.yml.
+- `docker.yml` — same `gate` job, then the multi-arch image is pushed
+  to `ghcr.io/fgjcarlos/nodered-mcp`.
 - `npm.yml` — gated on `release.yml`. After release.yml reports
-  success, npm.yml checks out the tag, confirms `package.json`
-  version agrees with the tag, runs `scripts/release-gate.js` to
+  success, npm.yml checks out the exact commit the gated release run
+  built (`workflow_run.head_sha`) and confirms the tag resolves to
+  that commit, confirms `package.json` version agrees with the tag,
+  runs `scripts/release-gate.js` to
   verify the GitHub Release carries `checksums.txt`, at least one
   tarball, and at least one SBOM (with a structurally valid
   `checksums.txt`), and only then publishes `@fgjcarlos/nodered-mcp`
@@ -135,6 +141,13 @@ success and runs only after the GitHub Release has been verified.
   working npm wrapper. The wrapper's postinstall reads `version`
   straight from `package.json` (#227 / #242), so the gate is the
   single source of truth.
+
+The moving `latest` reference — the GitHub "Latest release" badge, the
+`:latest` image tag and the `latest` npm dist-tag — follows one rule
+in all three channels (`scripts/release-latest-guard.js`): only a
+stable tag that is the newest stable version in the repository takes
+it. A prerelease, or a re-run of an older tag, publishes its exact
+version and leaves `latest` where it is.
 
 A new release is justified when there is a user-visible change: a new
 tool, a new subcommand, a new install channel, a fixed bug. Pure docs

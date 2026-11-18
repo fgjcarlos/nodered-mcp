@@ -8,7 +8,21 @@ on:
 permissions:
   contents: read
 
+# One release run per tag. A re-run of the same tag waits for the
+# previous one instead of racing it on the release assets.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  # Issue #349: the CI suite of the tagged commit is the gate for the
+  # whole publication chain. ci.yml is called as a reusable workflow,
+  # so it runs against this run's github.sha — the tagged commit — and
+  # every job below hangs from this gate through `needs`. A failing
+  # test, race or vet therefore publishes nothing at all.
+  gate:
+    uses: ./.github/workflows/ci.yml
+
   # Issue #258: real-artifact inspection. Run goreleaser in
   # --snapshot mode against the tag's source tree, then assert
   # every generated archive matches the native-package expectations
@@ -18,6 +32,7 @@ jobs:
   # a working GitHub Release. The same snapshot script also runs
   # on every PR via ci.yml's release-snapshot job.
   release-snapshot:
+    needs: gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -43,7 +58,11 @@ jobs:
       - name: upload inspected snapshot
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
-          name: release-snapshot-dist
+          # Not `release-snapshot-dist`: the gate above runs ci.yml,
+          # whose own release-snapshot job already uploads an artifact
+          # with that name, and two artifacts cannot share a name in
+          # the same run.
+          name: release-publish-dist
           path: |
             dist/*.tar.gz
             dist/checksums.txt
@@ -67,7 +86,7 @@ jobs:
       - name: download inspected snapshot
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
-          name: release-snapshot-dist
+          name: release-publish-dist
           path: dist
 
       - name: install packed npm package and launch native CLI
@@ -87,6 +106,10 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: 18
+
       - name: install checksum-verified syft for SBOMs
         run: bash scripts/install-syft.sh
 
@@ -96,3 +119,55 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Issue #349: goreleaser never marks the release as "latest" on
+  # its own (make_latest: false in .goreleaser.yaml). The moving
+  # channel is decided by the shared guard: only a stable tag that
+  # is the newest stable version in the repository takes it. A
+  # prerelease or a re-run of an older tag keeps its release and
+  # leaves the previous latest release alone.
+  #
+  # The promotion lives in its own job, and that job asks for write
+  # access to the release explicitly: the workflow default is
+  # `contents: read`, and marking a release as latest is a write.
+  promote-latest:
+    needs: goreleaser
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # The guard reads the repository tag list to decide whether
+          # this tag may take the moving `latest` release.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: 18
+
+      - name: decide the latest release
+        id: guard
+        # The tag travels as an environment variable, never as text
+        # interpolated into the shell command: a tag name may contain
+        # characters the shell would expand.
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/release-latest-guard.js --tag "$RELEASE_TAG"
+
+      - name: mark the release as latest
+        if: steps.guard.outputs.promote == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          gh release edit "$RELEASE_TAG" \
+            --repo "$REPOSITORY" \
+            --latest
+          echo "marked $RELEASE_TAG as the latest release"
+
+      - name: report the skipped latest release
+        if: steps.guard.outputs.promote != 'true'
+        run: |
+          echo "latest release left untouched: ${{ steps.guard.outputs.reason }}"
