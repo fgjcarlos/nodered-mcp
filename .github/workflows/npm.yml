@@ -45,6 +45,13 @@ permissions:
   # package.json "provenance": true flag has no effect.
   id-token: write
 
+# One npm publication at a time. Two tags racing on the moving
+# `latest` dist-tag would leave the registry pointing at whichever
+# finished last.
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
 jobs:
   publish-platforms:
     # Skip the job entirely when release.yml did not succeed; an
@@ -62,11 +69,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          # The triggering release.yml run executed against the tag;
-          # checkout the same ref so the version gate below reads the
-          # post-bump package.json. workflow_run events otherwise run
-          # on the default branch.
-          ref: ${{ env.TAG }}
+          # Issue #349: publish the exact commit the gated release run
+          # built, not whatever the tag resolves to now. head_sha is
+          # that commit; workflow_run events otherwise run on the
+          # default branch.
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
           fetch-tags: true
 
@@ -77,6 +84,19 @@ jobs:
         # packages. We use NPM_SECRET directly in the publish step.
         with:
           node-version: 20
+
+      # The tag and the commit must agree: the npm packages have to
+      # match the bytes the gated release published.
+      - name: verify the tag points at the gated release commit
+        run: |
+          set -euo pipefail
+          tagged=$(git rev-parse "refs/tags/${TAG}^{commit}")
+          head=$(git rev-parse HEAD)
+          if [ "$tagged" != "$head" ]; then
+            echo "tag $TAG points at $tagged, but the gated release run built $head"
+            exit 1
+          fi
+          echo "tag $TAG and the gated release commit agree: $head"
 
       - name: verify package.json version matches the tag
         env:
@@ -230,7 +250,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          ref: ${{ env.TAG }}
+          # Issue #349: the same commit the gated release run built.
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
           fetch-tags: true
 
@@ -327,7 +348,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          ref: ${{ env.TAG }}
+          # Issue #349: the same commit the gated release run built.
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          fetch-tags: true
 
       # Keep the final verifier on the token path used by both publishers.
       # Do not add registry-url while the npmjs Trusted Publisher dead-lock
@@ -384,7 +408,17 @@ jobs:
           fi
           echo "canary install passed: $reported"
 
+      # Issue #349: the moving `latest` dist-tag follows the same rule
+      # as the other channels — only a stable tag that is the newest
+      # stable version in the repository takes it. A prerelease or a
+      # re-run of an older tag publishes its exact version under
+      # `next` and leaves `latest` alone.
+      - name: decide the latest dist-tag
+        id: guard
+        run: node scripts/release-latest-guard.js --tag "${{ env.TAG }}"
+
       - name: promote platform packages to latest
+        if: steps.guard.outputs.promote == 'true'
         env:
           NPM_SECRET: ${{ secrets.NPM_SECRET }}
           VERSION: ${{ env.TAG }}
@@ -405,6 +439,7 @@ jobs:
       - name: promote main package to latest
         # Main moves last so the public wrapper never points at an
         # incompletely verified set of native package versions.
+        if: steps.guard.outputs.promote == 'true'
         env:
           NPM_SECRET: ${{ secrets.NPM_SECRET }}
           VERSION: ${{ env.TAG }}
@@ -427,6 +462,11 @@ jobs:
         # would fail without a retry (#344). `--expect` moves the
         # comparison inside the helper's loop: the read is retried
         # until the promoted version is the one the registry shows.
+        #
+        # The step only runs when this tag was allowed to take the
+        # moving channel; otherwise `latest` still points at the
+        # release that owns it.
+        if: steps.guard.outputs.promote == 'true'
         env:
           VERSION: ${{ env.TAG }}
         run: |
@@ -447,3 +487,8 @@ jobs:
             fi
             echo "verified latest for ${scope}@${version}"
           done
+
+      - name: report the skipped latest promotion
+        if: steps.guard.outputs.promote != 'true'
+        run: |
+          echo "latest dist-tag left untouched: ${{ steps.guard.outputs.reason }}"

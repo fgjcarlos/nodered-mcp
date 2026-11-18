@@ -2,6 +2,15 @@ version: 2
 
 project_name: nodered-mcp
 
+# Issue #349: goreleaser must never move the moving "latest" release
+# on its own. The release workflow marks the release as latest only
+# when scripts/release-latest-guard.js says the tag is a stable
+# version and the newest stable version in the repository, so a
+# prerelease or a re-run of an older tag cannot take `latest` away
+# from a newer stable release.
+release:
+  make_latest: false
+
 before:
   hooks:
     # Keep this list to plain, shell-free commands: goreleaser splits

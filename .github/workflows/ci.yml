@@ -3,9 +3,18 @@ name: ci
 on:
   push:
     branches: [main]
+    # Issue #349: a tag push runs the suite for the tagged commit, so
+    # the commit behind a release has a CI run of its own.
+    tags:
+      - "v*"
   pull_request:
   # Allows running the suite by hand from the Actions tab.
   workflow_dispatch:
+  # Issue #349: release.yml and docker.yml call this file as a
+  # reusable workflow. A called workflow runs in the caller's
+  # context, so github.sha is the tagged commit and the suite that
+  # gates the publication is the suite of that exact SHA.
+  workflow_call:
 
 permissions:
   contents: read
