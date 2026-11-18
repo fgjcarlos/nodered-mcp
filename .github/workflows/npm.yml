@@ -45,11 +45,13 @@ permissions:
   # package.json "provenance": true flag has no effect.
   id-token: write
 
-# One npm publication at a time. Two tags racing on the moving
-# `latest` dist-tag would leave the registry pointing at whichever
-# finished last.
+# One publication per tag. The group is scoped to the tag on purpose: a
+# global group lets a newer tag replace a still-pending one (GitHub
+# keeps only one pending run per group), and the middle release would
+# never reach npm. Two tags may publish at once; the latest-channel
+# guard decides which one takes `latest`.
 concurrency:
-  group: npm-publish
+  group: npm-publish-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: false
 
 jobs:
