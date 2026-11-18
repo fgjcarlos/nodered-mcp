@@ -204,6 +204,33 @@ function simulate(jobs, initial, context) {
   return reached;
 }
 
+// Extract the body of every `run:` block, so a regression can assert
+// on what actually reaches the shell.
+function runBlocks(text) {
+  const lines = text.split(/\r?\n/);
+  const blocks = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^(\s*)run:\s*(.*)$/.exec(lines[i]);
+    if (!m) continue;
+    const indent = m[1].length;
+    const body = [m[2]];
+    if (m[2].trim() === '' || m[2].trim() === '|' || m[2].trim() === '>-') {
+      for (let j = i + 1; j < lines.length; j++) {
+        const line = lines[j];
+        if (line.trim() === '') {
+          body.push('');
+          continue;
+        }
+        const inner = line.length - line.trimStart().length;
+        if (inner <= indent) break;
+        body.push(line);
+      }
+    }
+    blocks.push(body.join('\n'));
+  }
+  return blocks;
+}
+
 // --- the assertions --------------------------------------------------------
 
 const ci = readWorkflow('ci.yml');
@@ -322,6 +349,35 @@ test('the release artifact name does not clash with the gate upload', () => {
   assert.ok(ciArtifact, 'no snapshot artifact name found in ci.yml');
   assert.ok(releaseArtifact, 'no snapshot artifact name found in release.yml');
   assert.notEqual(ciArtifact[1], releaseArtifact[1]);
+});
+
+test('no shell command interpolates a tag into its own text', () => {
+  // A tag name is text a tag pusher controls. Interpolated into a
+  // `run:` block it reaches the shell and the shell expands it, so the
+  // tag has to travel as an environment variable instead.
+  for (const [name, text] of [['release.yml', release], ['docker.yml', docker], ['npm.yml', npm]]) {
+    for (const block of runBlocks(text)) {
+      assert.ok(
+        !/\$\{\{\s*(github\.ref_name|env\.TAG|github\.event\.workflow_run\.head_branch)\s*\}\}/.test(block),
+        `${name} interpolates a tag into a shell command: ${block.split('\n')[0].trim()}`,
+      );
+    }
+  }
+});
+
+test('the guard steps read the tag from the environment', () => {
+  const guards = [
+    ['release.yml', release, '- name: decide the latest release'],
+    ['docker.yml', docker, '- name: decide the latest image tag'],
+    ['npm.yml', npm, '- name: decide the latest dist-tag'],
+  ];
+  for (const [name, text, marker] of guards) {
+    const at = text.indexOf(marker);
+    assert.ok(at !== -1, `${name} has no guard step`);
+    const runLine = runBlocks(text.slice(at, at + 800)).find((block) => block.includes('release-latest-guard.js'));
+    assert.ok(runLine, `${name} guard step does not run the guard script`);
+    assert.match(runLine, /--tag "\$/, `${name} guard command does not read the tag from the environment`);
+  }
 });
 
 if (failed > 0) {

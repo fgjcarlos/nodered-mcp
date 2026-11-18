@@ -128,17 +128,24 @@ jobs:
       # leaves the previous latest release alone.
       - name: decide the latest release
         id: guard
-        run: node scripts/release-latest-guard.js --tag "${{ github.ref_name }}"
+        # The tag travels as an environment variable, never as text
+        # interpolated into the shell command: a tag name may contain
+        # characters the shell would expand.
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/release-latest-guard.js --tag "$RELEASE_TAG"
 
       - name: mark the release as latest
         if: steps.guard.outputs.promote == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
         run: |
-          gh release edit "${{ github.ref_name }}" \
-            --repo "${{ github.repository }}" \
+          gh release edit "$RELEASE_TAG" \
+            --repo "$REPOSITORY" \
             --latest
-          echo "marked ${{ github.ref_name }} as the latest release"
+          echo "marked $RELEASE_TAG as the latest release"
 
       - name: report the skipped latest release
         if: steps.guard.outputs.promote != 'true'

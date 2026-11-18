@@ -417,7 +417,10 @@ jobs:
       # `next` and leaves `latest` alone.
       - name: decide the latest dist-tag
         id: guard
-        run: node scripts/release-latest-guard.js --tag "${{ env.TAG }}"
+        # TAG is already an environment variable of this job, so the
+        # shell expands it itself. Interpolating it into the command
+        # text would let a tag name reach the shell unexpanded.
+        run: node scripts/release-latest-guard.js --tag "$TAG"
 
       - name: promote platform packages to latest
         if: steps.guard.outputs.promote == 'true'

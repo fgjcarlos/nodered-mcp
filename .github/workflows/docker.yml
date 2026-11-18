@@ -63,7 +63,12 @@ jobs:
       # leaves `latest` where it is.
       - name: decide the latest image tag
         id: guard
-        run: node scripts/release-latest-guard.js --tag "${{ github.ref_name }}"
+        # The tag travels as an environment variable, never as text
+        # interpolated into the shell command: a tag name may contain
+        # characters the shell would expand.
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/release-latest-guard.js --tag "$RELEASE_TAG"
 
       - name: extract metadata
         id: meta
