@@ -32,8 +32,8 @@ proceed. Check that `NODERED_BACKUP_DIR` exists and is writable.
 
 In the container image the directory is `/var/lib/nodered-mcp/backups`
 and the server runs as the `nonroot` user (uid 65532), so a bind mount
-whose permissions do not allow that user to write makes every mutating
-call fail with a backup error. Mount a volume there instead
+whose permissions do not allow that user to write makes every call that
+snapshots fail with a backup error. Mount a volume there instead
 (`--volume nodered-backups:/var/lib/nodered-mcp/backups`) and keep it
 mounted across recreations.
 

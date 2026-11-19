@@ -3,8 +3,12 @@
 44 tools, 3 resources, 2 prompts. Tools are classified by risk:
 
 - **read** — no side effects.
-- **write** — mutates persisted configuration and takes a backup first.
+- **write** — mutates persisted configuration.
 - **action** — has a runtime side effect that is not persisted (e.g. `inject_node`).
+
+A write that changes the flow configuration takes a snapshot of it first; the
+palette writes and `inject_node` do not. See
+[Which writes snapshot the flow configuration](#which-writes-snapshot-the-flow-configuration).
 
 The `read` / `write` split is enforced at tool **registration**, not
 inside each handler: the 23 mutating tools are not advertised when
@@ -23,8 +27,11 @@ judged on the effective configuration the write would deploy, and the
 document is walked recursively, so a forbidden type nested inside a
 subflow definition is refused too. `update_node` is judged on the node
 as it is after the patch is merged. The refusal names
-`MCP_NODE_DENYLIST` and the offending type, and it happens before the
-runtime is contacted and before any backup snapshot is taken.
+`MCP_NODE_DENYLIST` and the offending type. It happens before any backup
+snapshot is taken and, for every surface whose effective content is known up
+front, before the runtime is contacted. Two surfaces cannot know it up front:
+`update_node` and `connect_nodes` are judged on what they would produce, so
+their refusal follows a read of the tab and never a deployment or a backup.
 
 Covered surfaces: `create_flow`, `update_flow`, `add_node`,
 `update_node`, `connect_nodes`, `import_flow`, `set_flows`,
@@ -142,9 +149,40 @@ nodes and credentials; the automatic pre-restore snapshot is structural too.
    re-enter the credentials in the Node-RED editor, and deploy. Check the
    affected nodes' authentication and operation before declaring recovery done.
 
-The write tools advertise these limits before execution, and `restore_backup`
-repeats them in its successful response. No additional filesystem or secret
-access is granted to the MCP server.
+The write tools that change the flow configuration advertise these limits
+before execution. The palette tools and `inject_node` do not advertise them:
+the palette changes the installed modules and `inject_node` fires a message,
+and neither changes the flow configuration. `set_context` does not advertise
+them either, even though provisioning its helper tab is a flow-configuration
+write: the tool writes into the helper's context, and only the provisioning of
+the helper tab touches the flows. `restore_backup` repeats the limits in its
+successful response. No additional filesystem or secret access is granted to
+the MCP server.
+
+### Which writes snapshot the flow configuration
+
+The snapshot is fail-closed: when it cannot be written, the write does not
+proceed.
+
+**Snapshots the current configuration:**
+
+- flow tabs: `create_flow`, `update_flow`, `delete_flow`, `enable_flow`,
+  `disable_flow`;
+- granular edits: `add_node`, `update_node`, `delete_node`, `connect_nodes`;
+- the editor clipboard: `import_flow`;
+- full deploy and restore: `set_flows`, `restore_backup`;
+- subflow definitions: `create_subflow`, `update_subflow`, `delete_subflow`,
+  `instantiate_subflow`;
+- the runtime state: `set_flows_state` (it starts or stops the runtime, and
+  snapshots the configuration before it does);
+- the `set_context` helper, when the call has to provision its tab.
+
+**Takes no snapshot:**
+
+- the palette: `install_node`, `uninstall_node`, `enable_node`,
+  `disable_node` — they change the installed modules, not the flow
+  configuration;
+- `inject_node` — it fires a message; nothing is persisted.
 
 ## Flows
 

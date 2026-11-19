@@ -71,7 +71,9 @@ type Server struct {
 	//
 	// ctxHelperMu is the single shared synchronization point for the
 	// helper lifecycle: pointer publication, metadata writes, and
-	// restore-side invalidation. Issue #310. Every set_context path and
+	// restore-side invalidation. Issue #310. It is a context-aware
+	// mutex: the wait is abandoned when the caller's context is done
+	// (issue #347). Every set_context path and
 	// every restore_backup that touches ctxHelper must take this lock;
 	// see ensureSetContextHelper for the lock-ordering contract with
 	// nodered.Client.writeMu.

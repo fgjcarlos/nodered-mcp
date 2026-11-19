@@ -169,6 +169,7 @@ closed. Reopen it once there is new context.
   in the PR body. The project tracks four runtime dependencies; the
   bar for adding a fifth is "no stdlib alternative, no standard
   alternative".
-- Accept a PR that bypasses the backup-before-write guardrail. Every
-  mutating tool currently snapshots before it ships; the design
-  rationale is in [`docs/architecture.md`](./docs/architecture.md).
+- Accept a PR that bypasses the backup-before-write guardrail. Every tool
+  that mutates the flow configuration currently snapshots before it ships;
+  the design rationale is in
+  [`docs/architecture.md`](./docs/architecture.md).

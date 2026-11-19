@@ -18,9 +18,9 @@ package mcp
 // recreated" requirement.
 //
 // Concurrency: the helper is shared across all goroutines that call
-// set_context concurrently. Server.ctxHelperMu guards the entire
-// helper lifecycle — pointer publication, metadata writes, and the
-// restore-side invalidation. The lock is held across the whole
+// set_context concurrently. Server.ctxHelperMu (a context-aware mutex)
+// guards the entire helper lifecycle — pointer publication, metadata
+// writes, and the restore-side invalidation. The lock is held across the whole
 // critical section (provisioning + inject dispatch) so the helper
 // observed at the fast path is the same one the inject uses, and a
 // restore cannot interleave so a caller uses a stale helper after a
@@ -150,8 +150,9 @@ func (s *Server) injectWithProvisioningRetry(ctx context.Context, injectID strin
 //
 // Locking contract (issue #310): the caller MUST hold
 // Server.ctxHelperMu for the entire critical section that includes
-// the inject dispatch in handleSetContext. Holding the lock here
-// means:
+// the inject dispatch in handleSetContext. The wait for that lock is
+// context-aware: a caller whose context is done gives up instead of
+// staying queued (issue #347). Holding the lock here means:
 //   - pointer publication (s.ctxHelper = h) and metadata writes
 //     (h.flowID, h.injectID, h.functionID) happen under the same
 //     mutex acquisition, so a reader can never observe a partially-

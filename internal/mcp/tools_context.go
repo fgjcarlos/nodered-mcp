@@ -48,9 +48,6 @@ func (s *Server) handleGetContext(ctx context.Context, req mcp.CallToolRequest) 
 
 // describeContextTarget renders the id/key part of a context message, so the
 // empty-store reply names exactly what was looked up.
-
-// describeContextTarget renders the id/key part of a context message, so the
-// empty-store reply names exactly what was looked up.
 func describeContextTarget(id, key string) string {
 	switch {
 	case id != "" && key != "":

@@ -12,7 +12,7 @@
 | Bearer auth on HTTP transport | ✅ Token mandatory on non-loopback binds; server refuses to start without it |
 | OAuth for web clients | ✅ OAuth 2.1 / OIDC resource server with JWKS discovery |
 | **Concurrency (two LLMs editing)** | ✅ Resolved: a granular edit is built on the revisioned snapshot it deploys, so a deployment that lands in between is refused with a 409 instead of overwriting it |
-| **Backup pruning** | ⬜ **Pending** (marked with `ponytail:` in `backup.go`). Add when the directory gets unwieldy |
+| **Backup pruning** | ✅ Implemented: the newest `NODERED_BACKUP_KEEP` snapshots are kept (default 50, `0` disables pruning) |
 | Debug buffer size | ⬜ Fixed at 500; configurable if someone hits the ceiling |
 | Local query cache | ⬜ Not planned |
 
@@ -26,9 +26,10 @@
 | v0.4 | `search_nodes`, settings and runtime state — 19 tools, 3 resources, 2 prompts | Released |
 | v0.5 | Read-only mode, context-efficient reads, diagnostics, context, the debug stream, granular node editing, `diff_flows`, HTTP bearer auth — 43 tools | Released |
 | v0.6 | OAuth 2.1 Resource Server for hosted web connectors; npm channel with Windows binaries; SBOM + provenance on every artefact; Dependabot; SHA-pinned actions; CODEOWNERS + issue/PR templates; central NR version detection; get_runtime_info with capability matrix; startup banner with degraded-tools count — 44 tools | Released |
+| v0.7 | npm-native platform packages: the main npm package lists the six native binaries as exact-version `optionalDependencies` and the postinstall downloader is gone; npm publication hardened (scope guard, serialized promotion, pinned release toolchain); `init` detects Claude Desktop before its config exists | Released (v0.7.2) |
 
 ## Planned
 
-| Version | Scope |
-|---|---|
-| v0.7 | Local query cache |
+No version is planned yet. The local query cache was considered for v0.7
+and dropped: the risk table above lists it as *not planned*, and v0.7
+shipped the npm-native platform packages instead.

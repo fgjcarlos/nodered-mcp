@@ -141,7 +141,8 @@ docker run --rm --name nodered-mcp \
 ```
 
 The `nodered-backups` volume is where the image writes the snapshot it takes
-before every mutating call (`NODERED_BACKUP_DIR`). Keep it mounted: without
+before every mutating call that changes the flow configuration
+(`NODERED_BACKUP_DIR`). Keep it mounted: without
 it the snapshots live in the container's writable layer and are lost when the
 container is recreated. `docker run --rm` removes the container, not the
 named volume, so recreating the container keeps the history of snapshots.
@@ -171,9 +172,12 @@ guardrails. Three are built in:
 
 - Flow documents are treated as opaque JSON — no fixed Go structs,
   no field loss.
-- Every mutating operation takes a backup of the full flow
-  configuration first and fails closed if the snapshot cannot be
-  written. This is structural recovery only: deleted credentials are not
+- Every operation that mutates the flow configuration takes a backup of the
+  full flow configuration first and fails closed if the snapshot cannot be
+  written. The palette operations (`install_node`, `uninstall_node`,
+  `enable_node`, `disable_node`) and `inject_node` change the installed
+  modules or fire a message, not the flow configuration, and take no snapshot.
+  The snapshot is structural recovery only: deleted credentials are not
   recoverable from these snapshots. Before deleting or replacing flows,
   arrange an authorized external backup including the encrypted credential
   store and its original keys/configuration; see

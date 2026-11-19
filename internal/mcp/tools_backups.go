@@ -44,8 +44,6 @@ func (s *Server) handleListBackups(_ context.Context, _ mcp.CallToolRequest) (*m
 }
 
 // handleDiffFlows compares two flow configurations.
-
-// handleDiffFlows compares two flow configurations.
 func (s *Server) handleDiffFlows(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	from, err := req.RequireString("from")
 	if err != nil {
@@ -80,10 +78,6 @@ func (s *Server) handleDiffFlows(ctx context.Context, req mcp.CallToolRequest) (
 // resolveFlowSource turns a diff operand into a flow configuration. "current"
 // reads the live instance; anything else names a backup, with "latest" meaning
 // the most recent one.
-
-// resolveFlowSource turns a diff operand into a flow configuration. "current"
-// reads the live instance; anything else names a backup, with "latest" meaning
-// the most recent one.
 func (s *Server) resolveFlowSource(ctx context.Context, name string) (nodered.RawFlow, error) {
 	if name == "current" {
 		return s.nrClient.ListFlows(ctx)
@@ -100,8 +94,6 @@ func (s *Server) resolveFlowSource(ctx context.Context, name string) (nodered.Ra
 	}
 	return s.nrClient.ReadBackup(name)
 }
-
-// handleRestoreBackup restores the full flow config from a saved backup.
 
 // handleRestoreBackup restores the full flow config from a saved backup.
 func (s *Server) handleRestoreBackup(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
