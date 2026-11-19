@@ -6,6 +6,30 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- feat(init): add `--dry-run` to preview the merged config (#314, PR #321). A
+  plain `init` prints a freshly generated snippet, not the merge, so an
+  operator rerunning `--write` against a config that already holds other MCP
+  servers had no way to verify the real result without writing it.
+  `init --dry-run` performs the real merge in memory, redacts the
+  secret-bearing values and prints the exact bytes the write would produce: it
+  creates no file, no parent directory, no `.bak` and no temporary file, and
+  changes no permissions. The merge was split at its single write
+  (`mergeServer` is pure, `mergeServerIntoFile` writes), so the preview and
+  the commit share one computation by construction.
+- feat(mcp): refuse known-incompatible `set_context` and `inject_node` payload
+  calls (#316, PR #323). The version gate for `set_context` and for
+  `inject_node` with a payload called the version probe from inside the
+  request handler, and that probe fires a real `GET /settings`: an
+  argument-rejection path contacted the runtime and raced the handler's own
+  writes. The client now exposes a non-probing cached accessor
+  (`CachedNodeRedVersion`) and a `probed` flag that tells a cold cache from a
+  probe that ran and found no version, so a call the runtime cannot serve is
+  refused before any side effect, naming the detected and the required
+  version, while a runtime whose version could not be detected still runs and
+  says the call was not verified.
+
 ### Fixed
 
 - Gate every publication channel on the test suite of the tagged commit
@@ -261,6 +285,65 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   Admin API v2 with deployment type `flows`. Unrelated configuration and omitted
   metadata are retained; revision conflicts are returned without retrying.
 
+- fix(mcp): make the `get_runtime_info` capability states actionable (#315, PR
+  #322). A degraded tool was rendered as a bare string such as
+  `version_too_low`, so the operator had to know out of band that the remedy
+  is to upgrade Node-RED. The facts needed to make each entry actionable were
+  already on the runtime probe the matrix consumed, so the change is a
+  presentation over existing signals: a new `capabilityGuidance` adds a reason
+  and a remedy to every non-`ok` entry, keeps `unknown` explicit with an
+  empty remedy, and leaves the absence of a guidance entry as the signal that
+  the tool works.
+- fix(mcp): amortize the per-IP rate limiter eviction sweep (#313, PR #320).
+  The limiter scanned the whole map on every new-key insert once it exceeded
+  1024 entries, holding the global mutex for the entire pass: O(n) per request
+  under churn, and with every entry younger than the 10-minute TTL the scan
+  deleted nothing. The pass is now gated on two conditions -- the inserts
+  since the last sweep reached the threshold, and one TTL window elapsed since
+  it -- so an insert stays O(1) under the lock and a single O(n) pass runs at
+  most once per TTL window. The map is still uncapped on purpose: a hard cap
+  would let an attacker churn IPs to evict honest clients' buckets. The
+  behaviour behind a reverse proxy is now documented too, including why
+  `X-Forwarded-For` is ignored on purpose.
+- fix(nodered): route every logged URL through `RedactURL` (#312, PR #319).
+  Every URL that reaches a log line or a returned error now passes through the
+  existing redaction helper, so a query-string token or the userinfo of
+  `NODERED_URL` never lands in operator-visible output. The internal callers
+  were migrated to the exported `RedactURL`, and the error wrap sites use a
+  small `redactedErr` type whose `Error` scrubs every URL-shaped substring
+  while preserving the wrapped error.
+- fix(mcp): enforce the node denylist when restoring flow backups (#311, PR
+  #318). `restore_backup` deploys the whole flow configuration but never ran
+  the `MCP_NODE_DENYLIST` check the other write tools run, so a backup saved
+  before a policy change could reintroduce a now-prohibited node type and
+  reopen the RCE path issue #81 closed. The guard reuses the shared walkers
+  and runs on the same envelope the client deploys with, fires before the
+  snapshot and before `POST /flows`, and names the denied type.
+- fix(mcp): synchronize the context helper lifecycle (#310, PR #317). The
+  `set_context` helper was provisioned, published, rolled back and injected
+  without a single owner of that lifecycle, so a concurrent first caller could
+  provision a duplicate tab and a restore could invalidate the helper under an
+  in-flight call. One server-owned mutex now covers provisioning, publication,
+  rollback and injection, and a backup restore is serialized against the
+  invalidation. Regressions cover concurrent first callers, a provisioning
+  failure and retry, restore exclusion and reprovisioning.
+- fix(init): refuse invalid MCP server collections (#303, PR #306). `init
+  --write` could replace an existing MCP server collection that is not an
+  object, destroying a configuration it does not understand. The refusal
+  happens before the backup and before the write, so the original config is
+  preserved.
+- fix(init): make the client discovery evidence-based (#302, PR #309). A GUI
+  client is now detected from the platform's own application and config
+  evidence and a CLI client from an executable on `PATH`; OpenCode and Pi
+  joined the supported catalog, and the catalog, the documentation and the
+  examples are checked for parity. The clients are detected before the setup
+  prompts, and a clear error is returned when none is found.
+- fix(init): preserve the invoked symlink path (#116, PR #307). The generated
+  config used `os.Executable()`, which resolves a symlink, so a
+  package-manager upgrade that repointed the binary changed the command in the
+  config. The invoked path is used instead, with a fallback to `nodered-mcp`
+  and a documented `PATH` requirement when it cannot be resolved.
+
 - fix(npm): retry registry reads after `npm publish` and `npm
   dist-tag add` to tolerate npmjs propagation delay (#298). The
   v0.7.2 release required two manual reruns because the verifier
@@ -270,6 +353,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   (five attempts, linear backoff, ~45 s budget) and the workflow
   contract test (`bin/npm_workflow_order_test.js`) enforces that
   each verifier step routes through it.
+
+### Dependencies
+
+- chore(deps): bump the actions group: `docker/setup-qemu-action` 4.2.0 -> 4.3.0
+  and `docker/setup-buildx-action` 4.2.0 -> 4.3.0 (PR #301);
+  `docker/setup-qemu-action` -> 4.4.0, `docker/setup-buildx-action` -> 4.4.1
+  and `docker/build-push-action` 7.3.0 -> 7.4.0 (PR #305);
+  `actions/setup-node` 7.0.0 -> 7.1.0, `goreleaser/goreleaser-action` 7.2.3 ->
+  7.3.0, `actions/upload-artifact` 7.0.1 -> 7.0.2 and
+  `actions/download-artifact` 8.0.1 -> 8.0.2 (PR #326); `docker/login-action`
+  4.6.0 -> 4.7.0 (PR #360) and 4.7.0 -> 4.8.0 (PR #365).
+- chore(deps): bump `golang.org/x/time` 0.15.0 -> 0.16.0 (PR #304).
 
 ## [0.7.2] - 2026-08-24
 
@@ -293,7 +388,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - chore(deps): bump the actions group (docker/login-action, download-artifact,
   upload-artifact, goreleaser-action, checkout) and github.com/mark3labs/mcp-go
-  (#282, #283, #284, #285, #286, #287).
+  (PRs #282-#287).
 
 ## [0.7.1] - 2026-08-06
 

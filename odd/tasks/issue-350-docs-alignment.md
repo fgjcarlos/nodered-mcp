@@ -102,3 +102,14 @@ guarantees (#350)`.
   `go test ./...` OK (los seis paquetes, 0 fallos); `go vet ./...` OK;
   `git diff --check` limpio. Conteos verificados contra el código:
   44 tools, 21 read, 23 mutantes, 3 recursos, 2 prompts.
+- L6. Auditoría de cierre (auditor independiente): el alcance de docs y
+  comentarios quedó verificado, pero el CHANGELOG seguía incompleto para las
+  fusiones posteriores a v0.7.2. La causa fue una lectura equivocada: los
+  números de los títulos de commit (`#306`, `#307`, `#309`, `#317`-`#323`,
+  `#301`, `#304`, `#305`, `#326`) son **números de pull request**, no de issue;
+  los issues reales son `#116`, `#302`, `#303`, `#310`, `#311`, `#312`, `#313`,
+  `#314`, `#315` y `#316`, verificados con `gh issue view` y con los cuerpos de
+  los PR (`Closes #N`). Corrección: entradas nuevas para los diez issues
+  (sección `### Added` para #314 y #316, `### Fixed` para los demás) y una
+  sección `### Dependencies` con los seis bumps de Dependabot citados por su
+  PR. La sección `[0.7.2]` pasó a citar sus bumps como `PRs #282-#287`.
