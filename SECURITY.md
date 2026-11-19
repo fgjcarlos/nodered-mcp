@@ -15,9 +15,11 @@ flow configuration (`create_flow`, `update_flow`, `add_node`,
 `set_flows`, `delete_flow`, `enable_flow`, `disable_flow`,
 `create_subflow`, `update_subflow`, `instantiate_subflow`,
 `delete_subflow`, `restore_backup`) is effectively a deployer for that
-instance. The palette writes (`install_node`, `uninstall_node`,
-`enable_node`, `disable_node`) change the installed modules and
-`set_flows_state` starts or stops the runtime; neither deploys a flow.
+instance. The server's own `set_context` helper is one as well: the first
+call provisions a complete tab on the runtime. The palette writes
+(`install_node`, `uninstall_node`, `enable_node`, `disable_node`) change the
+installed modules and `set_flows_state` starts or stops the runtime; neither
+deploys a flow.
 Any node type the Node-RED runtime has installed — including
 shell-executing ones — can be deployed through these tools.
 

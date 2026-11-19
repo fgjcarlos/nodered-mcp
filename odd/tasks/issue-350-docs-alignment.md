@@ -48,8 +48,23 @@ hallazgos informativos, sin transición de corrección:
   `set_flows_state` también snapshot (no cambia los flows, arranca o para el
   runtime). Corregido: el comentario lo dice.
 
+El guard de entrega bloqueó el push: el rango debía revisarse de nuevo. Segunda
+revisión: lineage `review-dc0f9aa35102f2da`, **approved**, con dos avisos
+informativos más, corregidos antes de publicar:
+
+- `R2-READ-350-001` (readability, WARNING): el párrafo de límites de
+  recuperación excluía a `set_context` de las tools que los anuncian, mientras
+  la misma documentación clasificaba el aprovisionamiento de su helper como
+  una escritura de configuración. Corregido: el párrafo explica que
+  `set_context` no los anuncia aunque el aprovisionamiento sí sea una
+  escritura de flows.
+- `R2-READ-350-002` (readability, WARNING): la lista de deployers de
+  `SECURITY.md` omitía a `set_context`. Corregido: el helper se cuenta como
+  deployer porque su primer llamada aprovisiona una tab completa.
+
 Commits tras la revisión: `docs: restore the doc comments dropped with their
-duplicates (#350)`.
+duplicates (#350)` y `docs: settle how set_context relates to the backup
+guarantees (#350)`.
 
 ## Log
 
