@@ -54,6 +54,39 @@ S13. Contexto verificado en el código: la suite de CI cubre `gofmt` (`ci.yml:28
 
 **Límite de la evidencia (honestidad).** La aceptación pide "simular una prueba funcional fallida y comprobar que no se publica ningún canal". En este repositorio la regresión automatizada posible es **estructural** (T1), como ya se hace con `npm.yml`. La verificación de extremo a extremo (etiquetar un commit con una prueba rota y comprobar que no se publica nada) requiere un tag real y publicaría de verdad: se documenta como procedimiento manual opcional, no como regresión automatizada.
 
+## Auditoría de cierre (2026-11-19)
+
+Auditoría del trabajo **ya mergeado** en `main` (squash `9d2c51f`, PR #384) contra cada criterio de aceptación de la issue #349. El árbol auditado es idéntico a `origin/main` (`git diff origin/main` vacío).
+
+| Criterio de aceptación | Veredicto | Evidencia |
+|---|---|---|
+| Puerta común de release sobre el SHA exacto | Satisfecho | `ci.yml:17` (`workflow_call`) y `ci.yml:8-9` (trigger `tags: "v*"`); `release.yml:23-24` y `docker.yml:27-28` invocan `ci.yml` como job `gate`; cadenas `release-snapshot` (`release.yml:35`) → `release-artifact-smoke` (`:73`) → `goreleaser` (`:96`) → `promote-latest` (`:134`), y `build` (`docker.yml:31`). npm se gatea por `workflow_run` sobre el run de release (`npm.yml:36-39`, `:66-67`, `:247-248`) y publica el `head_sha` (`:78`, `:256`, `:354`), no el nombre del tag. |
+| Un fallo funcional no publica ningún canal | Satisfecho (estructural) | Todo job que publica cuelga de la puerta: `goreleaser` (`release.yml:96`), `promote-latest` (`:134`), push a GHCR (`docker.yml:31`, `:97`), `publish-platforms` (`npm.yml:58`), `publish-main` (`npm.yml:245`) y `verify-and-promote` (`npm.yml:342`). La simulación del fallo es la regresión `bin/release_gate_test.js` (19 grupos). |
+| Una prerelease o un rerun antiguo no mueve `latest` | Satisfecho | Regla única en `scripts/release-latest-guard.js:67-99`; `make_latest: false` (`.goreleaser.yaml:11-12`) y `flavor: latest=false` (`docker.yml:81-82`) desactivan la promoción automática; la promoción queda condicionada en `release.yml:148-173` (job `promote-latest`, `contents: write`), `docker.yml:64-89` y `npm.yml:426-497`. |
+| Regresión que falla antes y pasa después | Satisfecho | `bin/release_gate_test.js` (19 grupos de aserciones) y `bin/release_latest_guard_test.js` (15), ejecutados por el job `npm-wrapper` (`ci.yml:126`, `ci.yml:139-146`). Ejecutados en verde en esta auditoría. |
+| Documentación afectada actualizada | Satisfecho | `CONTRIBUTING.md:118-150` (puerta y regla de `latest`), `CHANGELOG.md:11-27`. |
+
+**Límites y seguimiento (no bloquean el cierre):**
+
+- La simulación de una prueba funcional fallida es **estructural**, no dinámica: probarla de extremo a extremo exige un tag real que publica de verdad. Queda como procedimiento manual documentado, fuera del alcance de esta issue.
+- `docker.yml:87-88` deja las etiquetas móviles de semver (`:1`, `:0.8`) sin condicionar a la guarda: una carrera entre tags distintos que **preexiste** a este cambio y cuyo arreglo reintroduciría el defecto de cancelación de runs pendientes (R4). Documentada como seguimiento en L24.
+- Avisos de cobertura no bloqueantes de la revisión nativa: ninguna aserción fija que `ci.yml` siga ejecutando `go test ./...` (`ci.yml:114-115`); la verificación tag→SHA de npm existe solo en `publish-platforms` (`npm.yml:92-103`); ninguna aserción fija el `if:` de promoción de `release.yml:159` ni el orden guard→push de `docker.yml`. Quedan como seguimiento.
+
+**Comprobaciones del alcance (2026-11-19, sobre el contenido de `main`):**
+
+| Comprobación | Resultado |
+|---|---|
+| `node bin/*_test.js` (9 archivos, incluidos `release_gate_test.js` y `release_latest_guard_test.js`) | OK (exit 0) |
+| `go build ./...` | OK |
+| `go vet ./...` | OK |
+| `gofmt -l .` | limpio |
+| `git diff --check` y `git show --check 9d2c51f` | limpio |
+| `go test ./... -count=1` | OK en el reintento. La primera ejecución falló en `TestStatusTailReconnectsAfterDrop` (`internal/nodered/status_test.go:400`), que pasó 5/5 aislado y 8/8 con el paquete completo: prueba intermitente y **preexistente** — el diff de #349 no toca ningún archivo Go. |
+| `go test -race ./... -count=1` | OK |
+| `scripts/coverage-ratchet.sh` | OK — 86,20% contra un piso de 81,20% |
+| `scripts/complexity-check.sh` | OK (requirió instalar `gocyclo v0.6.0`) |
+| parseo YAML de `ci.yml`, `release.yml`, `docker.yml`, `npm.yml`, `.goreleaser.yaml` | OK |
+
 ## Log
 
 L1. Petición del usuario (2026-11-17), verbatim: "Realiza un plan para resolver la issue #349, si tienes dudas realiza un cuestionario".
@@ -101,3 +134,5 @@ L22. Entrega: la rama `fix/issue-349-release-sha-gate` lleva seis commits (`ffc6
 L23. Revisión nativa sobre el candidato final (linaje `review-4ea44b88d9c245c2`, tier alto, 1055 líneas, presupuesto de corrección 200): los cuatro revisores fueron admitidos y el refute corroboró **un** hallazgo severo: **R1-RELEASE-LATEST-WRITE-PERMISSION** (risk, CRITICAL, determinista) — marcar la release como latest es una escritura y el default del workflow es `contents: read`. La corrección acotada (`3fdcb2d`, 49 líneas de diff) mueve la promoción fuera del job de goreleaser a un job propio `promote-latest` que declara `contents: write` de forma explícita, y añade una regresión que exige que el job que ejecuta `gh release edit` declare ese permiso. El validador dirigido aprobó la corrección y la revisión cerró como aprobada; el acuse exacto quemó la autoridad con evidencia `gentle-ai.review-acknowledged/v1`.
 
 L24. Avisos informativos de esa segunda revisión (no bloquean, no reabren la revisión): R2-NPM-GUARD-COVERAGE, R2-YAML-PARSER-COVERAGE, R3-LATEST-REGRESSION-COVERAGE, R3-NPM-SHA-REGRESSION-COVERAGE (cobertura de las regresiones: más casos para la guarda de npm, el parser del test y el SHA de npm) y R3-RELEASE-EDIT-PERMISSION (la misma observación de permisos, ya resuelta por la corrección). Queda un aviso con decisión pendiente para el mantenedor: **R3-LATEST-CROSS-TAG-RACE** (`docker.yml:16-19`) — dos tags distintos pueden publicar a la vez y competir por las etiquetas móviles de semver (`:1`, `:0.8`), no solo por `latest`; `latest` sí queda protegido por la guarda. La carrera de las etiquetas móviles de semver **preexiste** a este cambio (antes no había ningún grupo de concurrencia) y arreglarla exigiría serializar por línea de versión, lo que reintroduciría el defecto R4 (GitHub conserva un solo run pendiente por grupo y reemplaza al pendiente). Se deja documentada como seguimiento, no resuelta en esta issue.
+
+L25. Auditoría de cierre (2026-11-19): se auditó el trabajo de #349 ya mergeado en `main` (squash `9d2c51f`, PR #384) contra cada criterio de aceptación de la issue y se cerró la issue. Veredicto: los cinco criterios quedan **satisfechos**, con dos límites documentados —la simulación del fallo funcional es estructural y no dinámica, porque una prueba real exige un tag que publica de verdad, y las etiquetas móviles de semver de Docker quedan fuera de la guarda por una carrera preexistente—. Las comprobaciones del alcance quedaron en verde; la única falla fue `TestStatusTailReconnectsAfterDrop`, intermitente y preexistente (el diff de #349 no toca código Go). Los avisos de cobertura de la revisión nativa (R2/R3) quedan como seguimiento, fuera del alcance de esta issue.
