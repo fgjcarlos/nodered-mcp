@@ -144,7 +144,8 @@ docker run --rm --name nodered-mcp \
 ```
 
 El volumen `nodered-backups` es donde la imagen escribe la copia que toma
-antes de cada llamada que muta (`NODERED_BACKUP_DIR`). Mantenelo montado: sin
+antes de cada llamada que muta la configuración de flows (`NODERED_BACKUP_DIR`).
+Mantenelo montado: sin
 el, las copias viven en la capa escribible del contenedor y se pierden cuando
 se recrea. `docker run --rm` borra el contenedor, no el volumen con nombre,
 así que recrear el contenedor conserva el historial de copias.
@@ -174,8 +175,11 @@ en marcha exige guardarraíles. Hay tres integrados:
 
 - Los documentos de flow se tratan como JSON opaco — sin structs
   fijos de Go, sin pérdida de campos.
-- Cada operación mutante hace un snapshot completo de la
+- Cada operación que muta la configuración de flows hace un snapshot completo de la
   configuración antes y falla en cerrado si no puede escribirlo.
+  Las operaciones de paleta (`install_node`, `uninstall_node`, `enable_node`,
+  `disable_node`) y `inject_node` cambian los módulos instalados o disparan un
+  mensaje, no la configuración de flows, y no toman snapshot.
   Solo permite recuperar la estructura: estos snapshots no recuperan las
   credenciales borradas. Antes de borrar o reemplazar flows, prepará un backup
   externo autorizado que incluya el almacén cifrado de credenciales y sus

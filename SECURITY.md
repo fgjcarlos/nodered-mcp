@@ -9,12 +9,17 @@ README for context.
 ## Threat model
 
 `nodered-mcp` is an MCP server that talks to a Node-RED instance over
-its admin HTTP API. Every caller of an MCP write tool
-(`create_flow`, `update_flow`, `add_node`, `update_node`, `import_flow`,
-`set_flows`, `create_subflow`, `update_subflow`, `restore_backup`) is
-effectively a deployer for that instance. Any node type the Node-RED
-runtime has installed — including shell-executing ones — can be deployed
-through these tools.
+its admin HTTP API. Every caller of an MCP write tool that changes the
+flow configuration (`create_flow`, `update_flow`, `add_node`,
+`update_node`, `delete_node`, `connect_nodes`, `import_flow`,
+`set_flows`, `delete_flow`, `enable_flow`, `disable_flow`,
+`create_subflow`, `update_subflow`, `instantiate_subflow`,
+`delete_subflow`, `restore_backup`) is effectively a deployer for that
+instance. The palette writes (`install_node`, `uninstall_node`,
+`enable_node`, `disable_node`) change the installed modules and
+`set_flows_state` starts or stops the runtime; neither deploys a flow.
+Any node type the Node-RED runtime has installed — including
+shell-executing ones — can be deployed through these tools.
 
 The most acute risk is **remote code execution on the Node-RED host**
 via the Node-RED `exec` and `system` node types:
@@ -41,11 +46,14 @@ Out of the box, `nodered-mcp` defaults to a deny-list that blocks the
 | `MCP_NODE_DENYLIST=` (empty) | Operator opt-out — every node type is allowed. |
 | `MCP_NODE_DENYLIST=exec,system,foo,bar` | Custom denylist (replaces defaults). |
 
-The check runs in the Node-RED client, BEFORE the runtime is contacted and
-BEFORE a backup snapshot is taken. It is evaluated on the **effective
-configuration the write would deploy** — the document as it will be sent,
-not the request as it arrived — and it walks that document recursively,
-so a forbidden node type nested inside a subflow definition is found too.
+The check runs in the Node-RED client, BEFORE any backup snapshot is taken
+and — for every surface whose effective content is known up front —
+BEFORE the runtime is contacted. The two exceptions are listed under
+[When the refusal happens](#when-the-refusal-happens). It is evaluated on
+the **effective configuration the write would deploy** — the document as it
+will be sent, not the request as it arrived — and it walks that document
+recursively, so a forbidden node type nested inside a subflow definition is
+found too.
 A denied node type returns a typed error to the model and never touches
 the live instance:
 
@@ -122,10 +130,12 @@ never a backup.
    Node-RED's admin port to a network the MCP client is allowed to
    reach, and nothing else.
 
-5. **Audit backups.** Every write takes a backup of the current flow
-   config first. The default directory is `./backups`; configure
-   `NODERED_BACKUP_DIR` to a durable path you can audit after an
-   incident.
+5. **Audit backups.** Every write that changes the flow configuration takes
+   a backup of the current flow config first. The palette writes and
+   `inject_node` take none: they change the installed modules or fire a
+   message, not the flow configuration. The default directory is
+   `./backups`; configure `NODERED_BACKUP_DIR` to a durable path you can
+   audit after an incident.
 
 ## Operator opt-out
 

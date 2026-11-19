@@ -227,9 +227,9 @@ wording, and enforced by the `nodered` client, which is the only layer
 that knows the **effective configuration** a write would deploy.
 
 - The client holds the policy (`nodered.SetNodePolicy`) and consults it
-  at the entry of every write path: `CreateFlow`, `UpdateFlow`,
-  `AddNode`, `UpdateNode`, `ConnectNodes`, `SetFlows`, `RestoreFlows`,
-  `CreateSubflow`, `UpdateSubflow` and `InstantiateSubflow`.
+  at the entry of every write path that can carry a node type: `CreateFlow`,
+  `UpdateFlow`, `AddNode`, `UpdateNode`, `ConnectNodes`, `SetFlows`,
+  `RestoreFlows`, `CreateSubflow`, `UpdateSubflow` and `InstantiateSubflow`.
 - The document is walked **recursively** over the admin API's own shapes
   (`nodes`, `configs`, `subflows`), so a forbidden type nested inside a
   subflow definition is found. The walk stops at nothing but the
@@ -266,15 +266,23 @@ whose deadline passes gives up instead of staying queued, and it gives up
 before it snapshots anything or contacts the runtime (issue #347).
 See [Context helper recovery](tools.md#context-helper-recovery) for operator limits.
 
-## Safety: backup before every write (v0.1 guardrail)
+## Safety: backup before the flow-config writes (v0.1 guardrail)
 
-Every mutating operation (`POST /flows`, `PUT /flow/:id`,
-`DELETE /flow/:id`) takes, **before** touching anything, a
-`GET /flows` (the complete `flows.json`) and writes it to disk with
-a timestamp.
+Every write that changes the flow configuration (`POST /flows`,
+`PUT /flow/:id`, `DELETE /flow/:id`, `PUT /flow/global`) takes, **before**
+touching anything, a `GET /flows` (the complete `flows.json`) and writes it to
+disk with a timestamp. `POST /flows/state` (runtime start/stop) snapshots it
+too.
+
+The palette operations (`POST /nodes`, `DELETE /nodes/:module`,
+`PUT /nodes/:module`) and `inject_node` (`POST /inject/:id`) take no
+snapshot: they change the installed modules or fire a message, not the
+persisted flow configuration.
 
 - Directory: env `NODERED_BACKUP_DIR` (default `./backups` or OS temp; the
   container image sets it to `/var/lib/nodered-mcp/backups`).
+- Retention: the newest `NODERED_BACKUP_KEEP` snapshots are kept (default
+  50; `0` disables pruning). Pruning never blocks a write.
 - Filename: `flows-<YYYYMMDD-HHMMSS.NNNNNNNNN>-<seq>.json` (UTC, plus a
   per-process counter that keeps two snapshots in the same nanosecond
   apart).
@@ -293,15 +301,13 @@ a timestamp.
 - Backup filenames are restricted to bare names: `restore_backup`
   cannot be used to read arbitrary files from disk.
 
-<!-- ponytail: no backup pruning; add prune (keep last N) when the dir gets unwieldy -->
-
 ## Verifying the claims
 
 ```bash
 # Tool counts (source of truth lives in internal/mcp/tools_test.go)
-grep -oE 'mcp\.NewTool\("[a-z_]+"' internal/mcp/tools.go | sed 's/.*"//;s/"//' | sort -u
-grep -c 'addReadTool('  internal/mcp/tools.go     # -> 20
-grep -c 'addWriteTool(' internal/mcp/tools.go     # -> 23
+grep -o 'mcp\.NewTool('   internal/mcp/tools.go | wc -l   # -> 44 tools
+grep -o 'addReadTool('    internal/mcp/tools.go | wc -l   # -> 21 read tools
+grep -o 'addWriteTool('   internal/mcp/tools.go | wc -l   # -> 23 mutating tools
 
 # Source tree
 find cmd internal -name '*.go' ! -name '*_test.go' | sort
