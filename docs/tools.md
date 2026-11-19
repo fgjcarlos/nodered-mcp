@@ -150,13 +150,14 @@ nodes and credentials; the automatic pre-restore snapshot is structural too.
    affected nodes' authentication and operation before declaring recovery done.
 
 The write tools that change the flow configuration advertise these limits
-before execution. The palette tools and `inject_node` change neither the
-configuration nor the modules, so they do not advertise them.
-`set_context` does not advertise them either, even though provisioning its
-helper tab is a flow-configuration write: the tool writes into the helper's
-context, and only the provisioning of the helper tab touches the flows.
-`restore_backup` repeats the limits in its successful response. No additional
-filesystem or secret access is granted to the MCP server.
+before execution. The palette tools and `inject_node` do not advertise them:
+the palette changes the installed modules and `inject_node` fires a message,
+and neither changes the flow configuration. `set_context` does not advertise
+them either, even though provisioning its helper tab is a flow-configuration
+write: the tool writes into the helper's context, and only the provisioning of
+the helper tab touches the flows. `restore_backup` repeats the limits in its
+successful response. No additional filesystem or secret access is granted to
+the MCP server.
 
 ### Which writes snapshot the flow configuration
 
