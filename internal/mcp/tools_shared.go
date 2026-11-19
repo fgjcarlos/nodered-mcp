@@ -23,6 +23,14 @@ func prettyJSON(raw []byte) string {
 	return buf.String()
 }
 
+// flowParam reads a "flow" argument as either a JSON-encoded string, a
+// flow object directly, or a flat array of tabs and nodes (the shape
+// GET /flows returns). All three end up as json.RawMessage the handler
+// can hand to the validator. The flat-array case is what validate_flow
+// needs to accept the same payload create_flow / update_flow already do
+// (issue #413); a flat array passed to create_flow / update_flow still
+// falls through to normalizeFlowDoc, which returns a clear "pass the
+// flow id" error when the array is supplied without one.
 func flowParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) {
 	args := req.GetArguments()
 	v, ok := args[key]
@@ -53,6 +61,8 @@ func flowParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) {
 	}
 }
 
+// flowsParam reads a "flows" argument as either a JSON-encoded string or a
+// flow array. Same reasoning as flowParam.
 func flowsParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) {
 	args := req.GetArguments()
 	v, ok := args[key]
@@ -77,6 +87,8 @@ func flowsParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) {
 	}
 }
 
+// nodeParam reads a "node" argument as either a JSON-encoded string or a
+// node object. Mirrors flowParam for symmetry with the rest of the surface.
 func nodeParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) {
 	args := req.GetArguments()
 	v, ok := args[key]
@@ -101,6 +113,22 @@ func nodeParam(req mcp.CallToolRequest, key string) (json.RawMessage, error) {
 	}
 }
 
+// normalizeFlowDoc turns a raw flow payload into a Node-RED admin-API
+// document. If fillNodes is true and the document is a tab object whose
+// "nodes" or "configs" array is missing or explicitly null, an empty
+// array is substituted so a POST /flow does not bounce with the opaque
+// "Cannot read properties of null" runtime error.
+//
+// The payload is accepted in any of the three shapes Node-RED hands back:
+//
+//   - nested tab object:  {"id":"abc","label":"x","nodes":[...]}
+//   - flat array element: [{"type":"tab","id":"abc","label":"x"},
+//     {"type":"inject","id":"n1","z":"abc"}, ...]
+//
+// The flat shape comes from GET /flows, so update_flow can take the same
+// document back without forcing the caller to re-shape it. If the payload is
+// a flat array, the tab id to match is taken from flowID (when supplied);
+// a nested payload is accepted as-is.
 func normalizeFlowDoc(raw json.RawMessage, flowID string, fillNodes bool) (nodered.RawFlow, error) {
 	out, ok, err := normalizeFlowObject(raw, fillNodes)
 	if err != nil {
@@ -232,6 +260,8 @@ func normalizeFlatFlowArray(raw json.RawMessage, flowID string, fillNodes bool) 
 	return nodered.RawFlow(encoded), nil
 }
 
+// splitFlatFlow partitions a flat /flows array into the tab, its nodes, and
+// its config nodes, all indexed by id. Returns nil for tab when no match.
 func splitFlatFlow(flat []json.RawMessage, flowID string) (tab map[string]json.RawMessage, nodes, configs []json.RawMessage) {
 	for _, item := range flat {
 		var meta struct {
@@ -262,6 +292,7 @@ func splitFlatFlow(flat []json.RawMessage, flowID string) (tab map[string]json.R
 	return tab, nodes, configs
 }
 
+// hasXY reports whether the raw node carries x and y canvas coordinates.
 func hasXY(raw json.RawMessage) bool {
 	var probe struct {
 		X json.RawMessage `json:"x"`
@@ -273,6 +304,9 @@ func hasXY(raw json.RawMessage) bool {
 	return len(probe.X) > 0 && len(probe.Y) > 0
 }
 
+// looksLikeFlatArrayElement reports whether a parsed JSON object has the
+// shape of one entry inside a flat GET /flows array: an id, a type, and
+// no nested-array fields that would mean a full tab doc.
 func looksLikeFlatArrayElement(doc map[string]json.RawMessage) bool {
 	_, hasID := doc["id"]
 	_, hasType := doc["type"]
@@ -281,10 +315,17 @@ func looksLikeFlatArrayElement(doc map[string]json.RawMessage) bool {
 	return hasID && hasType && !hasNodes && !hasConfigs
 }
 
+// isJSONNull reports whether raw is the JSON literal "null". A
+// serializer output of `"nodes":null` is not the same as the key being
+// absent: the key exists, but it points at nothing. Node-RED's runtime
+// rejects that with an opaque "Cannot read properties of null" error, so
+// normalizeFlowDoc treats null the same as missing when filling defaults.
 func isJSONNull(raw json.RawMessage) bool {
 	return string(raw) == "null"
 }
 
+// normalizeFlowsArray splits a raw flows payload into the per-flow entries
+// the admin API expects.
 func normalizeFlowsArray(raw json.RawMessage) ([]json.RawMessage, error) {
 	var flows []json.RawMessage
 	if err := json.Unmarshal(raw, &flows); err != nil {

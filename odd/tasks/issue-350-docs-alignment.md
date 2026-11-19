@@ -34,6 +34,23 @@ usuario, L2; comprobaciones en L5).
   - `docs: drop the stale comments about the backup and the helper lock (#350)`
 - Ningún cambio de lógica: el diff en `.go` toca solo comentarios.
 
+Revisión nativa (RDD on, `assess` risk=medium, nativeRisk=high por la señal
+`SECURITY.md`, `reviewDue=true`): lineage `review-b3d1ef4e937fec6a`, lentes
+`readability` y `risk`, cierre **approved** con la autoridad quemada. Dos
+hallazgos informativos, sin transición de corrección:
+
+- `R2-READ-001` (readability, WARNING): la deduplicación de los doc comments
+  había borrado las dos copias del comentario de `flowParam`, dejando la
+  función sin documentar. Corregido: los nueve comentarios de
+  `internal/mcp/tools_shared.go` están restaurados (uno por función).
+- `R2-READ-002` (readability, WARNING): el comentario de `snapshotFlows`
+  nombraba solo la paleta y `inject_node` como excepciones, pero
+  `set_flows_state` también snapshot (no cambia los flows, arranca o para el
+  runtime). Corregido: el comentario lo dice.
+
+Commits tras la revisión: `docs: restore the doc comments dropped with their
+duplicates (#350)`.
+
 ## Log
 
 - L1. Petición original del usuario, textual: "resuelve la issue #350".
