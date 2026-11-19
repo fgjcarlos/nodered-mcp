@@ -58,6 +58,23 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   examples mount a volume there, and the smoke test performs a real
   deployment and checks that the snapshot is still there after the
   container is recreated.
+- Build a granular edit on the snapshot it deploys (#345). A granular
+  edit read the nested tab, applied the patch to that document and then
+  read the whole configuration again for the array to deploy and the
+  revision to deploy it with. Two reads, two snapshots: a change another
+  editor made in between was written back with the old value while the
+  deployment carried the new revision, so the runtime had no reason to
+  refuse it. The edit is now built on the snapshot it deploys — the base
+  of the edit is the tab as the flat array holds it, the array to deploy
+  is that same array, and the revision is that same response's revision.
+  The window left is the runtime's own: a deployment that lands after the
+  snapshot makes the revision stale and the runtime answers 409, which the
+  client does not work around. Building the base from the stored
+  configuration also preserves what the runtime's nested reconstruction
+  used to lose: the tab's `env`, `info` and unknown fields, the
+  configuration nodes, the order of the entries and the wires of a link
+  out node. Those wires are the runtime's to recompute, so the exception
+  moved into the shared rule engine, where every write path inherits it.
 - Keep reading the npm registry until it shows the expected value
   (#344). `scripts/wait-for-registry.sh` accepted the first non-empty
   stdout, but right after `npm dist-tag add` the registry can answer
@@ -159,6 +176,66 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   responses were unavailable. The wrapper now forwards `Flush` and exposes
   `Unwrap` for `http.ResponseController`.
 
+- Validate the effective configuration before a deployment (#334). A full
+  deployment (`set_flows`) and a restore (`restore_backup`) installed
+  whatever they were given, and the subflow writes did not look at the
+  topology of the definition at all. Measured against a real Node-RED, a
+  deploy with `wires:[["missing"]]` answers 204 and the client reports
+  success, and a deploy that instances a subflow whose definition is
+  missing leaves the runtime stopped, waiting for a node type that will
+  never be registered. The deployment paths now check the configuration as
+  a whole before anything is sent to the runtime — no request, no backup —
+  and refuse a wire that names no node in the same tab or subflow, a node
+  whose `z` names neither a tab nor a subflow definition, two entries with
+  the same id, an instance of a subflow whose definition is not in the
+  configuration, and a subflow port that names a node which is not in the
+  definition.
+- Refuse a null flow document instead of panicking on it (#333).
+  `json.Unmarshal("null", &map)` returns no error and leaves the map nil,
+  so the next write into that map panicked with "assignment to entry in nil
+  map". Three tool paths reached it: `create_flow` and `import_flow`, which
+  normalize the document with the fill enabled, and `inject_node`, which
+  writes the marker into the payload map. A flow document is now refused,
+  because null is not a flow document. An inject payload is wrapped, because
+  every value that is not a JSON object is already wrapped under "payload",
+  so the caller's value still reaches the inject's `msg`. Neither transport
+  lets the process die: over HTTP the repository's own `recoverPanics`
+  wrapper turned the panic into a 500, and over stdio mcp-go recovered it
+  into a JSON-RPC -32603.
+- Refuse deleting a subflow definition that is still in use (#332). The
+  runtime does not check that no instance of a subflow is in use before the
+  definition is removed: deleting a definition that a flow tab still
+  instances leaves the instance node pointing at a missing type, the next
+  deploy logs "Waiting for missing types to be registered" and the affected
+  flows never deploy. `delete_subflow` now scans the runtime for instance
+  nodes of type `subflow:<id>` — in flow tabs and nested inside another
+  subflow definition — and refuses the delete with the list of references
+  to remove first. The check runs before the backup and the write, so a
+  refused delete leaves the runtime untouched. Cascading deletion stays out
+  of scope: removing the instances along with the definition is a
+  destructive operation the operator has to ask for explicitly.
+- Recover `set_context` helpers across restarts (#331). The helper was a
+  process-local cache, so the first call after a restart had to provision
+  a replacement. Each call now reads the active flow configuration and
+  verifies an isolated helper's executable code, node configuration,
+  ownership and wiring before reusing it, so a helper that survives the
+  process is discovered and reused instead of replaced. When no supported
+  helper exists, the server creates the complete tab in one guarded
+  `POST /flow`, with node ids that do not collide with the existing
+  configuration and no intermediate empty-tab deployments. A failed or
+  ambiguous response is returned without automatic replay, and a later
+  explicit call discovers the helper the runtime actually installed.
+- Clarify the structural backup recovery limits (#330). The backup is a
+  structural snapshot of `GET /flows`, not a Node-RED disaster-recovery
+  backup: it does not cover the separate encrypted credential store or the
+  keys and configuration needed to decrypt it, and restoring a snapshot can
+  itself remove nodes and their credentials. The write tools that change
+  the flow configuration now advertise those limits before execution, and
+  `restore_backup` repeats them in its successful response, so the
+  recovery an operator can rely on is stated where the tool is called
+  instead of only in the documentation. The Go toolchain was updated for
+  the crypto/x509 security patch (the module now requires Go 1.26.11).
+
 - Enforce the node denylist on every mutating surface (#329).
   `MCP_NODE_DENYLIST` is now judged on the effective configuration a write
   would deploy, and the document is walked recursively, so a forbidden type
@@ -193,6 +270,40 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   (five attempts, linear backoff, ~45 s budget) and the workflow
   contract test (`bin/npm_workflow_order_test.js`) enforces that
   each verifier step routes through it.
+
+## [0.7.2] - 2026-08-24
+
+### Fixed
+
+- fix(init): detect Claude Desktop before its config exists (#289).
+- fix(release): pin the release Go toolchain (#293).
+- fix(release): serialize the npm package promotion (#294), so the main
+  package and the platform packages are never promoted at the same time.
+- chore(release): pin and verify the release toolchain (#295).
+- chore(release): bump the package metadata to v0.7.2 (#297).
+
+### Changed
+
+- docs(npm): expand the platform documentation for the npm install
+  matrix (#275).
+- ci: remove the publish-main retry workflow once the E403 root cause was
+  identified (#281), and the one-off publish-main retry it was replaced by.
+
+### Dependencies
+
+- chore(deps): bump the actions group (docker/login-action, download-artifact,
+  upload-artifact, goreleaser-action, checkout) and github.com/mark3labs/mcp-go
+  (#282, #283, #284, #285, #286, #287).
+
+## [0.7.1] - 2026-08-06
+
+### Fixed
+
+- fix(update): accept the platform package as the npm channel neighbour
+  (#276) (#277).
+- fix(npm): publish the main package with `NPM_SECRET` while Trusted
+  Publishing is disabled, bump the version to 0.7.1 and scope the guard
+  (#279).
 
 ## [0.7.0] - 2026-08-05
 
