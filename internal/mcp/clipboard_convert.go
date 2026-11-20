@@ -278,11 +278,17 @@ func (doc *clipboardImport) resolve(current []json.RawMessage) (json.RawMessage,
 	if err != nil {
 		return nil, remintCount{}, err
 	}
-	nodes, err := rewriteItems(doc.nodes, mapping)
+	// Config ids the remint replaced, for spotting config references by
+	// value in rewriteItems.
+	remintedConfigs := map[string]bool{}
+	for _, c := range configs {
+		remintedConfigs[c.id] = true
+	}
+	nodes, err := rewriteItems(doc.nodes, mapping, remintedConfigs)
 	if err != nil {
 		return nil, remintCount{}, err
 	}
-	cfgs, err := rewriteItems(configs, mapping)
+	cfgs, err := rewriteItems(configs, mapping, remintedConfigs)
 	if err != nil {
 		return nil, remintCount{}, err
 	}
@@ -347,7 +353,18 @@ func remintIDs(owned []clipboardItem, existing map[string]bool) (map[string]stri
 
 // rewriteItems returns the items' raw bytes with every reference in
 // mapping rewritten; with no mapping the bytes are returned untouched.
-func rewriteItems(items []clipboardItem, mapping map[string]string) ([]json.RawMessage, error) {
+//
+// References are the structural fields — id, wires, links, scope, g and
+// a group's nodes — plus config-node properties such as an mqtt node's
+// broker. The editor tells a config property from free text via node
+// definitions, which the runtime API does not expose here; without them
+// an ordinary property counts as a reference only when its value is the
+// id of a reminted config node (remintedConfigs). Canvas-node ids never
+// appear in a property of stock nodes, so free text naming one — name,
+// payload, function bodies — survives the remint (issue #371); free text
+// that spells out a reminted config id verbatim is the one false match
+// left possible.
+func rewriteItems(items []clipboardItem, mapping map[string]string, remintedConfigs map[string]bool) ([]json.RawMessage, error) {
 	out := make([]json.RawMessage, 0, len(items))
 	for _, it := range items {
 		if len(mapping) == 0 {
@@ -358,22 +375,39 @@ func rewriteItems(items []clipboardItem, mapping map[string]string) ([]json.RawM
 		if err != nil {
 			return nil, err
 		}
-		// shortcut: any string value equal to a reminted id is treated as a
-		// reference (wires, links, scope, g, config properties); Node-RED's
-		// 16-hex ids make a false match on user text practically impossible.
-		v = walkStrings(v, func(s string) string {
-			if n, ok := mapping[s]; ok {
-				return n
+		obj, ok := v.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("clipboard element %q is not a JSON object", it.id)
+		}
+		for k, val := range obj {
+			switch k {
+			case "id", "g":
+				if s, ok := val.(string); ok {
+					obj[k] = remap(mapping, s)
+				}
+			case "wires", "links", "scope", "nodes":
+				obj[k] = walkStrings(val, func(s string) string { return remap(mapping, s) })
+			default:
+				if s, ok := val.(string); ok && remintedConfigs[s] {
+					obj[k] = mapping[s]
+				}
 			}
-			return s
-		})
-		b, err := json.Marshal(v)
+		}
+		b, err := json.Marshal(obj)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, b)
 	}
 	return out, nil
+}
+
+// remap returns the reminted id for s, or s itself when it is not one.
+func remap(mapping map[string]string, s string) string {
+	if n, ok := mapping[s]; ok {
+		return n
+	}
+	return s
 }
 
 // exportClipboard selects the editor clipboard for one tab out of the flat
