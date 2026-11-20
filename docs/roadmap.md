@@ -27,6 +27,7 @@
 | v0.5 | Read-only mode, context-efficient reads, diagnostics, context, the debug stream, granular node editing, `diff_flows`, HTTP bearer auth — 43 tools | Released |
 | v0.6 | OAuth 2.1 Resource Server for hosted web connectors; npm channel with Windows binaries; SBOM + provenance on every artefact; Dependabot; SHA-pinned actions; CODEOWNERS + issue/PR templates; central NR version detection; get_runtime_info with capability matrix; startup banner with degraded-tools count — 44 tools | Released |
 | v0.7 | npm-native platform packages: the main npm package lists the six native binaries as exact-version `optionalDependencies` and the postinstall downloader is gone; npm publication hardened (scope guard, serialized promotion, pinned release toolchain); `init` detects Claude Desktop before its config exists | Released (v0.7.2) |
+| v0.8 | Hardening: the node denylist on every write surface, deployments validated before they reach the runtime, the editor's flat clipboard in `export_flow`/`import_flow` (breaking), no replay of mutating tools, granular edits on one revisioned snapshot, cancelable write lock, bounded JWKS refreshes, every publication channel gated on the tagged commit's CI; `init --dry-run` | Released (v0.8.0) |
 
 ## Planned
 

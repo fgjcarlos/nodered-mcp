@@ -195,10 +195,12 @@ con `Node-RED-Deployment-Type: flows`, guardando primero un backup de la
 configuración exacta usada como base. La protección contra conflictos empieza
 en ese snapshot con revisión: si otro despliegue cambia la revisión después
 del snapshot, esta actualización devuelve HTTP 409 en lugar de reaplicar
-cambios obsoletos. Las ediciones puntuales leen
-la pestaña anidada antes de tomar el snapshot, por lo que un cambio externo
-durante ese intervalo previo todavía puede sobrescribirse. Lee de nuevo el
-flow actual antes de reintentar una edición tras un conflicto.
+cambios obsoletos. Una edición puntual se construye sobre ese mismo
+snapshot: la pestaña que modifica es la que lleva el despliegue, así que un
+cambio que otro editor hizo en una propiedad que la edición no toca
+sobrevive a la edición, y un cambio que llega después del snapshot se
+rechaza con el propio 409 del runtime en lugar de sobrescribirse. Lee de
+nuevo el flow actual antes de reintentar una edición tras un conflicto.
 
 Las tools de lectura reintentan los fallos de transporte hasta dos veces. Las
 tools mutantes se ejecutan una sola vez: si la conexión se cierra sin una

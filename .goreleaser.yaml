@@ -74,6 +74,8 @@ changelog:
   sort: asc
   filters:
     exclude:
-      - "^docs:"
-      - "^test:"
-      - "^chore:"
+      # Match the scoped forms too (docs(odd):, chore(deps):, ci(release):).
+      - "^docs[(:]"
+      - "^test[(:]"
+      - "^chore[(:]"
+      - "^ci[(:]"
