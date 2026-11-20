@@ -32,6 +32,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Close three `import_flow` clipboard partition edge cases (#370). A node
+  with canvas coordinates but no `z` was filed as a global config node,
+  and dropped without a word when its id already existed on the
+  instance; it is now refused with a message that names it. A global
+  config node was reused whenever the instance had any element with its
+  id, so the imported nodes could bind to an object of another type or
+  to another tab's config node; it is now reused only when the instance
+  has it as a global config node of the same type, and otherwise travels
+  with the tab under a reminted id. The denylist pre-check keeps judging
+  every element of the clipboard, including the members of a subflow
+  definition and the global config nodes the instance already has, and
+  this is now documented as the intended policy.
 - Gate every publication channel on the test suite of the tagged commit
   (#349). The CI workflow only ran for `main` and pull requests, so a
   tag push produced no test run at all: the release workflow published
