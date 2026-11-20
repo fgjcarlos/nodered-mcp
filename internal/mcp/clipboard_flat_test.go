@@ -20,8 +20,8 @@ import (
 	"github.com/fgjcarlos/nodered-mcp/internal/nodered"
 )
 
-// fakeRuntime holds a flat configuration and answers the three requests the
-// clipboard tools make: GET /flows, POST /flow and GET /flow/:id. POST /flow
+// fakeRuntime holds a flat configuration and answers the two requests the
+// clipboard tools make: GET /flows and POST /flow. POST /flow
 // behaves like Node-RED's addFlow: it assigns the tab id, forces every
 // member's z to it, and refuses a member id that already exists.
 type fakeRuntime struct {
