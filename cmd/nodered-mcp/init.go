@@ -185,7 +185,11 @@ func runInitDryRun(target mcpClient, bin string, env map[string]string) error {
 	path, rootKey, ok := writableTarget(target.key)
 	if !ok {
 		fmt.Fprintf(os.Stderr, "\n--- %s: %s ---\n", target.name, target.note)
-		fmt.Println(renderConfig(target.key, bin, "", "", ""))
+		// env holds the answers as buildEnv shaped them; renderConfig drops the token.
+		fmt.Println(renderConfig(target.key, bin, env["NODERED_URL"], "", env["NODERED_BACKUP_DIR"]))
+		if _, ok := env["NODERED_TOKEN"]; ok {
+			printTokenOmittedNote()
+		}
 		fmt.Fprintf(os.Stderr, "\n(--dry-run isn't supported for %s — the merge preview requires a writable config target)\n", target.name)
 		return fmt.Errorf("--dry-run is not supported for %s: no preview was produced", target.name)
 	}
