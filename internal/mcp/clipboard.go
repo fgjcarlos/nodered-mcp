@@ -35,7 +35,7 @@ func (s *Server) handleExportFlow(ctx context.Context, req mcp.CallToolRequest) 
 	current, err := s.currentFlowItems(ctx)
 	if err != nil {
 		slog.Error("export_flow failed", "error", err, "id", id)
-		return toolResultError(err, fmt.Sprintf("reading flows: %v", err))
+		return toolResultError(err, fmt.Sprintf("reading flow: %v", err))
 	}
 	items, err := exportClipboard(current, id)
 	if err != nil {
@@ -76,7 +76,7 @@ func (s *Server) handleImportFlow(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return toolResultError(err, fmt.Sprintf("reading flows: %v", err))
 	}
-	nested, reminted, err := doc.resolve(current)
+	nested, remint, err := doc.resolve(current)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -85,7 +85,7 @@ func (s *Server) handleImportFlow(ctx context.Context, req mcp.CallToolRequest) 
 		return mcp.NewToolResultError(fmt.Sprintf("clipboard is not a valid flow document: %v", err)), nil
 	}
 
-	slog.Debug("tool: import_flow", "bytes", len(tab), "reminted", reminted)
+	slog.Debug("tool: import_flow", "bytes", len(tab), "collided", remint.collided, "reminted", remint.reminted)
 
 	created, err := s.nrClient.CreateFlow(ctx, tab)
 	if err != nil {
@@ -97,8 +97,8 @@ func (s *Server) handleImportFlow(ctx context.Context, req mcp.CallToolRequest) 
 		return mcp.NewToolResultError(fmt.Sprintf("created flow has no id: %v (response: %s)", err, string(created))), nil
 	}
 	msg := fmt.Sprintf("Flow imported. New id: %q. Node-RED rewrites the tab id on POST /flow; call export_flow with the new id to learn the runtime-assigned one.", newID)
-	if reminted > 0 {
-		msg += fmt.Sprintf(" %d node ids already existed on this instance, so every node id of the copy was reminted and its wires and references rewritten.", reminted)
+	if remint.reminted > 0 {
+		msg += fmt.Sprintf(" %d of the copy's %d node ids already existed on this instance, so all %d were reminted and their wires and references rewritten.", remint.collided, remint.reminted, remint.reminted)
 	}
 	return mcp.NewToolResultText(msg), nil
 }

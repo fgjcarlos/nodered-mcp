@@ -183,6 +183,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   config nodes and subflows the instance has are reused; a missing
   subflow is refused with the step to take. The nested shape earlier
   releases exported is still accepted.
+- Correct the `import_flow` and `export_flow` messages the flat-clipboard
+  change left inaccurate (#369). The reminted note reported every reminted
+  id as an existing one; it now says how many of the copy's ids collided
+  and how many were reminted ("1 of the copy's 3 node ids already
+  existed on this instance, so all 3 were reminted ..."). A nested
+  clipboard with several tabs is refused as "clipboard has N tabs" again
+  instead of "clipboard has no tab", and a failed read in `export_flow`
+  keeps the released `reading flow:` prefix.
 
 - Validate a flat flow array as a whole in `validate_flow` (#336). The
   validator rebuilt one document per tab, so an id shared by two tabs, a
