@@ -12,6 +12,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   on every release. The deprecation has been in place since August, but the
   step re-sent it each time and failed the v0.8.0 `publish-main` job when the
   registry answered `E422`, which skipped the `latest` promotion.
+- Wait long enough for npmjs to serve a fresh publish. The post-publish
+  registry reads gave up after ~45 s, while npmjs took about 6 minutes to
+  serve the last v0.8.0 package; `scripts/wait-for-registry.sh` now retries
+  26 times with sleeps capped at 30 s, about 10 minutes per package (#396).
 
 ## [0.8.0] - 2026-11-20
 
