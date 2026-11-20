@@ -136,17 +136,22 @@ func flattenNestedTab(el json.RawMessage) ([]json.RawMessage, bool, error) {
 	return append([]json.RawMessage{tab}, out...), true, nil
 }
 
-// nestedTab decodes el when it has the nested tab shape: a nodes or
-// configs member, or no type at all.
+// nestedTab decodes el when it is an object with the nested tab shape.
 func nestedTab(el json.RawMessage) (map[string]json.RawMessage, bool) {
 	var doc map[string]json.RawMessage
 	if json.Unmarshal(el, &doc) != nil || doc == nil {
 		return nil, false
 	}
+	return doc, isNestedTab(doc)
+}
+
+// isNestedTab is the nested tab rule: the object has a nodes or configs
+// member, or it has no type (a flat element always has one).
+func isNestedTab(doc map[string]json.RawMessage) bool {
 	_, hasNodes := doc["nodes"]
 	_, hasConfigs := doc["configs"]
 	_, hasType := doc["type"]
-	return doc, hasNodes || hasConfigs || !hasType
+	return hasNodes || hasConfigs || !hasType
 }
 
 // allNestedTabs reports whether every element has the nested tab shape.
@@ -274,10 +279,7 @@ func (doc *clipboardImport) resolve(current []json.RawMessage) (json.RawMessage,
 		}
 	}
 	owned := append(append([]clipboardItem{}, doc.nodes...), configs...)
-	mapping, collided, err := remintIDs(owned, existing)
-	if err != nil {
-		return nil, remintCount{}, err
-	}
+	mapping, collided := remintIDs(owned, existing)
 	// Config ids the remint replaced, for spotting config references by
 	// value in rewriteItems.
 	remintedConfigs := map[string]bool{}
@@ -329,7 +331,7 @@ type remintCount struct{ collided, reminted int }
 
 // remintIDs returns old → new ids for every owned item when any owned id
 // already exists on the target, and nil otherwise, plus the colliding count.
-func remintIDs(owned []clipboardItem, existing map[string]bool) (map[string]string, int, error) {
+func remintIDs(owned []clipboardItem, existing map[string]bool) (map[string]string, int) {
 	collided := 0
 	taken := map[string]bool{}
 	for id := range existing {
@@ -342,13 +344,13 @@ func remintIDs(owned []clipboardItem, existing map[string]bool) (map[string]stri
 		taken[it.id] = true
 	}
 	if collided == 0 {
-		return nil, 0, nil
+		return nil, 0
 	}
 	mapping := make(map[string]string, len(owned))
 	for _, it := range owned {
 		mapping[it.id] = newNodeID(taken)
 	}
-	return mapping, collided, nil
+	return mapping, collided
 }
 
 // rewriteItems returns the items' raw bytes with every reference in
