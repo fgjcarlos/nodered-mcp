@@ -328,16 +328,6 @@ jobs:
           integrity=$(scripts/wait-for-registry.sh -- npm view "@fgjcarlos/nodered-mcp@${version}" dist.integrity)
           echo "verified integrity for @fgjcarlos/nodered-mcp@${version}"
 
-      - name: deprecate broken 0.6.2 npm release
-        env:
-          NPM_SECRET: ${{ secrets.NPM_SECRET }}
-        run: |
-          if npm view "@fgjcarlos/nodered-mcp@0.6.2" version >/dev/null 2>&1; then
-            echo "//registry.npmjs.org/:_authToken=${NPM_SECRET}" > ~/.npmrc
-            npm deprecate "@fgjcarlos/nodered-mcp@0.6.2" \
-              "Broken Windows installer; upgrade to @fgjcarlos/nodered-mcp@latest"
-          fi
-
   verify-and-promote:
     needs: [publish-platforms, publish-main]
     if: >-

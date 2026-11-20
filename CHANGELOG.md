@@ -6,6 +6,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- Drop the npm workflow step that re-deprecated `@fgjcarlos/nodered-mcp@0.6.2`
+  on every release. The deprecation has been in place since August, but the
+  step re-sent it each time and failed the v0.8.0 `publish-main` job when the
+  registry answered `E422`, which skipped the `latest` promotion.
+
 ## [0.8.0] - 2026-11-20
 
 ### Added
