@@ -51,6 +51,10 @@ func decodeClipboardItems(raw json.RawMessage) ([]clipboardItem, error) {
 	if len(arr) == 0 {
 		return nil, fmt.Errorf("clipboard array is empty")
 	}
+	if len(arr) > 1 && allNestedTabs(arr) {
+		// Earlier releases refused a multi-tab nested paste by array length.
+		return nil, errManyTabs(len(arr))
+	}
 	if len(arr) == 1 {
 		legacy, ok, err := flattenNestedTab(arr[0])
 		if err != nil {
@@ -96,14 +100,8 @@ func placeItem(raw json.RawMessage) (clipboardItem, bool) {
 // export_flow produced ([{...tab, nodes:[...]}]) and turns it into flat
 // elements. ok is false when el is not that shape.
 func flattenNestedTab(el json.RawMessage) ([]json.RawMessage, bool, error) {
-	var doc map[string]json.RawMessage
-	if json.Unmarshal(el, &doc) != nil || doc == nil {
-		return nil, false, nil
-	}
-	_, hasNodes := doc["nodes"]
-	_, hasConfigs := doc["configs"]
-	_, hasType := doc["type"]
-	if !hasNodes && !hasConfigs && hasType {
+	doc, ok := nestedTab(el)
+	if !ok {
 		return nil, false, nil
 	}
 	var tabID string
@@ -136,6 +134,36 @@ func flattenNestedTab(el json.RawMessage) ([]json.RawMessage, bool, error) {
 		return nil, true, err
 	}
 	return append([]json.RawMessage{tab}, out...), true, nil
+}
+
+// nestedTab decodes el when it has the nested tab shape: a nodes or
+// configs member, or no type at all.
+func nestedTab(el json.RawMessage) (map[string]json.RawMessage, bool) {
+	var doc map[string]json.RawMessage
+	if json.Unmarshal(el, &doc) != nil || doc == nil {
+		return nil, false
+	}
+	_, hasNodes := doc["nodes"]
+	_, hasConfigs := doc["configs"]
+	_, hasType := doc["type"]
+	return doc, hasNodes || hasConfigs || !hasType
+}
+
+// allNestedTabs reports whether every element has the nested tab shape.
+func allNestedTabs(arr []json.RawMessage) bool {
+	for _, el := range arr {
+		if _, ok := nestedTab(el); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func errManyTabs(n int) error {
+	return fmt.Errorf(
+		"clipboard has %d tabs; import_flow only accepts a single tab — split the import by hand if you want them on separate tabs",
+		n,
+	)
 }
 
 // withZ sets z on a nested member so it places like a flat element.
@@ -172,10 +200,7 @@ func parseClipboard(raw json.RawMessage) (*clipboardImport, error) {
 	case len(tabs) == 0:
 		return nil, fmt.Errorf(`clipboard has no tab; import_flow creates one flow tab and needs exactly one element with "type":"tab"`)
 	case len(tabs) > 1:
-		return nil, fmt.Errorf(
-			"clipboard has %d tabs; import_flow only accepts a single tab — split the import by hand if you want them on separate tabs",
-			len(tabs),
-		)
+		return nil, errManyTabs(len(tabs))
 	}
 	tab := tabs[0]
 	if err := json.Unmarshal(tab.raw, &doc.tab); err != nil {
@@ -208,14 +233,15 @@ func (doc *clipboardImport) place(it clipboardItem, tabID string, subflowIDs map
 }
 
 // resolve builds the nested POST /flow document against the target's
-// current flat configuration and reports how many ids it reminted.
+// current flat configuration and reports how many tab-owned ids collided
+// with the target and how many it reminted.
 //
 // ID policy: global config nodes and subflow definitions the target already
 // has are reused, not copied. When no tab-owned id exists on the target the
 // ids are kept, so a move between instances is lossless. When any does —
 // a copy into the same instance — every tab-owned id is reminted and every
 // reference to it rewritten, because POST /flow refuses duplicates.
-func (doc *clipboardImport) resolve(current []json.RawMessage) (json.RawMessage, int, error) {
+func (doc *clipboardImport) resolve(current []json.RawMessage) (json.RawMessage, remintCount, error) {
 	existing := map[string]bool{}
 	subflows := map[string]bool{}
 	for _, raw := range current {
@@ -227,7 +253,7 @@ func (doc *clipboardImport) resolve(current []json.RawMessage) (json.RawMessage,
 		}
 	}
 	if err := doc.checkSubflows(subflows); err != nil {
-		return nil, 0, err
+		return nil, remintCount{}, err
 	}
 	configs := doc.configs
 	for _, g := range doc.globals {
@@ -237,17 +263,17 @@ func (doc *clipboardImport) resolve(current []json.RawMessage) (json.RawMessage,
 		}
 	}
 	owned := append(append([]clipboardItem{}, doc.nodes...), configs...)
-	mapping, err := remintIDs(owned, existing)
+	mapping, collided, err := remintIDs(owned, existing)
 	if err != nil {
-		return nil, 0, err
+		return nil, remintCount{}, err
 	}
 	nodes, err := rewriteItems(doc.nodes, mapping)
 	if err != nil {
-		return nil, 0, err
+		return nil, remintCount{}, err
 	}
 	cfgs, err := rewriteItems(configs, mapping)
 	if err != nil {
-		return nil, 0, err
+		return nil, remintCount{}, err
 	}
 	out := make(map[string]json.RawMessage, len(doc.tab)+2)
 	for k, v := range doc.tab {
@@ -260,7 +286,7 @@ func (doc *clipboardImport) resolve(current []json.RawMessage) (json.RawMessage,
 		out["configs"], _ = json.Marshal(cfgs)
 	}
 	encoded, err := json.Marshal(out)
-	return encoded, len(mapping), err
+	return encoded, remintCount{collided: collided, reminted: len(mapping)}, err
 }
 
 // checkSubflows refuses subflow definitions and instances the target lacks:
@@ -280,28 +306,32 @@ func (doc *clipboardImport) checkSubflows(onTarget map[string]bool) error {
 	return nil
 }
 
+// remintCount is how many tab-owned ids collided with the target and how
+// many were reminted as a result (all of them, or none).
+type remintCount struct{ collided, reminted int }
+
 // remintIDs returns old → new ids for every owned item when any owned id
-// already exists on the target, and nil otherwise.
-func remintIDs(owned []clipboardItem, existing map[string]bool) (map[string]string, error) {
-	collides := false
+// already exists on the target, and nil otherwise, plus the colliding count.
+func remintIDs(owned []clipboardItem, existing map[string]bool) (map[string]string, int, error) {
+	collided := 0
 	taken := map[string]bool{}
 	for id := range existing {
 		taken[id] = true
 	}
 	for _, it := range owned {
 		if existing[it.id] {
-			collides = true
+			collided++
 		}
 		taken[it.id] = true
 	}
-	if !collides {
-		return nil, nil
+	if collided == 0 {
+		return nil, 0, nil
 	}
 	mapping := make(map[string]string, len(owned))
 	for _, it := range owned {
 		mapping[it.id] = newNodeID(taken)
 	}
-	return mapping, nil
+	return mapping, collided, nil
 }
 
 // rewriteItems returns the items' raw bytes with every reference in
