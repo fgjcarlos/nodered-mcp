@@ -12,6 +12,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   on every release. The deprecation has been in place since August, but the
   step re-sent it each time and failed the v0.8.0 `publish-main` job when the
   registry answered `E422`, which skipped the `latest` promotion.
+- Report the Docker image version without the tag's leading `v`: the image
+  printed `v0.8.0` while the goreleaser binaries and the npm package report
+  `0.8.0`. The Dockerfile now strips a single leading `v` from `VERSION`
+  (#395).
 
 ## [0.8.0] - 2026-11-20
 

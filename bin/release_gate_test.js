@@ -380,6 +380,15 @@ test('the guard steps read the tag from the environment', () => {
   }
 });
 
+test('the docker image reports the version without the tag\'s leading v', () => {
+  // docker.yml passes the tag (v0.8.0) as VERSION, while goreleaser
+  // stamps {{ .Version }} (0.8.0). The image has to strip the `v` so
+  // both channels report the same string (#395).
+  assert.match(docker, /VERSION=\$\{\{\s*github\.ref_name\s*\}\}/);
+  const dockerfile = fs.readFileSync(path.join(ROOT, 'Dockerfile'), 'utf8');
+  assert.match(dockerfile, /-X main\.version=\$\{VERSION#v\}/);
+});
+
 test('the job that promotes the latest release asks for write access', () => {
   // Marking a release as latest is a write. The workflow default is
   // `contents: read`, so the job that runs it has to declare the
