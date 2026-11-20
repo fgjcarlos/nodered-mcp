@@ -90,7 +90,7 @@ Only consulted when `MCP_TRANSPORT=http`.
 
 | Variable | Default | Flag | Description |
 |---|---|---|---|
-| `MCP_NODE_DENYLIST` | `exec,system` | — | Node types the write tools refuse to create. These two run shell commands as the Node-RED process, so allowing them turns `add_node` into remote code execution. Set to the empty string to opt out — see [`SECURITY.md`](../SECURITY.md) |
+| `MCP_NODE_DENYLIST` | `exec,system` | — | Node types every write that can deploy a node type refuses, from `add_node` to `import_flow`, `set_flows` and `restore_backup`. These two run shell commands as the Node-RED process, so allowing them turns the write tools into remote code execution. Set to the empty string to opt out — see [`SECURITY.md`](../SECURITY.md) |
 
 `--http-addr :8090` **is not** loopback: it listens on every
 interface. That is why the token is mandatory there.

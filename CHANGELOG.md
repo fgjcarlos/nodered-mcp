@@ -6,6 +6,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-20
+
 ### Added
 
 - feat(init): add `--dry-run` to preview the merged config (#314, PR #321). A
@@ -30,8 +32,50 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   version, while a runtime whose version could not be detected still runs and
   says the call was not verified.
 
+### Changed
+
+Behaviour a client or an operator may depend on. Each item is detailed
+under Fixed.
+
+- **Breaking:** `export_flow` returns the editor's flat clipboard array —
+  one `tab` element followed by its nodes and the config nodes and subflow
+  definitions they use — instead of `[{tab, nodes}]` (#337). Code that
+  parses the old shape must be updated. `import_flow` takes the flat
+  clipboard and still accepts the legacy nested shape.
+- **Docker:** the image's working directory and default
+  `NODERED_BACKUP_DIR` are now `/var/lib/nodered-mcp` and
+  `/var/lib/nodered-mcp/backups` (#346). A volume mounted at the old
+  `/home/nonroot/backups` no longer receives the snapshots; mount it at
+  the new path.
+- Deployments are validated as a whole before they reach the runtime:
+  `set_flows`, `restore_backup` and the subflow writes refuse a
+  configuration with dangling wires or missing subflow definitions, among
+  other structural problems; `set_flows` and `restore_backup` take
+  `force: true` as the explicit override (#334).
+- New refusals: `delete_subflow` refuses a subflow that is still in use
+  (#332), `inject_node` refuses a payload on a node that is not an inject
+  node (#338), and `set_context` and `inject_node` with a payload refuse a
+  Node-RED version known not to support them (#316).
+- Mutating tools are no longer retried after an ambiguous transport
+  failure; only read tools retry (#328).
+- `validate_flow` reports the new issue kinds `missing_type` and
+  `orphan_node` (#336); `get_runtime_info` reports the new capability
+  states `stream_disconnected` and `stream_unavailable` with a reason and a
+  remedy (#315, #341).
+- `init` returns an error when no supported client is detected (#302) and
+  `init --write` refuses a config whose MCP server collection is not an
+  object instead of replacing it (#303).
+
 ### Fixed
 
+- Rewrite only real references when `import_flow` remints ids (#371,
+  PR #390). Any string value equal to a reminted id was rewritten, so free
+  text that named an old id — a node name, a payload, a function body — was
+  silently changed when a clipboard with short hand-written ids was imported
+  into the instance it came from. The rewrite now covers the structural
+  fields (`id`, `wires`, `links`, `scope`, `g`, a group's `nodes`) plus the
+  properties whose value is the id of a reminted config node, which keeps
+  config references such as an mqtt node's broker wired.
 - Close three `import_flow` clipboard partition edge cases (#370). A node
   with canvas coordinates but no `z` was filed as a global config node,
   and dropped without a word when its id already existed on the
@@ -373,6 +417,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   (five attempts, linear backoff, ~45 s budget) and the workflow
   contract test (`bin/npm_workflow_order_test.js`) enforces that
   each verifier step routes through it.
+
+### Security
+
+Summary of the security-relevant fixes; each is detailed under Fixed.
+
+- The node denylist (`MCP_NODE_DENYLIST`) is enforced on every surface that
+  can deploy a node type, including `restore_backup` and `import_flow`,
+  which could otherwise deploy an `exec` node (#311, #329).
+- Credentials and tokens are redacted from every logged URL and from HTTP
+  error messages (#312, #342).
+- JWKS refreshes for unknown key ids are bounded and coalesced, so an
+  invalid token with an invented `kid` can no longer make the server
+  download the key set once per request (#348).
+- The per-IP rate limiter eviction sweep is amortized (#313).
+- The Go toolchain moved to 1.26.11 for the crypto/x509 security patch
+  (#330), and `golang.org/x/text` to 0.41.0 for GO-2026-6629 (#351).
 
 ### Dependencies
 
@@ -753,7 +813,13 @@ Dependabot, pinned action SHAs, CODEOWNERS, and issue templates.
   now validates bearer tokens issued by an external Identity
   Provider when `MCP_OAUTH_ISSUER` is set.
 
-[Unreleased]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.5.14...HEAD
+[Unreleased]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.7.2...v0.8.0
+[0.7.2]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.7.1...v0.7.2
+[0.7.1]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.6.2...v0.7.0
+[0.6.2]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.6.1...v0.6.2
+[0.6.0]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.5.15...v0.6.0
 [0.5.14]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.5.13...v0.5.14
 [0.5.13]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.5.12...v0.5.13
 [0.5.12]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.5.11...v0.5.12
