@@ -365,6 +365,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `actions/download-artifact` 8.0.1 -> 8.0.2 (PR #326); `docker/login-action`
   4.6.0 -> 4.7.0 (PR #360) and 4.7.0 -> 4.8.0 (PR #365).
 - chore(deps): bump `golang.org/x/time` 0.15.0 -> 0.16.0 (PR #304).
+- chore(deps): bump `golang.org/x/text` 0.40.0 -> 0.41.0 (#351). The audit
+  advisory GO-2026-6629 (panic in `x/text/secure/precis`) is fixed in v0.41.0;
+  `x/text` stays an indirect dependency and `govulncheck` still reports zero
+  reachable vulnerabilities.
 
 ## [0.7.2] - 2026-08-24
 
