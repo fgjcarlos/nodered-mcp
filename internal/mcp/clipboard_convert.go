@@ -224,6 +224,10 @@ func (doc *clipboardImport) place(it clipboardItem, tabID string, subflowIDs map
 		doc.nodes = append(doc.nodes, it)
 	case it.z == tabID:
 		doc.configs = append(doc.configs, it)
+	case it.z == "" && it.isXY:
+		// Only config nodes live outside a tab; a canvas node without z
+		// would otherwise be filed as one and could be dropped as reused.
+		return fmt.Errorf("clipboard element %q (type %q) has canvas coordinates but no z; set its z to the tab id %q", it.id, it.typ, tabID)
 	case it.z == "":
 		doc.globals = append(doc.globals, it)
 	default:
@@ -236,17 +240,23 @@ func (doc *clipboardImport) place(it clipboardItem, tabID string, subflowIDs map
 // current flat configuration and reports how many tab-owned ids collided
 // with the target and how many it reminted.
 //
-// ID policy: global config nodes and subflow definitions the target already
-// has are reused, not copied. When no tab-owned id exists on the target the
+// ID policy: subflow definitions the target already has are reused, not
+// copied; so is a global config node the target has as a global config
+// node of the same type — any other id match is a different object, and the
+// config travels with the tab like a missing one. When no tab-owned id exists on the target the
 // ids are kept, so a move between instances is lossless. When any does —
 // a copy into the same instance — every tab-owned id is reminted and every
 // reference to it rewritten, because POST /flow refuses duplicates.
 func (doc *clipboardImport) resolve(current []json.RawMessage) (json.RawMessage, remintCount, error) {
 	existing := map[string]bool{}
+	globals := map[string]string{} // id → type of the target's global config nodes
 	subflows := map[string]bool{}
 	for _, raw := range current {
 		if it, ok := placeItem(raw); ok && it.id != "" {
 			existing[it.id] = true
+			if it.z == "" && it.typ != "tab" && it.typ != "subflow" {
+				globals[it.id] = it.typ
+			}
 			if it.typ == "subflow" {
 				subflows[it.id] = true
 			}
@@ -257,8 +267,9 @@ func (doc *clipboardImport) resolve(current []json.RawMessage) (json.RawMessage,
 	}
 	configs := doc.configs
 	for _, g := range doc.globals {
-		if !existing[g.id] {
-			// POST /flow scopes every config it creates to the new tab.
+		if t, ok := globals[g.id]; !ok || t != g.typ {
+			// POST /flow scopes every config it creates to the new tab; a
+			// colliding id is reminted below.
 			configs = append(configs, g)
 		}
 	}
