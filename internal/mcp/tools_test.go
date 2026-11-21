@@ -1353,7 +1353,11 @@ func TestGetRuntimeLogs_NotFoundSurfacesActionableHint(t *testing.T) {
 		t.Errorf("the error should mention the endpoint, got %q", tc.Text)
 	}
 	if !strings.Contains(tc.Text, "stdout") && !strings.Contains(tc.Text, "log") {
-		t.Errorf("the error should mention the stdout/log fallback, got %q", tc.Text)
+		t.Errorf("the error should point at the runtime's stdout/log, got %q", tc.Text)
+	}
+	// #407: stock Node-RED writes no ~/.node-red/*.log file.
+	if strings.Contains(tc.Text, "~/.node-red") {
+		t.Errorf("the error must not name a ~/.node-red log file, got %q", tc.Text)
 	}
 }
 

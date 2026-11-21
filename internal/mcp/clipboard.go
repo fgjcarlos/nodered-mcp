@@ -103,6 +103,7 @@ func (s *Server) handleImportFlow(ctx context.Context, req mcp.CallToolRequest) 
 	if remint.reminted > 0 {
 		msg += fmt.Sprintf(" %d of the copy's %d node ids already existed on this instance, so all %d were reminted and their wires and references rewritten.", remint.collided, remint.reminted, remint.reminted)
 	}
+	msg += routeCollisionNotice(routeCollisions(doc, current))
 	return mcp.NewToolResultText(msg), nil
 }
 

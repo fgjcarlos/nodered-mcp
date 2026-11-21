@@ -91,7 +91,9 @@ func noderedCapabilityMatrix(p RuntimeProbe) map[string]Capability {
 	// Tools gated by settings or by an observed runtime state, not by
 	// version. The order matters for readability of the JSON: state
 	// tools first, then stream tools, then the rest.
-	matrix["get_flows_state"] = classifySettingTool(p.RuntimeStateEnabled)
+	// Node-RED mounts GET /flows/state unconditionally; only POST is
+	// gated by settings.runtimeState.enabled (#406).
+	matrix["get_flows_state"] = CapOK
 	matrix["set_flows_state"] = classifySettingTool(p.RuntimeStateEnabled)
 	matrix["get_node_status"] = classifyStreamTool(p.DebugStreamEnabled, p.StatusStream)
 	matrix["get_debug_messages"] = classifyStreamTool(p.DebugStreamEnabled, p.DebugStream)
@@ -141,7 +143,7 @@ func capabilityGuidance(tool string, cap Capability, p RuntimeProbe) (reason, re
 		// The matrix assigns stream_disabled only when the opt-in is
 		// off, so the flag is the evidence behind the state.
 		return "the /comms stream is disabled: MCP_DEBUG_STREAM is off",
-			"Set MCP_DEBUG_STREAM=on (or pass --debug-stream) and restart the MCP; some Node-RED versions are unstable on this WebSocket"
+			"Set MCP_DEBUG_STREAM=true (or pass --debug-stream) and restart the MCP; some Node-RED versions are unstable on this WebSocket"
 	case CapStreamDisconnected:
 		// The error can come from an unreachable runtime, from a token
 		// Node-RED rejected, or from the /comms handshake itself, so
@@ -164,7 +166,7 @@ func capabilityGuidance(tool string, cap Capability, p RuntimeProbe) (reason, re
 	case CapEndpointNotMounted:
 		if !p.RuntimeLogsMounted {
 			return "GET /logs is not mounted on this Node-RED (stock 5.x removed the admin endpoint)",
-				"The tool will fall back to the local log file under ~/.node-red/"
+				"Read the runtime's own output instead: its stdout (journalctl for a systemd service, docker logs for a container), or the file a logging handler writes if one is configured in settings.js"
 		}
 		return "the admin endpoint this tool depends on is not mounted on this Node-RED",
 			"Re-enable the endpoint on the Node-RED side, or use a tool that does not require it"
@@ -246,21 +248,12 @@ func classifySettingTool(runtimeStateEnabled bool) Capability {
 	return CapOK
 }
 
-// classifyRuntimeLogsTool: get_runtime_logs is gated by the
-// /logs endpoint being mounted AND the debug stream being on.
-// /logs is not part of stock NR — only stock NR < 5.x exposed
-// it. Stock 5.x returns 404 and the handler falls back to
-// ~/.node-red/*.log. We classify as endpoint_not_mounted when the
-// probe shows the endpoint is gone, regardless of stream state —
-// if the endpoint is gone, the tool will read the local log file
-// instead, which still works. So in practice we report
-// endpoint_not_mounted to flag that the admin API does not expose
-// it (and the user knows we are using the fallback).
-//
-// ponytail: this is the simplest mapping that covers the audit's
-// three known failure modes; we deliberately do not encode every
-// fallback path because the JSON is for the operator, not for
-// routing decisions.
+// classifyRuntimeLogsTool: get_runtime_logs only reads GET /logs,
+// which is not part of the stock Node-RED 5.x admin API. When the
+// probe shows the endpoint is gone (404) we classify the tool as
+// endpoint_not_mounted, regardless of stream state. There is no
+// fallback: the tool never reads a local file (#407), so the remedy
+// points the operator at the runtime's own output.
 func classifyRuntimeLogsTool(p RuntimeProbe) Capability {
 	if !p.RuntimeLogsMounted {
 		return CapEndpointNotMounted

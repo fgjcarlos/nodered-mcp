@@ -77,8 +77,9 @@ func TestCapabilityMatrix_UnknownVersion(t *testing.T) {
 	}
 }
 
-// NR >= 5.0 with runtimeState disabled — state tools classify as
-// setting_disabled; version-gated tools still ok.
+// NR >= 5.0 with runtimeState disabled — only set_flows_state is
+// setting_disabled: Node-RED mounts GET /flows/state unconditionally and
+// gates only POST /flows/state (#406). Version-gated tools still ok.
 func TestCapabilityMatrix_RuntimeStateOff(t *testing.T) {
 	p := RuntimeProbe{
 		NodeRedVersion:      v(5, 0, 1),
@@ -87,8 +88,8 @@ func TestCapabilityMatrix_RuntimeStateOff(t *testing.T) {
 		DiagnosticsMounted:  true,
 	}
 	m := noderedCapabilityMatrix(p)
-	if got := m["get_flows_state"]; got != CapSettingDisabled {
-		t.Errorf("get_flows_state with runtimeState off = %q, want setting_disabled", got)
+	if got := m["get_flows_state"]; got != CapOK {
+		t.Errorf("get_flows_state with runtimeState off = %q, want ok", got)
 	}
 	if got := m["set_flows_state"]; got != CapSettingDisabled {
 		t.Errorf("set_flows_state with runtimeState off = %q, want setting_disabled", got)

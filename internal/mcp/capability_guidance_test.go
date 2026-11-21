@@ -76,7 +76,7 @@ func TestCapabilityGuidance_UnknownRuntimeIsExplicit(t *testing.T) {
 // /settings, not from /flows/state, and the guidance has to say so.
 func TestCapabilityGuidance_SettingDisabledNamesRuntimeState(t *testing.T) {
 	p := RuntimeProbe{NodeRedVersion: v(5, 0, 1), RuntimeStateEnabled: false}
-	for _, tool := range []string{"get_flows_state", "set_flows_state"} {
+	for _, tool := range []string{"set_flows_state"} {
 		r, m := capabilityGuidance(tool, CapSettingDisabled, p)
 		if !strings.Contains(r, "settings.runtimeState.enabled") {
 			t.Errorf("%s reason should name settings.runtimeState.enabled, got %q", tool, r)
@@ -95,10 +95,14 @@ func TestCapabilityGuidance_EndpointNotMountedNamesLogs(t *testing.T) {
 	if !strings.Contains(r, "/logs") {
 		t.Errorf("reason should name /logs, got %q", r)
 	}
-	// The tool has a real fallback (local log file), so the remedy
-	// should mention it — that is the concrete next step.
-	if m == "" {
-		t.Error("remedy should be non-empty: the tool falls back to local logs")
+	// Issue #407: the tool has no fallback, so the remedy must not
+	// promise one; it must point at where the runtime's output lives.
+	lm := strings.ToLower(m)
+	if strings.Contains(lm, "fall back") || strings.Contains(lm, "fallback") {
+		t.Errorf("remedy must not promise a fallback, got %q", m)
+	}
+	if !strings.Contains(m, "stdout") {
+		t.Errorf("remedy should name the runtime's stdout as the alternative, got %q", m)
 	}
 }
 
@@ -138,7 +142,7 @@ func TestCapabilityGuidance_StreamDisabledNamesMCPFlag(t *testing.T) {
 // causes — enabled:false, a missing runtimeState key, and an
 // unreadable /settings body — and the probe cannot tell them apart.
 func TestCapabilityGuidance_SettingDisabledDoesNotClaimAClosedGate(t *testing.T) {
-	for _, tool := range []string{"get_flows_state", "set_flows_state"} {
+	for _, tool := range []string{"set_flows_state"} {
 		r, _ := capabilityGuidance(tool, CapSettingDisabled, RuntimeProbe{})
 		lower := strings.ToLower(r)
 		if strings.Contains(lower, "is false") || strings.Contains(lower, "gate is closed") {
