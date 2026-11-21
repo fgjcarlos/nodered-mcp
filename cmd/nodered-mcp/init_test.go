@@ -19,7 +19,7 @@ func TestDetectClients_CursorStaleDirectoryIsNotInstalled(t *testing.T) {
 	if clientInstalled(client) {
 		t.Fatal("stale Cursor directory alone must not count as installed")
 	}
-	for _, cursor := range clientCatalog(runtime.GOOS, home, t.TempDir(), t.TempDir(), t.TempDir()) {
+	for _, cursor := range clientCatalog(runtime.GOOS, home, t.TempDir(), t.TempDir(), t.TempDir(), "") {
 		if cursor.key == "cursor" {
 			for _, probe := range cursor.probes {
 				if probe == cursorDir {

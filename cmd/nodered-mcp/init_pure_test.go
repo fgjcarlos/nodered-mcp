@@ -225,7 +225,7 @@ func TestClientInstalledEvidence(t *testing.T) {
 					t.Fatal(err)
 				}
 				t.Setenv("PATH", t.TempDir())
-				for _, client := range clientCatalog(runtime.GOOS, home, filepath.Join(home, "config"), "", "") {
+				for _, client := range clientCatalog(runtime.GOOS, home, filepath.Join(home, "config"), "", "", "") {
 					if client.key == "gemini" {
 						return client
 					}
@@ -259,7 +259,7 @@ func TestClientCatalogPlatformProbes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.goos+"/"+tc.key, func(t *testing.T) {
 			var got []string
-			for _, client := range clientCatalog(tc.goos, home, cfg, appData, local) {
+			for _, client := range clientCatalog(tc.goos, home, cfg, appData, local, "") {
 				if client.key == tc.key {
 					got = client.probes
 					break
@@ -282,7 +282,7 @@ func TestClientCatalogPlatformProbes(t *testing.T) {
 }
 
 func TestClientCatalogMatchesDocumentationAndExamples(t *testing.T) {
-	clients := clientCatalog(runtime.GOOS, "/home/test", "/config", "/appdata", "/localappdata")
+	clients := clientCatalog(runtime.GOOS, "/home/test", "/config", "/appdata", "/localappdata", "")
 	repoRoot := filepath.Join("..", "..")
 	doc, err := os.ReadFile(filepath.Join(repoRoot, "docs", "clients.md"))
 	if err != nil {
@@ -323,5 +323,40 @@ func TestClientCatalogMatchesDocumentationAndExamples(t *testing.T) {
 		if filepath.Ext(file.Name()) == ".json" && !expectedExamples[file.Name()] {
 			t.Errorf("example %q is not assigned to a client in the catalog", file.Name())
 		}
+	}
+}
+
+// Pi reads user-level MCP servers from <agent-dir>/mcp.json, where the agent
+// dir is $PI_CODING_AGENT_DIR when set and ~/.pi/agent otherwise (#397).
+func TestKnownClientsPiNoteHonoursAgentDir(t *testing.T) {
+	home := t.TempDir()
+	override := filepath.Join(t.TempDir(), "pi-agent")
+	cases := []struct {
+		name, env, want string
+		unset           bool
+	}{
+		{name: "override", env: override, want: filepath.Join(override, "mcp.json")},
+		{name: "empty", want: filepath.Join(home, ".pi", "agent", "mcp.json")},
+		{name: "unset", unset: true, want: filepath.Join(home, ".pi", "agent", "mcp.json")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, v := range []string{"HOME", "USERPROFILE", "home"} {
+				t.Setenv(v, home)
+			}
+			t.Setenv("PI_CODING_AGENT_DIR", tc.env) // restores the original value after the test
+			if tc.unset {
+				os.Unsetenv("PI_CODING_AGENT_DIR")
+			}
+			for _, c := range knownClients() {
+				if c.key == "pi" {
+					if want := "paste into " + tc.want; c.note != want {
+						t.Fatalf("pi note = %q, want %q", c.note, want)
+					}
+					return
+				}
+			}
+			t.Fatal("Pi client missing from catalog")
+		})
 	}
 }
