@@ -7,10 +7,12 @@
 # the v0.7.2 release (#298) require two manual reruns: the npm write had
 # succeeded, the next read had not yet propagated.
 #
-# This helper retries the read up to N times with linear backoff
-# (3s, 6s, 9s, 12s, 15s by default — total budget ~45s) and exits
-# 0 on the first non-empty value. After the budget is exhausted it
-# exits 1 so the calling step fails closed, matching the workflow's
+# This helper retries the read up to N times with linear backoff capped
+# at 30s per sleep (by default 26 attempts: 3s, 6s, ... 30s, then 30s
+# each — total budget 615s, ~10 minutes per call) and exits 0 on the
+# first non-empty value. npmjs took ~6 minutes to serve the last of
+# seven fresh packages on v0.8.0, past the old ~45s budget (#396).
+# After the budget is exhausted it exits 1 so the calling step fails closed, matching the workflow's
 # existing invariant: do not move any `latest` tag until the registry
 # actually carries the expected state.
 #
@@ -35,14 +37,12 @@
 # exact `--expect` value). Exits 1 on retry exhaustion or
 # argument error. Stderr carries the attempt log so the CI step's
 # failure output names what was waited on.
-#
-# ponytail: linear backoff is fine for npm's documented propagation
-# window (~30s); switch if a future cycle sees real exhaustion.
 
 set -euo pipefail
 
-attempts=5
+attempts=26
 base_sleep=3
+max_sleep=30
 expect=""
 expect_set=false
 cmd=()
@@ -129,6 +129,7 @@ for attempt in $(seq 1 "$attempts"); do
     break
   fi
   sleep=$((attempt * base_sleep))
+  [ "$sleep" -gt "$max_sleep" ] && sleep=$max_sleep
   echo "wait-for-registry: attempt $attempt/$attempts $reason, sleeping ${sleep}s ($description)" >&2
   if [ -n "$last_error" ]; then
     echo "wait-for-registry: last command error: $last_error" >&2

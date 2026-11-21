@@ -516,3 +516,79 @@ func TestDryRun_PreviewIsNotByteIdenticalToWrite(t *testing.T) {
 		}
 	}
 }
+
+// runInitStdout runs runInit with input on stdin and returns only its stdout
+// (the snippet); prompts and notes go to stderr and are discarded.
+func runInitStdout(t *testing.T, input string, args ...string) (string, error) {
+	t.Helper()
+	oldStdin, oldStdout, oldStderr := os.Stdin, os.Stdout, os.Stderr
+	defer func() { os.Stdin, os.Stdout, os.Stderr = oldStdin, oldStdout, oldStderr }()
+	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer devNull.Close()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdin := inputAsFile(input)
+	defer os.Remove(stdin.Name())
+	defer stdin.Close()
+	os.Stdin, os.Stdout, os.Stderr = stdin, w, devNull
+	done := make(chan string)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		done <- buf.String()
+	}()
+	runErr := runInit(args)
+	w.Close()
+	return <-done, runErr
+}
+
+// TestRunInit_DryRunUnsupportedTargetKeepsAnswers pins #394: for a client
+// without a writable target, --dry-run prints the same snippet a plain init
+// prints for the same answers (URL, backup dir), never the token, still
+// errors and writes nothing.
+func TestRunInit_DryRunUnsupportedTargetKeepsAnswers(t *testing.T) {
+	for _, tc := range []struct{ key, name, url, backup string }{
+		{"claude-code", "Claude Code", "'NODERED_URL=http://nodered.lan:1880'", "'NODERED_BACKUP_DIR=/srv/backups'"},
+		{"pi", "Pi", `"NODERED_URL": "http://nodered.lan:1880"`, `"NODERED_BACKUP_DIR": "/srv/backups"`},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("HOME", dir)
+			t.Setenv("XDG_CONFIG_HOME", dir)
+			oldDetect := detectClients
+			detectClients = func(bool) []mcpClient { return []mcpClient{{key: tc.key, name: tc.name}} }
+			defer func() { detectClients = oldDetect }()
+
+			for _, token := range []string{"", "s3cret-tok"} {
+				input := "http://nodered.lan:1880\n" + token + "\n/srv/backups\n"
+				got, err := runInitStdout(t, input, "--dry-run")
+				if err == nil || !strings.Contains(err.Error(), "--dry-run is not supported for "+tc.name) {
+					t.Fatalf("token=%q: want the --dry-run is not supported error, got %v", token, err)
+				}
+				for _, want := range []string{tc.url, tc.backup} {
+					if !strings.Contains(got, want) {
+						t.Errorf("token=%q: dry-run snippet missing %s:\n%s", token, want, got)
+					}
+				}
+				if strings.Contains(got, "NODERED_TOKEN") || (token != "" && strings.Contains(got, token)) {
+					t.Errorf("token=%q: dry-run snippet leaked the token:\n%s", token, got)
+				}
+				plain, err := runInitStdout(t, input)
+				if err != nil {
+					t.Fatalf("plain init: %v", err)
+				}
+				if got != plain {
+					t.Errorf("token=%q: dry-run snippet differs from plain init:\ndry-run:\n%s\nplain:\n%s", token, got, plain)
+				}
+			}
+			if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
+				t.Errorf("dry-run created files under HOME: %v (err %v)", entries, err)
+			}
+		})
+	}
+}

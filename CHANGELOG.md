@@ -12,6 +12,28 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   on every release. The deprecation has been in place since August, but the
   step re-sent it each time and failed the v0.8.0 `publish-main` job when the
   registry answered `E422`, which skipped the `latest` promotion.
+- `nodered-mcp init` now tells Pi users to paste into
+  `$PI_CODING_AGENT_DIR/mcp.json` when that variable is set, instead of the
+  hardcoded `~/.pi/agent/mcp.json` that Pi does not read under the override
+  (#397).
+- Keep the answers in the `init --dry-run` snippet for clients without a
+  writable config target (Claude Code, VS Code, OpenCode, Pi). The preview
+  rendered the snippet from empty values, so it printed an empty
+  `NODERED_URL` and no `NODERED_BACKUP_DIR`; it now prints the same snippet a
+  plain `init` prints for the same answers, still without the token (#394).
+- Report the Docker image version without the tag's leading `v`: the image
+  printed `v0.8.0` while the goreleaser binaries and the npm package report
+  `0.8.0`. The Dockerfile now strips a single leading `v` from `VERSION`
+  (#395).
+- Wait long enough for npmjs to serve a fresh publish. The post-publish
+  registry reads gave up after ~45 s, while npmjs took about 6 minutes to
+  serve the last v0.8.0 package; `scripts/wait-for-registry.sh` now retries
+  26 times with sleeps capped at 30 s, about 10 minutes per package (#396).
+- Recommend `MCP_DEBUG_STREAM=true` instead of `MCP_DEBUG_STREAM=on` in the
+  startup warning, the `get_debug_messages` and `get_node_status` errors, the
+  capability guidance and the `get_node_status` description. The config parser
+  accepts boolean values only, so every hint led to a server that refused to
+  start with `strconv.ParseBool: parsing "on": invalid syntax` (#402).
 - The `search_nodes` description no longer advertises a
   `NODERED_SEARCH_BASE_URL` variable that nothing reads; it names the public
   npm registry (`registry.npmjs.org`) the search always calls. A test now
