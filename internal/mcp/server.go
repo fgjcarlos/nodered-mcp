@@ -206,7 +206,7 @@ func buildDenylist(types []string) func(string) bool {
 // default and the safe one: starting a /comms dial on some Node-RED
 // versions (notably :latest) crashes the runtime via a bug in
 // @node-red/editor-api/auth/tokens.js. Operators who need debug streaming
-// opt in explicitly via MCP_DEBUG_STREAM=on.
+// opt in explicitly via MCP_DEBUG_STREAM=true.
 //
 // opts.NodeDenylist is wired into the server's denylist closure. The
 // write tools call it before forwarding any node payload to Node-RED
@@ -262,7 +262,7 @@ func New(nrClient *nodered.Client, opts Options) *Server {
 		// Issue #159: surface this hint at Warn level so it is visible
 		// under the defensive MCP_LOG_LEVEL=warn production default,
 		// not only at the noisier Info level.
-		slog.Warn("debug stream disabled; set MCP_DEBUG_STREAM=on to enable")
+		slog.Warn("debug stream disabled; set MCP_DEBUG_STREAM=true to enable")
 	} else {
 		if tail, err := nodered.NewDebugTail(nrClient, nodered.DefaultDebugBufferSize); err != nil {
 			slog.Warn("debug tail unavailable", "error", err)

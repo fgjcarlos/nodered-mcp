@@ -20,7 +20,7 @@ import (
 func (s *Server) handleGetDebugMessages(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if !s.debugStream {
 		return mcp.NewToolResultError(
-			"debug streaming is disabled. Set MCP_DEBUG_STREAM=on (or pass --debug-stream) " +
+			"debug streaming is disabled. Set MCP_DEBUG_STREAM=true (or pass --debug-stream) " +
 				"to enable the /comms WebSocket tail. On some Node-RED versions the tail " +
 				"crashes the runtime; keep it off unless you need it.",
 		), nil
@@ -173,8 +173,9 @@ func (s *Server) handleGetRuntimeLogs(ctx context.Context, req mcp.CallToolReque
 				"Node-RED did not respond on GET /logs. This endpoint is not part of the " +
 					"standard Node-RED 5.x admin API; it may be exposed by a future version, a " +
 					"fork, or a logging plugin mounted at /logs. To read the runtime log on a " +
-					"stock install, point at Node-RED's stdout (the file is named " +
-					"~/.node-red/*.log or the container's stdout).",
+					"stock install, read the runtime's own output: its stdout (journalctl for a " +
+					"systemd service, docker logs for a container), or the file a logging " +
+					"handler writes if one is configured in settings.js.",
 			), nil
 		}
 		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
@@ -366,7 +367,7 @@ func (s *Server) handleGetNodeStatus(ctx context.Context, req mcp.CallToolReques
 	if !s.debugStream {
 		return mcp.NewToolResultError(
 			"node status is not available: the /comms WebSocket is not connected. " +
-				"Set MCP_DEBUG_STREAM=on to enable it. On some Node-RED versions the " +
+				"Set MCP_DEBUG_STREAM=true to enable it. On some Node-RED versions the " +
 				"tail crashes the runtime; keep it off unless you need it.",
 		), nil
 	}
@@ -508,15 +509,16 @@ func (s *Server) handleGetFlowsState(ctx context.Context, _ mcp.CallToolRequest)
 	raw, err := s.nrClient.GetFlowsState(ctx)
 	if err != nil {
 		slog.Error("get_flows_state failed", "error", err)
-		// Same runtimeState gate as set_flows_state -- the GET endpoint is
-		// only mounted alongside the POST one.
+		// GET /flows/state is mounted unconditionally; only POST is gated
+		// by settings.runtimeState.enabled (#406), so a 404 is not that gate.
 		var apiErr *nodered.APIError
 		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
 			return mcp.NewToolResultError(
-				"Node-RED did not respond on GET /flows/state. This endpoint is " +
-					"only mounted when settings.runtimeState.enabled is true. Add " +
-					"`runtimeState: { enabled: true, ui: false }` to your " +
-					"settings.js and restart Node-RED, then retry.",
+				"Node-RED answered 404 on GET /flows/state. This endpoint does " +
+					"not depend on settings.runtimeState (only POST /flows/state, " +
+					"used by set_flows_state, does). Check that NODERED_URL points " +
+					"at the Node-RED admin API root and that this Node-RED version " +
+					"provides /flows/state.",
 			), nil
 		}
 		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))

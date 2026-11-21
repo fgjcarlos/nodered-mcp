@@ -10,9 +10,11 @@ RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 
+# docker.yml passes the tag (v0.8.0); strip its leading v so the image
+# reports the same version as the goreleaser binaries (0.8.0).
 ARG VERSION=docker
 RUN CGO_ENABLED=0 go build \
-	-ldflags "-s -w -X main.version=${VERSION}" \
+	-ldflags "-s -w -X main.version=${VERSION#v}" \
 	-o /out/nodered-mcp ./cmd/nodered-mcp
 
 # The runtime image has no shell, so the directory the nonroot user owns
