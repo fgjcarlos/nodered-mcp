@@ -6,6 +6,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- `import_flow` names each `http in` route (method + url) of the copy that an
+  existing node already serves, with that node and its tab, and reminds that
+  deleting the copy leaves the original route unregistered until that tab is
+  redeployed. The import still happens (#409).
+
 ### Fixed
 
 - Drop the npm workflow step that re-deprecated `@fgjcarlos/nodered-mcp@0.6.2`
