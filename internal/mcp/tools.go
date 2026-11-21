@@ -119,7 +119,8 @@ func (s *Server) registerTools() {
 				"is reminted and its wires and references rewritten. Global config nodes "+
 				"and subflows the instance already has are reused; a subflow it lacks must "+
 				"be created first with create_subflow. Returns the runtime-assigned id of "+
-				"the new tab.\n\n"+
+				"the new tab, and names each http in route (method + url) of the copy that "+
+				"an existing node already serves, with that node and its tab.\n\n"+
 				"WARNING: this tool can deploy any node type the Node-RED instance has "+
 				"installed, including exec/system nodes that execute shell commands on "+
 				"the Node-RED host. The MCP server blocks a configurable set of node "+
