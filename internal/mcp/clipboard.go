@@ -66,10 +66,10 @@ func (s *Server) handleImportFlow(ctx context.Context, req mcp.CallToolRequest) 
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	// Refuse a forbidden type before any request; CreateFlow judges the
-	// final document again. Deliberately stricter than what gets posted
-	// (#370): subflow members and reused global configs are judged too,
-	// since CreateFlow never follows a subflow:<id> instance to the
-	// definition it runs.
+	// final document again, including the runtime definitions its
+	// subflow:<id> instances run. Deliberately stricter than what gets
+	// posted (#370): subflow members and reused global configs are
+	// judged too.
 	for _, t := range doc.types {
 		if !s.nrClient.NodeTypeAllowed(t) {
 			return mcp.NewToolResultError(deniedNodeMessage(t)), nil

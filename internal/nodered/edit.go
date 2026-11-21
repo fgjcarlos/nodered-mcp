@@ -37,7 +37,10 @@ import (
 // still race — the loser's change is refused with a 409, not silently
 // applied — but the window is one round trip rather than however long a
 // model takes to rewrite a whole tab.
-func (c *Client) editFlow(ctx context.Context, flowID string, edit func(RawFlow) (RawFlow, error)) error {
+//
+// edit also receives the configuration the snapshot holds, so a check can
+// resolve what a subflow instance in the tab runs.
+func (c *Client) editFlow(ctx context.Context, flowID string, edit func(tab RawFlow, flows []json.RawMessage) (RawFlow, error)) error {
 	release, err := c.writeGuard(ctx)
 	if err != nil {
 		return err
@@ -54,7 +57,7 @@ func (c *Client) editFlow(ctx context.Context, flowID string, edit func(RawFlow)
 	if !ok {
 		return flowTabNotFound(flowID)
 	}
-	next, err := edit(current)
+	next, err := edit(current, snap.flows)
 	if err != nil {
 		return err
 	}
@@ -72,7 +75,10 @@ func (c *Client) AddNode(ctx context.Context, flowID string, node json.RawMessag
 	if err := c.deniedNodeType(node); err != nil {
 		return err
 	}
-	return c.editFlow(ctx, flowID, func(f RawFlow) (RawFlow, error) {
+	return c.editFlow(ctx, flowID, func(f RawFlow, flows []json.RawMessage) (RawFlow, error) {
+		if err := c.deniedSubflowInstance(node, flows); err != nil {
+			return nil, err
+		}
 		return AddNodeToFlow(f, node)
 	})
 }
@@ -89,18 +95,18 @@ func (c *Client) UpdateNode(ctx context.Context, flowID, nodeID string, patch ma
 			return err
 		}
 	}
-	return c.editFlow(ctx, flowID, func(f RawFlow) (RawFlow, error) {
+	return c.editFlow(ctx, flowID, func(f RawFlow, flows []json.RawMessage) (RawFlow, error) {
 		next, err := UpdateNodeInFlow(f, nodeID, patch)
 		if err != nil {
 			return nil, err
 		}
-		return next, c.deniedNodeTypeOfNode(next, nodeID)
+		return next, c.deniedNodeTypeOfNode(next, nodeID, flows)
 	})
 }
 
 // DeleteNode removes a node and any wires pointing at it.
 func (c *Client) DeleteNode(ctx context.Context, flowID, nodeID string) error {
-	return c.editFlow(ctx, flowID, func(f RawFlow) (RawFlow, error) {
+	return c.editFlow(ctx, flowID, func(f RawFlow, _ []json.RawMessage) (RawFlow, error) {
 		return DeleteNodeFromFlow(f, nodeID)
 	})
 }
@@ -112,15 +118,15 @@ func (c *Client) DeleteNode(ctx context.Context, flowID, nodeID string) error {
 // The judgement happens after the tab is read (the effective wiring is not
 // known before that) but before anything is deployed.
 func (c *Client) ConnectNodes(ctx context.Context, flowID, fromID string, port int, toID string) error {
-	return c.editFlow(ctx, flowID, func(f RawFlow) (RawFlow, error) {
+	return c.editFlow(ctx, flowID, func(f RawFlow, flows []json.RawMessage) (RawFlow, error) {
 		next, err := ConnectNodesInFlow(f, fromID, port, toID)
 		if err != nil {
 			return nil, err
 		}
-		if err := c.deniedNodeTypeOfNode(next, fromID); err != nil {
+		if err := c.deniedNodeTypeOfNode(next, fromID, flows); err != nil {
 			return nil, err
 		}
-		return next, c.deniedNodeTypeOfNode(next, toID)
+		return next, c.deniedNodeTypeOfNode(next, toID, flows)
 	})
 }
 
