@@ -35,7 +35,8 @@ preview output as sensitive if your config stores tokens unusually.
 
 The same limitation as `--write` applies: for clients with no safe
 config target (Claude Code, VS Code, OpenCode, Pi) the preview prints
-the manual snippet and exits with an error, so automation can detect
+the same manual snippet a plain `init` prints for your answers (still
+without `NODERED_TOKEN`) and exits with an error, so automation can detect
 that nothing was merged. `--dry-run` and `--write` together are
 rejected as contradictory.
 

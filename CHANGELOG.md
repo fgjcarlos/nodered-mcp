@@ -16,6 +16,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `$PI_CODING_AGENT_DIR/mcp.json` when that variable is set, instead of the
   hardcoded `~/.pi/agent/mcp.json` that Pi does not read under the override
   (#397).
+- Keep the answers in the `init --dry-run` snippet for clients without a
+  writable config target (Claude Code, VS Code, OpenCode, Pi). The preview
+  rendered the snippet from empty values, so it printed an empty
+  `NODERED_URL` and no `NODERED_BACKUP_DIR`; it now prints the same snippet a
+  plain `init` prints for the same answers, still without the token (#394).
 
 ## [0.8.0] - 2026-11-20
 
