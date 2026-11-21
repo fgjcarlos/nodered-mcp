@@ -161,7 +161,9 @@ pi install mcp-adapter
 ```
 
 Then write `~/.pi/agent/mcp.json` (global) or `./.pi/mcp.json`
-(project-local). See
+(project-local). When `PI_CODING_AGENT_DIR` is set, Pi reads the global
+file from `$PI_CODING_AGENT_DIR/mcp.json` instead, and `nodered-mcp init`
+names that path. See
 [`examples/pi_mcp_config.json`](../examples/pi_mcp_config.json).
 
 ```json

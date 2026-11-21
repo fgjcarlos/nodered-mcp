@@ -26,10 +26,14 @@ type mcpClient struct {
 func knownClients() []mcpClient {
 	home, _ := os.UserHomeDir()
 	cfg, _ := os.UserConfigDir()
-	return clientCatalog(runtime.GOOS, home, cfg, os.Getenv("APPDATA"), os.Getenv("LOCALAPPDATA"))
+	return clientCatalog(runtime.GOOS, home, cfg, os.Getenv("APPDATA"), os.Getenv("LOCALAPPDATA"), os.Getenv("PI_CODING_AGENT_DIR"))
 }
 
-func clientCatalog(goos, home, cfg, appData, localAppData string) []mcpClient {
+func clientCatalog(goos, home, cfg, appData, localAppData, piAgentDir string) []mcpClient {
+	// Pi reads <agent-dir>/mcp.json; PI_CODING_AGENT_DIR overrides ~/.pi/agent.
+	if piAgentDir == "" {
+		piAgentDir = filepath.Join(home, ".pi", "agent")
+	}
 	claudeDesktopConfig := filepath.Join(cfg, "Claude", "claude_desktop_config.json")
 	if goos == "windows" && appData != "" {
 		claudeDesktopConfig = filepath.Join(appData, "Claude", "claude_desktop_config.json")
@@ -90,7 +94,7 @@ func clientCatalog(goos, home, cfg, appData, localAppData string) []mcpClient {
 		},
 		{
 			key: "pi", name: "Pi", commands: []string{"pi"},
-			note:   "paste into " + filepath.Join(home, ".pi", "agent", "mcp.json"),
+			note:   "paste into " + filepath.Join(piAgentDir, "mcp.json"),
 			format: "pi", rootKey: "mcpServers", example: "examples/pi_mcp_config.json",
 		},
 	}
