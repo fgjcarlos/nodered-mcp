@@ -21,6 +21,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   rendered the snippet from empty values, so it printed an empty
   `NODERED_URL` and no `NODERED_BACKUP_DIR`; it now prints the same snippet a
   plain `init` prints for the same answers, still without the token (#394).
+- Report the Docker image version without the tag's leading `v`: the image
+  printed `v0.8.0` while the goreleaser binaries and the npm package report
+  `0.8.0`. The Dockerfile now strips a single leading `v` from `VERSION`
+  (#395).
 
 ## [0.8.0] - 2026-11-20
 
