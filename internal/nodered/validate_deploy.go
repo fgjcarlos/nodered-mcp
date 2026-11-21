@@ -714,30 +714,36 @@ func portTargetIssues(defID string, members map[string]int, ports []json.RawMess
 			continue
 		}
 		for _, wire := range parsed.Wires {
-			id, ok := rawString(wire.ID)
-			if !ok || id == "" {
-				issues = append(issues, danglingSubflowPortIssue(defID, kind, ""))
-				continue
-			}
-			outputs, member := members[id]
-			if kind == "out" && id == defID {
-				// A subflow can wire its input straight to its output; the
-				// port then indexes the instance's wires, which the runtime
-				// builds from the "in" ports.
-				outputs, member = inPorts, true
-			}
-			if !member {
-				issues = append(issues, danglingSubflowPortIssue(defID, kind, id))
-				continue
-			}
-			if kind == "out" {
-				if issue, bad := outPortIndexIssue(defID, output, id, wire.Port, outputs); bad {
-					issues = append(issues, issue)
-				}
+			if issue, bad := subflowWireIssue(defID, kind, members, inPorts, output, wire.ID, wire.Port); bad {
+				issues = append(issues, issue)
 			}
 		}
 	}
 	return issues
+}
+
+// subflowWireIssue judges one wire of a subflow port: its target must be a
+// member of the definition and, on an "out" port, its port must be one the
+// runtime can index.
+func subflowWireIssue(defID, kind string, members map[string]int, inPorts, output int, rawID, rawPort json.RawMessage) (FlowIssue, bool) {
+	id, ok := rawString(rawID)
+	if !ok || id == "" {
+		return danglingSubflowPortIssue(defID, kind, ""), true
+	}
+	outputs, member := members[id]
+	if kind == "out" && id == defID {
+		// A subflow can wire its input straight to its output; the port
+		// then indexes the instance's wires, which the runtime builds from
+		// the "in" ports.
+		outputs, member = inPorts, true
+	}
+	if !member {
+		return danglingSubflowPortIssue(defID, kind, id), true
+	}
+	if kind != "out" {
+		return FlowIssue{}, false
+	}
+	return outPortIndexIssue(defID, output, id, rawPort, outputs)
 }
 
 // outPortIndexIssue checks the "port" of one wire of an "out" port.
