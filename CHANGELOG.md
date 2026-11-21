@@ -12,6 +12,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   on every release. The deprecation has been in place since August, but the
   step re-sent it each time and failed the v0.8.0 `publish-main` job when the
   registry answered `E422`, which skipped the `latest` promotion.
+- Stop promising a local-log fallback for `get_runtime_logs`. The
+  `get_runtime_info` guidance said the tool "will fall back to the local log
+  file under ~/.node-red/", and the 404 error named a `~/.node-red/*.log` file,
+  but the tool only calls `GET /logs` and stock Node-RED writes no such file.
+  Both now point at the runtime's own output: stdout (journalctl, docker logs)
+  or the file a logging handler writes if one is configured (#407).
 
 ## [0.8.0] - 2026-11-20
 
