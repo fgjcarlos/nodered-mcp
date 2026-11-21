@@ -29,6 +29,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   registry reads gave up after ~45 s, while npmjs took about 6 minutes to
   serve the last v0.8.0 package; `scripts/wait-for-registry.sh` now retries
   26 times with sleeps capped at 30 s, about 10 minutes per package (#396).
+- Recommend `MCP_DEBUG_STREAM=true` instead of `MCP_DEBUG_STREAM=on` in the
+  startup warning, the `get_debug_messages` and `get_node_status` errors, the
+  capability guidance and the `get_node_status` description. The config parser
+  accepts boolean values only, so every hint led to a server that refused to
+  start with `strconv.ParseBool: parsing "on": invalid syntax` (#402).
 
 ## [0.8.0] - 2026-11-20
 
