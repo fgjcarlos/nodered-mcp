@@ -76,7 +76,7 @@ func TestCapabilityGuidance_UnknownRuntimeIsExplicit(t *testing.T) {
 // /settings, not from /flows/state, and the guidance has to say so.
 func TestCapabilityGuidance_SettingDisabledNamesRuntimeState(t *testing.T) {
 	p := RuntimeProbe{NodeRedVersion: v(5, 0, 1), RuntimeStateEnabled: false}
-	for _, tool := range []string{"get_flows_state", "set_flows_state"} {
+	for _, tool := range []string{"set_flows_state"} {
 		r, m := capabilityGuidance(tool, CapSettingDisabled, p)
 		if !strings.Contains(r, "settings.runtimeState.enabled") {
 			t.Errorf("%s reason should name settings.runtimeState.enabled, got %q", tool, r)
@@ -138,7 +138,7 @@ func TestCapabilityGuidance_StreamDisabledNamesMCPFlag(t *testing.T) {
 // causes — enabled:false, a missing runtimeState key, and an
 // unreadable /settings body — and the probe cannot tell them apart.
 func TestCapabilityGuidance_SettingDisabledDoesNotClaimAClosedGate(t *testing.T) {
-	for _, tool := range []string{"get_flows_state", "set_flows_state"} {
+	for _, tool := range []string{"set_flows_state"} {
 		r, _ := capabilityGuidance(tool, CapSettingDisabled, RuntimeProbe{})
 		lower := strings.ToLower(r)
 		if strings.Contains(lower, "is false") || strings.Contains(lower, "gate is closed") {

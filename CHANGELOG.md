@@ -12,6 +12,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   on every release. The deprecation has been in place since August, but the
   step re-sent it each time and failed the v0.8.0 `publish-main` job when the
   registry answered `E422`, which skipped the `latest` promotion.
+- `get_runtime_info` no longer reports `get_flows_state` as `setting_disabled`
+  when `settings.runtimeState.enabled` is off: Node-RED mounts
+  `GET /flows/state` unconditionally and gates only `POST /flows/state`
+  (`set_flows_state`). The `get_flows_state` 404 hint no longer tells the
+  operator to enable `runtimeState` (#406).
 
 ## [0.8.0] - 2026-11-20
 

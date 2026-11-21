@@ -169,8 +169,11 @@ func TestHandleGetRuntimeInfo_CapabilityGuidanceSettingDisabled(t *testing.T) {
 		t.Fatalf("handler reported error: %v", res.Content)
 	}
 	tc := res.Content[0].(mcp.TextContent)
-	if !strings.Contains(tc.Text, `"get_flows_state": "setting_disabled"`) {
-		t.Fatalf("get_flows_state should be setting_disabled, got %q", tc.Text)
+	if !strings.Contains(tc.Text, `"get_flows_state": "ok"`) {
+		t.Fatalf("get_flows_state should be ok (GET /flows/state is not gated), got %q", tc.Text)
+	}
+	if !strings.Contains(tc.Text, `"set_flows_state": "setting_disabled"`) {
+		t.Fatalf("set_flows_state should be setting_disabled, got %q", tc.Text)
 	}
 	if !strings.Contains(tc.Text, `settings.runtimeState.enabled`) {
 		t.Errorf("reason should name settings.runtimeState.enabled, got %q", tc.Text)

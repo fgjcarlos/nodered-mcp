@@ -508,15 +508,16 @@ func (s *Server) handleGetFlowsState(ctx context.Context, _ mcp.CallToolRequest)
 	raw, err := s.nrClient.GetFlowsState(ctx)
 	if err != nil {
 		slog.Error("get_flows_state failed", "error", err)
-		// Same runtimeState gate as set_flows_state -- the GET endpoint is
-		// only mounted alongside the POST one.
+		// GET /flows/state is mounted unconditionally; only POST is gated
+		// by settings.runtimeState.enabled (#406), so a 404 is not that gate.
 		var apiErr *nodered.APIError
 		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
 			return mcp.NewToolResultError(
-				"Node-RED did not respond on GET /flows/state. This endpoint is " +
-					"only mounted when settings.runtimeState.enabled is true. Add " +
-					"`runtimeState: { enabled: true, ui: false }` to your " +
-					"settings.js and restart Node-RED, then retry.",
+				"Node-RED answered 404 on GET /flows/state. This endpoint does " +
+					"not depend on settings.runtimeState (only POST /flows/state, " +
+					"used by set_flows_state, does). Check that NODERED_URL points " +
+					"at the Node-RED admin API root and that this Node-RED version " +
+					"provides /flows/state.",
 			), nil
 		}
 		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
