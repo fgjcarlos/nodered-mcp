@@ -173,8 +173,9 @@ func (s *Server) handleGetRuntimeLogs(ctx context.Context, req mcp.CallToolReque
 				"Node-RED did not respond on GET /logs. This endpoint is not part of the " +
 					"standard Node-RED 5.x admin API; it may be exposed by a future version, a " +
 					"fork, or a logging plugin mounted at /logs. To read the runtime log on a " +
-					"stock install, point at Node-RED's stdout (the file is named " +
-					"~/.node-red/*.log or the container's stdout).",
+					"stock install, read the runtime's own output: its stdout (journalctl for a " +
+					"systemd service, docker logs for a container), or the file a logging " +
+					"handler writes if one is configured in settings.js.",
 			), nil
 		}
 		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))

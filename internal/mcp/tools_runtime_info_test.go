@@ -182,8 +182,7 @@ func TestHandleGetRuntimeInfo_CapabilityGuidanceSettingDisabled(t *testing.T) {
 
 // TestHandleGetRuntimeInfo_CapabilityGuidanceEndpointNotMounted
 // covers the endpoint_not_mounted reason: the /logs endpoint
-// returns 404, and the guidance must say so and mention the local
-// log fallback.
+// returns 404, and the guidance must say so.
 func TestHandleGetRuntimeInfo_CapabilityGuidanceEndpointNotMounted(t *testing.T) {
 	s, _ := serverWithMockVersionProbe(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

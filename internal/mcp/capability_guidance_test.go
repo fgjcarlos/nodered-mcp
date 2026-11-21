@@ -95,10 +95,14 @@ func TestCapabilityGuidance_EndpointNotMountedNamesLogs(t *testing.T) {
 	if !strings.Contains(r, "/logs") {
 		t.Errorf("reason should name /logs, got %q", r)
 	}
-	// The tool has a real fallback (local log file), so the remedy
-	// should mention it — that is the concrete next step.
-	if m == "" {
-		t.Error("remedy should be non-empty: the tool falls back to local logs")
+	// Issue #407: the tool has no fallback, so the remedy must not
+	// promise one; it must point at where the runtime's output lives.
+	lm := strings.ToLower(m)
+	if strings.Contains(lm, "fall back") || strings.Contains(lm, "fallback") {
+		t.Errorf("remedy must not promise a fallback, got %q", m)
+	}
+	if !strings.Contains(m, "stdout") {
+		t.Errorf("remedy should name the runtime's stdout as the alternative, got %q", m)
 	}
 }
 
