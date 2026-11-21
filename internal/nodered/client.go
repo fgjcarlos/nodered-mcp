@@ -107,8 +107,9 @@ type Options struct {
 	// Defaults to 50; set to 0 to disable pruning.
 	BackupKeep int
 	// SearchBaseURL is the npm-compatible registry searched by SearchNodes.
-	// Defaults to "https://registry.npmjs.org" if empty. Set this to a
-	// private registry mirror (e.g. an internal Verdaccio) when needed.
+	// Defaults to "https://registry.npmjs.org" if empty. No env var maps to
+	// it: the binary always searches the public registry; tests point it
+	// at a fixture.
 	SearchBaseURL string
 	// SkipVersionProbe disables the Node-RED version probe (GET
 	// /settings). Set it in tests whose mock records every request:

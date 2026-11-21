@@ -12,6 +12,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   on every release. The deprecation has been in place since August, but the
   step re-sent it each time and failed the v0.8.0 `publish-main` job when the
   registry answered `E422`, which skipped the `latest` promotion.
+- The `search_nodes` description no longer advertises a
+  `NODERED_SEARCH_BASE_URL` variable that nothing reads; it names the public
+  npm registry (`registry.npmjs.org`) the search always calls. A test now
+  fails when a tool names an env var `config.go` does not read (#403)
 
 ## [0.8.0] - 2026-11-20
 

@@ -313,7 +313,7 @@ to its output.
 |---|---|---|---|
 | `list_nodes` | `GET /nodes` | read | |
 | `get_node_info` | `GET /nodes/:module` | read | |
-| `search_nodes` | npm registry | read | Private mirror via `Options.SearchBaseURL` |
+| `search_nodes` | npm registry | read | Public registry (`registry.npmjs.org`) |
 | `install_node` | `POST /nodes` | write | |
 | `uninstall_node` | `DELETE /nodes/:module` | write | |
 | `enable_node` | `PUT /nodes/:module[/:set]` | write | |
