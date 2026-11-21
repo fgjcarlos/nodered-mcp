@@ -25,6 +25,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   printed `v0.8.0` while the goreleaser binaries and the npm package report
   `0.8.0`. The Dockerfile now strips a single leading `v` from `VERSION`
   (#395).
+- Wait long enough for npmjs to serve a fresh publish. The post-publish
+  registry reads gave up after ~45 s, while npmjs took about 6 minutes to
+  serve the last v0.8.0 package; `scripts/wait-for-registry.sh` now retries
+  26 times with sleeps capped at 30 s, about 10 minutes per package (#396).
 
 ## [0.8.0] - 2026-11-20
 
