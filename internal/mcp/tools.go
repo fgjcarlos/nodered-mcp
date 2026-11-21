@@ -767,7 +767,7 @@ func (s *Server) registerTools() {
 				"Pass `node_id` for one node, or `flow_id` for every node in a tab.\n\n"+
 				"The response carries the most recent status and, for an errored node, "+
 				"the last error text. The cache is fed by the /comms WebSocket, which "+
-				"is opt-in via `MCP_DEBUG_STREAM=on` — when the flag is off, the tool "+
+				"is opt-in via `MCP_DEBUG_STREAM=true` — when the flag is off, the tool "+
 				"reports a clear \"stream unavailable\" message rather than returning "+
 				"stale data. Read-only: querying does not trigger any runtime side "+
 				"effect.",
@@ -829,8 +829,8 @@ func (s *Server) registerTools() {
 				"endpoint as flows.nodered.org). Returns name, version, description and "+
 				"link per hit. Use this before install_node when you don't know the exact "+
 				"npm package name. Read-only. "+
-				"Requires outbound network access to the npm registry "+
-				"(https://registry.npmjs.org or NODERED_SEARCH_BASE_URL if set).",
+				"Requires outbound network access to the public npm registry "+
+				"(https://registry.npmjs.org).",
 		),
 		mcp.WithString("query", mcp.Required(),
 			mcp.Description("Free-text search, e.g. \"dashboard\", \"mqtt\", \"modbus\".")),

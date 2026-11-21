@@ -158,9 +158,10 @@ func TestHandleGetFlowsState_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestHandleGetFlowsState_NotFound_HintMentionsRuntimeState(t *testing.T) {
-	// Without settings.runtimeState.enabled, GET /flows/state 404s.
-	// The handler should surface the runtimeState hint.
+func TestHandleGetFlowsState_NotFound_HintDoesNotBlameRuntimeState(t *testing.T) {
+	// Node-RED mounts GET /flows/state unconditionally; only POST is
+	// gated by settings.runtimeState.enabled (#406). A 404 must not
+	// send the operator to enable runtimeState.
 	s, _ := serverWithMock(t, func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 	})
@@ -169,8 +170,11 @@ func TestHandleGetFlowsState_NotFound_HintMentionsRuntimeState(t *testing.T) {
 		t.Fatal("404 should be a typed error")
 	}
 	tc := res.Content[0].(mcp.TextContent)
-	if !strings.Contains(tc.Text, "runtimeState") {
-		t.Errorf("hint should mention runtimeState, got %q", tc.Text)
+	if strings.Contains(tc.Text, "only mounted when") || strings.Contains(tc.Text, "enabled: true") {
+		t.Errorf("hint should not tie GET /flows/state to runtimeState, got %q", tc.Text)
+	}
+	if !strings.Contains(tc.Text, "GET /flows/state") {
+		t.Errorf("hint should name the endpoint, got %q", tc.Text)
 	}
 }
 

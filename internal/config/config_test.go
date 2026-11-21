@@ -407,3 +407,21 @@ func TestLoad_HTTPRate_RejectsUnparseableDisabled(t *testing.T) {
 		t.Errorf("error should mention MCP_HTTP_RATE_DISABLED, got: %v", err)
 	}
 }
+
+// Issue #402: MCP_DEBUG_STREAM=true, the value every hint recommends, enables
+// the stream; `on` is not a ParseBool value and must abort startup loudly.
+func TestLoad_ParsesDebugStream(t *testing.T) {
+	t.Setenv("MCP_DEBUG_STREAM", "true")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.MCPDebugStream {
+		t.Error("MCP_DEBUG_STREAM=true should enable the debug stream")
+	}
+
+	t.Setenv("MCP_DEBUG_STREAM", "on")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected error for unparseable MCP_DEBUG_STREAM, got nil")
+	}
+}

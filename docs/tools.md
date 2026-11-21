@@ -322,7 +322,7 @@ port carry only an `id`.
 |---|---|---|---|
 | `list_nodes` | `GET /nodes` | read | |
 | `get_node_info` | `GET /nodes/:module` | read | |
-| `search_nodes` | npm registry | read | Private mirror via `Options.SearchBaseURL` |
+| `search_nodes` | npm registry | read | Public registry (`registry.npmjs.org`) |
 | `install_node` | `POST /nodes` | write | |
 | `uninstall_node` | `DELETE /nodes/:module` | write | |
 | `enable_node` | `PUT /nodes/:module[/:set]` | write | |
@@ -334,7 +334,7 @@ port carry only an `id`.
 |---|---|---|---|
 | `get_settings` | `GET /settings` | read | |
 | `get_diagnostics` | `GET /diagnostics` | read | Requires Node-RED ≥3.1 |
-| `get_flows_state` | `GET /flows/state` | read | |
+| `get_flows_state` | `GET /flows/state` | read | Not gated by `runtimeState` |
 | `get_context` | `GET /context/...` | read | editor-api, no stability contract |
 | `set_context` | `GET /flows`, `POST /flow`, `POST /inject/:id` | write | Verified persistent inject/function helper |
 | `get_debug_messages` | `/comms` WebSocket | read | Buffer of 500, reconnects |
@@ -342,7 +342,7 @@ port carry only an `id`.
 | `list_plugins` | `GET /plugins` | read | editor-api |
 | `get_runtime_info` | companion to `get_diagnostics` | read | MCP server view of the runtime |
 | `get_node_status` | `/comms` WebSocket | read | |
-| `set_flows_state` | `POST /flows/state` | write | |
+| `set_flows_state` | `POST /flows/state` | write | Requires `settings.runtimeState.enabled: true` |
 | `list_backups` | local | read | |
 | `diff_flows` | local + `GET /flows` | read | |
 | `restore_backup` | `POST /flows` | write | The backup is validated first; `force=true` skips that |
@@ -423,14 +423,14 @@ explains the non-`ok` ones.
     "capabilityMatrix": {
       "set_context": "version_too_low",
       "get_diagnostics": "ok",
-      "get_flows_state": "setting_disabled"
+      "set_flows_state": "setting_disabled"
     },
     "capabilityGuidance": {
       "set_context": {
         "reason": "Node-RED 3.0.0 is below the 5.0.0 minimum required by set_context",
         "remedy": "Upgrade Node-RED to at least 5.0.0"
       },
-      "get_flows_state": {
+      "set_flows_state": {
         "reason": "the runtime-state setting did not read as enabled; settings.runtimeState.enabled was false, absent, or /settings was unreadable",
         "remedy": "Set settings.runtimeState.enabled to true in settings.js (or via the runtime settings UI) and restart Node-RED"
       }
