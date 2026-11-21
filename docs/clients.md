@@ -35,7 +35,8 @@ preview output as sensitive if your config stores tokens unusually.
 
 The same limitation as `--write` applies: for clients with no safe
 config target (Claude Code, VS Code, OpenCode, Pi) the preview prints
-the manual snippet and exits with an error, so automation can detect
+the same manual snippet a plain `init` prints for your answers (still
+without `NODERED_TOKEN`) and exits with an error, so automation can detect
 that nothing was merged. `--dry-run` and `--write` together are
 rejected as contradictory.
 
@@ -160,7 +161,9 @@ pi install mcp-adapter
 ```
 
 Then write `~/.pi/agent/mcp.json` (global) or `./.pi/mcp.json`
-(project-local). See
+(project-local). When `PI_CODING_AGENT_DIR` is set, Pi reads the global
+file from `$PI_CODING_AGENT_DIR/mcp.json` instead, and `nodered-mcp init`
+names that path. See
 [`examples/pi_mcp_config.json`](../examples/pi_mcp_config.json).
 
 ```json

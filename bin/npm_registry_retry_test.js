@@ -187,6 +187,44 @@ test('reports the real command error instead of swallowing it', () => {
   assert.match(r.stderr, /npm ERR! code E404/);
 });
 
+// #396: npmjs took ~6 minutes to serve the last of seven fresh
+// packages on v0.8.0, while the old default budget was ~45s. The
+// default must cover at least 10 minutes per call, with each sleep
+// capped so the backoff cannot grow unbounded. `sleep` is an external
+// command, so a fake one on PATH records the waits instantly.
+function withFakeSleep(dir) {
+  const log = path.join(dir, 'sleeps');
+  fs.writeFileSync(path.join(dir, 'sleep'), `#!/usr/bin/env bash\necho "$1" >> "${log}"\n`);
+  fs.chmodSync(path.join(dir, 'sleep'), 0o755);
+  return () => fs.readFileSync(log, 'utf8').trim().split('\n').map(Number);
+}
+
+test('default budget waits at least 10 minutes with capped sleeps (#396)', () => {
+  const { dir, script } = makeFakeNpm([...Array(25).fill(''), 'sha512-slow']);
+  const sleeps = withFakeSleep(dir);
+  const r = runHelper(['--', script, 'dist.integrity'], fakeEnv(script));
+  const waited = sleeps();
+  fs.rmSync(dir, { recursive: true, force: true });
+  assert.equal(r.status, 0, `expected exit 0, got ${r.status}\nstderr: ${r.stderr}`);
+  assert.equal(r.stdout, 'sha512-slow');
+  assert.equal(waited.length, 25);
+  assert.ok(Math.max(...waited) <= 30, `sleep exceeded 30s cap: ${waited}`);
+  const total = waited.reduce((a, b) => a + b, 0);
+  assert.ok(total >= 600, `default budget ${total}s is under 10 minutes`);
+});
+
+test('default budget still fails closed when the value never appears (#396)', () => {
+  const { dir, script } = makeFakeNpm(['']);
+  const sleeps = withFakeSleep(dir);
+  const r = runHelper(['--', script, 'dist.integrity'], fakeEnv(script));
+  const total = sleeps().reduce((a, b) => a + b, 0);
+  fs.rmSync(dir, { recursive: true, force: true });
+  assert.equal(r.status, 1, `expected exit 1, got ${r.status}\nstderr: ${r.stderr}`);
+  assert.match(r.stderr, /gave up after 26 attempts/);
+  assert.ok(total <= 15 * 60, `default budget ${total}s exceeds 15 minutes`);
+  assert.equal(r.stdout, '');
+});
+
 test('rejects unknown flags with exit 2', () => {
   const r = runHelper(['--bogus']);
   assert.equal(r.status, 2, `expected exit 2, got ${r.status}\nstderr: ${r.stderr}`);
