@@ -57,6 +57,11 @@ func (c *Client) deployFlowUpdate(ctx context.Context, id string, flow RawFlow) 
 	if err != nil {
 		return err
 	}
+	// The whole tab is judged, as UpdateFlow judges it; a subflow instance
+	// in it runs a definition that lives in the configuration, not the tab.
+	if err := c.deniedSubflowInstance(flow, snap.flows); err != nil {
+		return err
+	}
 	return c.deployFlowUpdateOn(ctx, id, flow, snap)
 }
 

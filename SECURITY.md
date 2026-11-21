@@ -81,7 +81,12 @@ defence as one that ships a payload of pure `exec`).
 The policy is evaluated on the content the write would deploy, walked
 recursively over the admin API's own shapes (`nodes`, `configs`,
 `subflows`), so a forbidden type nested inside a subflow definition is
-found too.
+found too. A subflow instance (`subflow:<id>`) is judged by the definition
+it runs, including instances nested inside that definition: the definition
+is resolved from the configuration the write would deploy (the document
+plus, for a partial write, the runtime's current configuration), so an
+instance of a definition that holds a forbidden type is refused even when
+the definition already lives in the runtime.
 
 - A write that submits a whole document — `create_flow`, `update_flow`,
   `import_flow`, `set_flows`, `restore_backup`, `create_subflow`,
@@ -105,7 +110,9 @@ taken, for every surface where the effective content is known up front.
 Two checks cannot know that before reading the runtime: the node
 `update_node` would produce, and the nodes `connect_nodes` would wire.
 Those refusals follow a read of the tab, and never a deployment and
-never a backup.
+never a backup. The same holds for a subflow instance whose definition
+lives in the runtime: it is judged after the read the write already
+makes, before any backup or deployment.
 
 ## How to harden an install
 

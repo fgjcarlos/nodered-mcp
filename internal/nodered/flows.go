@@ -161,7 +161,17 @@ func (c *Client) CreateFlow(ctx context.Context, flow RawFlow) (RawFlow, error) 
 	if err := validateFlowWires(flow); err != nil {
 		return nil, err
 	}
-	if _, err := c.snapshotFlows(ctx); err != nil {
+	// The snapshot read doubles as the configuration the new tab joins, so
+	// its subflow instances are judged by the definitions they would run
+	// before the backup is written.
+	current, err := c.ListFlows(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("backup: fetching current flows: %w", err)
+	}
+	if err := c.deniedSubflowInstance(flow, FlowArray(current)); err != nil {
+		return nil, err
+	}
+	if _, err := c.saveFlowSnapshot(current); err != nil {
 		return nil, err
 	}
 	var resp RawFlow
@@ -538,7 +548,7 @@ func FlowTabCount(raw RawFlow) int {
 // require a deploy. Node-RED's editor exposes the same toggle as the
 // checkbox next to each tab in the sidebar.
 func (c *Client) SetFlowDisabled(ctx context.Context, id string, disabled bool) error {
-	return c.editFlow(ctx, id, func(f RawFlow) (RawFlow, error) {
+	return c.editFlow(ctx, id, func(f RawFlow, _ []json.RawMessage) (RawFlow, error) {
 		return SetDisabledInFlow(f, disabled)
 	})
 }

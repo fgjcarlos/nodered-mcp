@@ -228,6 +228,11 @@ func (c *Client) CreateSubflow(ctx context.Context, subflow json.RawMessage) (Ra
 		all = append(all, json.RawMessage(sf))
 	}
 	all = append(all, prepared)
+	// An instance nested in the definition runs another definition,
+	// resolved against the set this write installs.
+	if err := c.deniedSubflowInstance(prepared, all); err != nil {
+		return nil, err
+	}
 	if err := c.putGlobalSubflowsLocked(ctx, all, configs); err != nil {
 		return nil, err
 	}
@@ -307,6 +312,9 @@ func (c *Client) UpdateSubflow(ctx context.Context, id string, subflow json.RawM
 			Path:       "/flow/global",
 			Body:       fmt.Sprintf("no subflow with id %q", id),
 		}
+	}
+	if err := c.deniedSubflowInstance(prepared, all); err != nil {
+		return err
 	}
 	return c.putGlobalSubflowsLocked(ctx, all, configs)
 }

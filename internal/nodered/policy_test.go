@@ -221,16 +221,16 @@ func TestIssue329_DeniedNodeTypeOfNodeFindsTheNodeByID(t *testing.T) {
 		`"nodes":[{"id":"i1","type":"inject","z":"tabA","wires":[]},{"id":"e1","type":"exec","z":"tabA","wires":[]}],` +
 		`"configs":[{"id":"c1","type":"system","name":"pwn"}]}`)
 
-	assertIssue329DeniedError(t, c.deniedNodeTypeOfNode(doc, "e1"), "exec")
-	assertIssue329DeniedError(t, c.deniedNodeTypeOfNode(doc, "c1"), "system")
+	assertIssue329DeniedError(t, c.deniedNodeTypeOfNode(doc, "e1", nil), "exec")
+	assertIssue329DeniedError(t, c.deniedNodeTypeOfNode(doc, "c1", nil), "system")
 
-	if err := c.deniedNodeTypeOfNode(doc, "i1"); err != nil {
+	if err := c.deniedNodeTypeOfNode(doc, "i1", nil); err != nil {
 		t.Errorf("an allowed node must not be refused, got %v", err)
 	}
-	if err := c.deniedNodeTypeOfNode(doc, "missing"); err != nil {
+	if err := c.deniedNodeTypeOfNode(doc, "missing", nil); err != nil {
 		t.Errorf("an unknown node id must not be refused, got %v", err)
 	}
-	if err := c.deniedNodeTypeOfNode(doc, ""); err != nil {
+	if err := c.deniedNodeTypeOfNode(doc, "", nil); err != nil {
 		t.Errorf("an empty node id must not be refused, got %v", err)
 	}
 }
