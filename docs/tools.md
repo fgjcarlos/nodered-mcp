@@ -199,7 +199,7 @@ proceed.
 | `update_node` | `GET /flows` + `POST /flows` | write | Merges properties |
 | `delete_node` | `GET /flows` + `POST /flows` | write | Cleans incoming wires |
 | `connect_nodes` | `GET /flows` + `POST /flows` | write | |
-| `validate_flow` | local | read | Dry-run structural check; a flat array is judged as a whole: unique ids across tabs, subflows and config nodes, a type on every entry, and an owner (tab or subflow) for every node and group. An instance of a subflow not in the payload is not reported |
+| `validate_flow` | local | read | Dry-run structural check plus advisory warnings for selected core nodes. A flat array is judged as a whole: unique ids across tabs, subflows and config nodes, a type on every entry, and an owner (tab or subflow) for every node and group. An instance of a subflow not in the payload is not a structural issue |
 | `disable_flow` | `GET /flows` + `POST /flows` | write | |
 | `enable_flow` | `GET /flows` + `POST /flows` | write | |
 | `inject_node` | `POST /inject/:id` | action | Excluded from `--read-only`; optional payload |
@@ -315,6 +315,27 @@ is not below the number of `in` ports makes the start throw. These are
 reported as `invalid_subflow_port` by `create_subflow`, `update_subflow`,
 `set_flows`, `restore_backup` and `validate_flow`. The wires of an `in`
 port carry only an `id`.
+
+### Semantic warnings in `validate_flow`
+
+`ok` and `issues` still describe structural validation. The optional
+`warnings` array is advisory and never affects writes. It reports:
+
+- `output_count_mismatch`: the number of groups in `wires` differs from
+  the declared outputs of a Function or Trigger node, or from the number
+  of Switch rules when available. Empty groups count as output slots.
+- `invalid_property_type`: a Change rule's `pt` (or a Move rule's
+  destination `tot`) is not `msg`, `flow` or `global`, or a Switch's
+  `propertyType` is not one of those types, `jsonata` or `env`.
+  This does not check comparison or literal value types.
+- `http_response_unreachable`: no HTTP Response is reachable from an
+  HTTP In by following wires and static links in the supplied document.
+  A path through a subflow, Link Call or link to a missing target is
+  inconclusive and suppresses the warning. This does not guarantee a
+  response at runtime or check for multiple reachable responses.
+
+The checks are local; they do not query the runtime or inspect contributed
+node definitions.
 
 ## Palette
 

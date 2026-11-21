@@ -275,7 +275,9 @@ func (s *Server) registerTools() {
 				"subflow and config node, and every node and group must belong to a tab "+
 				"or a subflow definition. Returns every issue found so the "+
 				"caller can fix them all at once, rather than discover one per failed "+
-				"deploy. Read-only — nothing is sent to the runtime.",
+				"deploy. Also reports advisory warnings for selected core nodes: output counts, "+
+				"Change/Switch property types and HTTP In without a reachable HTTP Response. "+
+				"Warnings do not change ok or block writes. Read-only — nothing is sent to the runtime.",
 		),
 		mcp.WithString("flow", mcp.Required(),
 			mcp.Description("The flow document as a JSON string (same shape as create_flow).")),

@@ -332,21 +332,8 @@ func (s *Server) handleDeleteFlow(ctx context.Context, req mcp.CallToolRequest) 
 	return mcp.NewToolResultText(fmt.Sprintf("Flow %q deleted (a backup was taken first).", id) + "\n\n" + backupRecoveryNotice), nil
 }
 
-// handleValidateFlow runs the structural checks against an in-memory flow
-// document. It does not contact the runtime. The "flow" argument accepts
-// either a JSON-encoded string, a flow object directly, or a flat array
-// of tabs and nodes — the same shapes create_flow / update_flow accept
-// — so a model can copy the same payload it would have written, run
-// validate_flow over it, and only call the write tool after the issue
-// list comes back empty.
-
-// handleValidateFlow runs the structural checks against an in-memory flow
-// document. It does not contact the runtime. The "flow" argument accepts
-// either a JSON-encoded string, a flow object directly, or a flat array
-// of tabs and nodes — the same shapes create_flow / update_flow accept
-// — so a model can copy the same payload it would have written, run
-// validate_flow over it, and only call the write tool after the issue
-// list comes back empty.
+// handleValidateFlow runs structural checks and advisory semantic checks
+// without contacting the runtime. Only structural issues affect ok.
 func (s *Server) handleValidateFlow(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	raw, err := flowParam(req, "flow")
 	if err != nil {
@@ -354,24 +341,34 @@ func (s *Server) handleValidateFlow(_ context.Context, req mcp.CallToolRequest) 
 	}
 	slog.Debug("tool: validate_flow")
 
-	issues := nodered.ValidateFlows(nodered.RawFlow(raw))
+	flow := nodered.RawFlow(raw)
+	issues := nodered.ValidateFlows(flow)
+	warnings := nodered.ValidateFlowSemantics(flow)
 	resp := struct {
-		OK     bool                `json:"ok"`
-		Issues []nodered.FlowIssue `json:"issues"`
+		OK       bool                  `json:"ok"`
+		Issues   []nodered.FlowIssue   `json:"issues"`
+		Warnings []nodered.FlowWarning `json:"warnings,omitempty"`
 	}{
-		OK:     len(issues) == 0,
-		Issues: issues,
+		OK:       len(issues) == 0,
+		Issues:   issues,
+		Warnings: warnings,
 	}
 	out, err := json.MarshalIndent(resp, "", "  ")
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("encoding response: %v", err)), nil
 	}
+
+	summary := fmt.Sprintf("%d issue(s)", len(issues))
 	if resp.OK {
-		return mcp.NewToolResultText(fmt.Sprintf("ok — 0 issues\n\n```json\n%s\n```", string(out))), nil
+		summary = "ok — 0 issues"
 	}
-	return mcp.NewToolResultText(fmt.Sprintf(
-		"%d issue(s) found:\n\n```json\n%s\n```", len(issues), string(out),
-	)), nil
+	if len(warnings) != 0 {
+		summary += fmt.Sprintf(", %d warning(s)", len(warnings))
+	}
+	if !resp.OK {
+		summary += " found:"
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("%s\n\n```json\n%s\n```", summary, out)), nil
 }
 
 // handleDisableFlow stops a flow tab from running without deleting it.
