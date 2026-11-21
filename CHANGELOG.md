@@ -6,6 +6,30 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-21
+
+### Security
+
+- Judge a subflow instance by the definition it runs (GHSA-9674-fhx9-vp6c,
+  PR #416). The node denylist (`MCP_NODE_DENYLIST`, default `exec,system`)
+  checked a `subflow:<id>` instance only by its own type, so an instance of
+  a subflow definition that already held a denied node type — for example an
+  `exec` node created in the editor — could be deployed through
+  `instantiate_subflow`, `add_node`, `update_node`, `connect_nodes`,
+  `update_flow`, `create_flow`, `import_flow`, `create_subflow` or
+  `update_subflow`. Instances are now resolved, transitively and with a cycle
+  guard, against the definitions in the configuration the write would
+  deploy, and refused with the usual denylist error before any backup or
+  runtime write. Affected versions: 0.8.0 and earlier.
+
+### Changed
+
+- `set_flows`, `restore_backup`, `create_subflow`, `update_subflow` and
+  `validate_flow` now refuse a subflow output-port wire whose `port` is
+  missing or cannot be indexed by the runtime (#408). A configuration that
+  already holds such a wire is refused as a whole unless `force: true` is
+  passed. The Node-RED editor never produces these wires.
+
 ### Added
 
 - `import_flow` names each `http in` route (method + url) of the copy that an
@@ -871,7 +895,8 @@ Dependabot, pinned action SHAs, CODEOWNERS, and issue templates.
   now validates bearer tokens issued by an external Identity
   Provider when `MCP_OAUTH_ISSUER` is set.
 
-[Unreleased]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.7.2...v0.8.0
 [0.7.2]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.7.0...v0.7.1
