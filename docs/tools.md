@@ -306,6 +306,15 @@ instance of that subflow, and an `out` port that names one logs
 The one legal reference that is not a member is the definition's own
 id on an `out` port — that is how a subflow wires its input straight
 to its output.
+Every wire of an `out` port must also carry a `port` that is a
+non-negative integer (`{"id":"fn","port":0}`): the runtime indexes the
+target's wires by it, so a missing or invalid `port`, or one past the
+outputs of the internal node (as many as its `wires` array has), never
+fires, and on a pass-through to the definition's own id a `port` that
+is not below the number of `in` ports makes the start throw. These are
+reported as `invalid_subflow_port` by `create_subflow`, `update_subflow`,
+`set_flows`, `restore_backup` and `validate_flow`. The wires of an `in`
+port carry only an `id`.
 
 ## Palette
 

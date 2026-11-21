@@ -3,6 +3,7 @@ package nodered
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -74,6 +75,10 @@ const (
 	// "in" or an "out" — whose wire names a node that is not in the
 	// definition.
 	IssueDanglingSubflowPort FlowIssueKind = "dangling_subflow_port"
+	// IssueInvalidSubflowPort is a wire of an "out" port of a subflow
+	// definition whose "port" is missing, is not a non-negative integer,
+	// or names an output its target does not have.
+	IssueInvalidSubflowPort FlowIssueKind = "invalid_subflow_port"
 	// IssueInvalidLinks is a link node whose "links" field is not an
 	// array. The runtime iterates that field with forEach when it parses
 	// the configuration, so a truthy value that is not an array stops the
@@ -592,10 +597,12 @@ func (ix *configIndex) field(index int, name string) (json.RawMessage, bool) {
 // subflowPortIssues checks the ports of a subflow definition, whose
 // members are the entries that name it as their owner.
 func (ix *configIndex) subflowPortIssues(defID string) []FlowIssue {
-	members := map[string]bool{}
+	members := map[string]int{}
 	for _, index := range ix.members[defID] {
 		if id := ix.entries[index].ID; id != "" {
-			members[id] = true
+			var fields map[string]json.RawMessage
+			_ = json.Unmarshal(ix.raws[index], &fields)
+			members[id] = outputCount(fields)
 		}
 	}
 	return subflowPortIssues(defID, members, ix.ownerRaw(defID))
@@ -627,17 +634,17 @@ func subflowDefinitionPortIssues(def json.RawMessage) []FlowIssue {
 	if err != nil {
 		return nil
 	}
-	ids := map[string]bool{}
+	ids := map[string]int{}
 	for _, member := range members {
 		if id := nodeID(member); id != "" {
-			ids[id] = true
+			ids[id] = outputCount(member)
 		}
 	}
 	// The groups of a definition are members too: the runtime resolves
 	// the ports against the groups as well.
 	for _, group := range meta.Groups {
 		if id := nodeID(group); id != "" {
-			ids[id] = true
+			ids[id] = outputCount(group)
 		}
 	}
 	return subflowPortIssues(meta.ID, ids, def)
@@ -658,7 +665,10 @@ func subflowDefinitionPortIssues(def json.RawMessage) []FlowIssue {
 // The one reference that is legal and is not a member is the definition's
 // own id on an "out" port: that is how a subflow wires its input straight
 // to its output.
-func subflowPortIssues(defID string, members map[string]bool, def json.RawMessage) []FlowIssue {
+//
+// members maps the id of every member to its output count, or -1 when
+// the count is not known.
+func subflowPortIssues(defID string, members map[string]int, def json.RawMessage) []FlowIssue {
 	var ports struct {
 		In  []json.RawMessage `json:"in"`
 		Out []json.RawMessage `json:"out"`
@@ -667,41 +677,109 @@ func subflowPortIssues(defID string, members map[string]bool, def json.RawMessag
 		return nil
 	}
 	var issues []FlowIssue
-	issues = append(issues, portTargetIssues(defID, members, ports.In, "in")...)
-	issues = append(issues, portTargetIssues(defID, members, ports.Out, "out")...)
+	issues = append(issues, portTargetIssues(defID, members, ports.In, "in", len(ports.In))...)
+	issues = append(issues, portTargetIssues(defID, members, ports.Out, "out", len(ports.In))...)
 	return issues
 }
 
+// outputCount returns the number of outputs a node is known to have: the
+// length of its wires array, or its numeric "outputs" when that is
+// larger. It returns -1 when the node carries neither.
+func outputCount(node map[string]json.RawMessage) int {
+	count := -1
+	var wires []json.RawMessage
+	if json.Unmarshal(node["wires"], &wires) == nil && wires != nil {
+		count = len(wires)
+	}
+	var outputs float64
+	if json.Unmarshal(node["outputs"], &outputs) == nil && int(outputs) > count {
+		count = int(outputs)
+	}
+	return count
+}
+
 // portTargetIssues reports the wires of one port list that name a node
-// which is not in the definition.
-func portTargetIssues(defID string, members map[string]bool, ports []json.RawMessage, kind string) []FlowIssue {
+// which is not in the definition, and the "out" wires whose port the
+// runtime cannot index (issue #408).
+func portTargetIssues(defID string, members map[string]int, ports []json.RawMessage, kind string, inPorts int) []FlowIssue {
 	var issues []FlowIssue
-	for _, port := range ports {
+	for output, port := range ports {
 		var parsed struct {
 			Wires []struct {
-				ID json.RawMessage `json:"id"`
+				ID   json.RawMessage `json:"id"`
+				Port json.RawMessage `json:"port"`
 			} `json:"wires"`
 		}
 		if err := json.Unmarshal(port, &parsed); err != nil {
 			continue
 		}
 		for _, wire := range parsed.Wires {
-			id, ok := rawString(wire.ID)
-			if !ok || id == "" {
-				issues = append(issues, danglingSubflowPortIssue(defID, kind, ""))
-				continue
+			if issue, bad := subflowWireIssue(defID, kind, members, inPorts, output, wire.ID, wire.Port); bad {
+				issues = append(issues, issue)
 			}
-			if members[id] {
-				continue
-			}
-			if kind == "out" && id == defID {
-				// A subflow can wire its input straight to its output.
-				continue
-			}
-			issues = append(issues, danglingSubflowPortIssue(defID, kind, id))
 		}
 	}
 	return issues
+}
+
+// subflowWireIssue judges one wire of a subflow port: its target must be a
+// member of the definition and, on an "out" port, its port must be one the
+// runtime can index.
+func subflowWireIssue(defID, kind string, members map[string]int, inPorts, output int, rawID, rawPort json.RawMessage) (FlowIssue, bool) {
+	id, ok := rawString(rawID)
+	if !ok || id == "" {
+		return danglingSubflowPortIssue(defID, kind, ""), true
+	}
+	outputs, member := members[id]
+	if kind == "out" && id == defID {
+		// A subflow can wire its input straight to its output; the port
+		// then indexes the instance's wires, which the runtime builds from
+		// the "in" ports.
+		outputs, member = inPorts, true
+	}
+	if !member {
+		return danglingSubflowPortIssue(defID, kind, id), true
+	}
+	if kind != "out" {
+		return FlowIssue{}, false
+	}
+	return outPortIndexIssue(defID, output, id, rawPort, outputs)
+}
+
+// outPortIndexIssue checks the "port" of one wire of an "out" port.
+//
+// The runtime indexes the target's wires by that port when it starts an
+// instance (@node-red/runtime/lib/flows/Subflow.js): an internal node gets
+// node.wires[port] extended, so a missing port or one past the node's
+// outputs never fires; a pass-through extends
+// subflowInstanceConfig.wires[port], an array built from the "in" ports,
+// so a port outside it throws a TypeError. The deployment answers 204
+// either way. outputs is the target's output count, -1 when unknown.
+func outPortIndexIssue(defID string, output int, target string, raw json.RawMessage, outputs int) (FlowIssue, bool) {
+	var port float64
+	switch {
+	case len(raw) == 0:
+		return invalidSubflowPortIssue(defID, output, target, "has no port"), true
+	case string(raw) == "null" || json.Unmarshal(raw, &port) != nil || port < 0 || port != math.Trunc(port):
+		return invalidSubflowPortIssue(defID, output, target, fmt.Sprintf("has port %s, which is not a non-negative integer", raw)), true
+	case outputs >= 0 && port >= float64(outputs):
+		has := fmt.Sprintf("%q has %d output(s)", target, outputs)
+		if target == defID {
+			has = fmt.Sprintf("the subflow has %d input(s) to pass through", outputs)
+		}
+		return invalidSubflowPortIssue(defID, output, target, fmt.Sprintf("has port %s, but %s", raw, has)), true
+	}
+	return FlowIssue{}, false
+}
+
+// invalidSubflowPortIssue builds the issue for an "out" wire whose port
+// the runtime cannot index.
+func invalidSubflowPortIssue(defID string, output int, target, problem string) FlowIssue {
+	return FlowIssue{
+		Kind:    IssueInvalidSubflowPort,
+		Target:  target,
+		Message: fmt.Sprintf("subflow %q has output %d wired to %q, and that wire %s; the runtime indexes the wires of %q by that port when it starts an instance, so the output never fires or the start throws, and the deployment that installed it had already answered with success", defID, output, target, problem, target),
+	}
 }
 
 // danglingSubflowPortIssue builds the issue for a port wire that names

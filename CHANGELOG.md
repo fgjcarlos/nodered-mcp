@@ -49,6 +49,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   but the tool only calls `GET /logs` and stock Node-RED writes no such file.
   Both now point at the runtime's own output: stdout (journalctl, docker logs)
   or the file a logging handler writes if one is configured (#407).
+- Refuse a subflow definition whose `out` port wire has a missing or
+  non-integer `port`, or a `port` past its target's outputs (or, on a
+  pass-through, past the `in` ports). The runtime indexes the wires by that
+  port when an instance starts, so the output was dropped silently or the
+  start threw after the deploy had answered 204. `create_subflow`,
+  `update_subflow`, `set_flows`, `restore_backup` and `validate_flow` now
+  report it as `invalid_subflow_port` before any backup or write (#408)
 
 ## [0.8.0] - 2026-11-20
 
