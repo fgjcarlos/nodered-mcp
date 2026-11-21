@@ -19,7 +19,7 @@ package nodered
 // itself can crash the runtime on some Node-RED versions (the same
 // bug the flag was added for in #39). Operators opt in explicitly
 // when they want debug + status; everything else gets a clear "set
-// MCP_DEBUG_STREAM=on" hint.
+// MCP_DEBUG_STREAM=true" hint.
 
 import (
 	"context"
@@ -551,11 +551,11 @@ func pickIDs(nodes []map[string]any) []string {
 // surfaces when the WebSocket is not connected (the operator
 // has not opted in via MCP_DEBUG_STREAM). Surfaced as a
 // dedicated sentinel so the handler can produce a clear,
-// action-shaped message ("set MCP_DEBUG_STREAM=on") without
+// action-shaped message ("set MCP_DEBUG_STREAM=true") without
 // grepping strings.
 var ErrStatusStreamUnavailable = errors.New(
 	"node status stream is not available: the /comms WebSocket is " +
-		"not connected. Set MCP_DEBUG_STREAM=on to enable it (and " +
+		"not connected. Set MCP_DEBUG_STREAM=true to enable it (and " +
 		"restart the MCP if the flag was not set at start-up)",
 )
 

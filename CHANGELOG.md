@@ -12,6 +12,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   on every release. The deprecation has been in place since August, but the
   step re-sent it each time and failed the v0.8.0 `publish-main` job when the
   registry answered `E422`, which skipped the `latest` promotion.
+- Recommend `MCP_DEBUG_STREAM=true` instead of `MCP_DEBUG_STREAM=on` in the
+  startup warning, the `get_debug_messages` and `get_node_status` errors, the
+  capability guidance and the `get_node_status` description. The config parser
+  accepts boolean values only, so every hint led to a server that refused to
+  start with `strconv.ParseBool: parsing "on": invalid syntax` (#402).
 
 ## [0.8.0] - 2026-11-20
 

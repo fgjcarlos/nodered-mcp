@@ -20,7 +20,7 @@ import (
 func (s *Server) handleGetDebugMessages(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if !s.debugStream {
 		return mcp.NewToolResultError(
-			"debug streaming is disabled. Set MCP_DEBUG_STREAM=on (or pass --debug-stream) " +
+			"debug streaming is disabled. Set MCP_DEBUG_STREAM=true (or pass --debug-stream) " +
 				"to enable the /comms WebSocket tail. On some Node-RED versions the tail " +
 				"crashes the runtime; keep it off unless you need it.",
 		), nil
@@ -366,7 +366,7 @@ func (s *Server) handleGetNodeStatus(ctx context.Context, req mcp.CallToolReques
 	if !s.debugStream {
 		return mcp.NewToolResultError(
 			"node status is not available: the /comms WebSocket is not connected. " +
-				"Set MCP_DEBUG_STREAM=on to enable it. On some Node-RED versions the " +
+				"Set MCP_DEBUG_STREAM=true to enable it. On some Node-RED versions the " +
 				"tail crashes the runtime; keep it off unless you need it.",
 		), nil
 	}
