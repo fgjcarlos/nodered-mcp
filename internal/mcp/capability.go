@@ -91,7 +91,9 @@ func noderedCapabilityMatrix(p RuntimeProbe) map[string]Capability {
 	// Tools gated by settings or by an observed runtime state, not by
 	// version. The order matters for readability of the JSON: state
 	// tools first, then stream tools, then the rest.
-	matrix["get_flows_state"] = classifySettingTool(p.RuntimeStateEnabled)
+	// Node-RED mounts GET /flows/state unconditionally; only POST is
+	// gated by settings.runtimeState.enabled (#406).
+	matrix["get_flows_state"] = CapOK
 	matrix["set_flows_state"] = classifySettingTool(p.RuntimeStateEnabled)
 	matrix["get_node_status"] = classifyStreamTool(p.DebugStreamEnabled, p.StatusStream)
 	matrix["get_debug_messages"] = classifyStreamTool(p.DebugStreamEnabled, p.DebugStream)

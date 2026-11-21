@@ -38,6 +38,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `NODERED_SEARCH_BASE_URL` variable that nothing reads; it names the public
   npm registry (`registry.npmjs.org`) the search always calls. A test now
   fails when a tool names an env var `config.go` does not read (#403)
+- `get_runtime_info` no longer reports `get_flows_state` as `setting_disabled`
+  when `settings.runtimeState.enabled` is off: Node-RED mounts
+  `GET /flows/state` unconditionally and gates only `POST /flows/state`
+  (`set_flows_state`). The `get_flows_state` 404 hint no longer tells the
+  operator to enable `runtimeState` (#406).
 
 ## [0.8.0] - 2026-11-20
 
