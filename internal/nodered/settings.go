@@ -203,8 +203,8 @@ func (c *Client) SearchNodes(ctx context.Context, query string, limit int) ([]Se
 	ctx, cancel := context.WithTimeout(ctx, searchTimeout)
 	defer cancel()
 
-	// ponytail: registry URL defaults to the public registry; configurable
-	// for private mirrors (see Options.SearchBaseURL).
+	// The binary always uses the public registry; Options.SearchBaseURL
+	// only exists so tests can point the search at a fixture.
 	base := c.searchBaseURL
 	if base == "" {
 		base = "https://registry.npmjs.org"

@@ -34,6 +34,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   capability guidance and the `get_node_status` description. The config parser
   accepts boolean values only, so every hint led to a server that refused to
   start with `strconv.ParseBool: parsing "on": invalid syntax` (#402).
+- The `search_nodes` description no longer advertises a
+  `NODERED_SEARCH_BASE_URL` variable that nothing reads; it names the public
+  npm registry (`registry.npmjs.org`) the search always calls. A test now
+  fails when a tool names an env var `config.go` does not read (#403)
 
 ## [0.8.0] - 2026-11-20
 

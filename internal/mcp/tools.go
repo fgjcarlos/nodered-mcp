@@ -829,8 +829,8 @@ func (s *Server) registerTools() {
 				"endpoint as flows.nodered.org). Returns name, version, description and "+
 				"link per hit. Use this before install_node when you don't know the exact "+
 				"npm package name. Read-only. "+
-				"Requires outbound network access to the npm registry "+
-				"(https://registry.npmjs.org or NODERED_SEARCH_BASE_URL if set).",
+				"Requires outbound network access to the public npm registry "+
+				"(https://registry.npmjs.org).",
 		),
 		mcp.WithString("query", mcp.Required(),
 			mcp.Description("Free-text search, e.g. \"dashboard\", \"mqtt\", \"modbus\".")),
