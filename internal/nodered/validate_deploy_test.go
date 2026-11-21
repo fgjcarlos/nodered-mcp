@@ -380,6 +380,93 @@ func TestValidateEffectiveConfig_SubflowPortsInNestedShape(t *testing.T) {
 	}
 }
 
+// Issue #408: the runtime indexes the wires of an "out" port by its
+// "port" (Subflow.js: node.wires[wires[j].port], and for a pass-through
+// subflowInstanceConfig.wires[wires[j].port], built from the "in" ports).
+// A missing or invalid port drops the output or throws when an instance
+// starts, so it is refused; the "in" ports carry only an id.
+func TestValidateEffectiveConfig_SubflowOutPortIndex(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      string
+		outWire string
+		ok      bool
+	}{
+		{"missing port", `[{"id":"inner"}]`, `{"id":"inner"}`, false},
+		{"string port", `[{"id":"inner"}]`, `{"id":"inner","port":"0"}`, false},
+		{"null port", `[{"id":"inner"}]`, `{"id":"inner","port":null}`, false},
+		{"negative port", `[{"id":"inner"}]`, `{"id":"inner","port":-1}`, false},
+		{"fractional port", `[{"id":"inner"}]`, `{"id":"inner","port":0.5}`, false},
+		{"port beyond the node's outputs", `[{"id":"inner"}]`, `{"id":"inner","port":1}`, false},
+		{"port beyond a node with no outputs", `[{"id":"inner"}]`, `{"id":"sink","port":0}`, false},
+		{"pass-through port beyond the in ports", `[{"id":"inner"}]`, `{"id":"sf_a","port":1}`, false},
+		{"pass-through with no in port", ``, `{"id":"sf_a","port":0}`, false},
+		{"pass-through missing port", `[{"id":"inner"}]`, `{"id":"sf_a"}`, false},
+		{"port 0", `[{"id":"inner"}]`, `{"id":"inner","port":0}`, true},
+		{"second output", `[{"id":"inner"}]`, `{"id":"two","port":1}`, true},
+		{"node whose outputs are not known", `[{"id":"inner"}]`, `{"id":"bare","port":3}`, true},
+		{"pass-through port 0", `[{"id":"inner"}]`, `{"id":"sf_a","port":0}`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := `[]`
+			if tc.in != "" {
+				in = `[{"x":40,"y":40,"wires":` + tc.in + `}]`
+			}
+			cfg := `[
+			  {"id":"t1","type":"tab","label":"Home"},
+			  {"id":"sf_a","type":"subflow","name":"A","in":` + in + `,
+			   "out":[{"x":160,"y":160,"wires":[` + tc.outWire + `]}]},
+			  {"id":"inner","type":"function","z":"sf_a","x":140,"y":140,"wires":[[]]},
+			  {"id":"two","type":"switch","z":"sf_a","x":140,"y":200,"wires":[[],[]]},
+			  {"id":"sink","type":"debug","z":"sf_a","x":140,"y":260,"wires":[]},
+			  {"id":"bare","type":"function","z":"sf_a","x":140,"y":320}
+			]`
+			issues := ValidateEffectiveConfig(RawFlow(cfg))
+			if tc.ok {
+				if len(issues) != 0 {
+					t.Fatalf("expected no issues, got %+v", issues)
+				}
+				return
+			}
+			if len(issues) != 1 || issues[0].Kind != IssueInvalidSubflowPort {
+				t.Fatalf("expected one %s issue, got %+v", IssueInvalidSubflowPort, issues)
+			}
+			if !strings.Contains(issues[0].Message, `subflow "sf_a"`) || !strings.Contains(issues[0].Message, "port") {
+				t.Errorf("expected the message to name the subflow and the port: %s", issues[0].Message)
+			}
+			// The flat array a model hands validate_flow is judged the same way.
+			if got := ValidateFlows(RawFlow(cfg)); len(got) != 1 || got[0].Kind != IssueInvalidSubflowPort {
+				t.Errorf("validate_flow should report it too, got %+v", got)
+			}
+		})
+	}
+}
+
+// The nested shape the subflow write path carries is judged the same way,
+// and the error names the subflow, the output and the target.
+func TestValidateSubflowPorts_RefusesOutWireWithoutPort(t *testing.T) {
+	def := `{
+	  "id":"sf_a","type":"subflow","name":"A",
+	  "in":[{"x":40,"y":40,"wires":[{"id":"fn"}]}],
+	  "out":[{"x":300,"y":30,"wires":[{"id":"fn"}]}],
+	  "nodes":[{"id":"fn","type":"function","z":"sf_a","x":140,"y":140,"wires":[[]]}]
+	}`
+	err := validateSubflowPorts(json.RawMessage(def))
+	if err == nil {
+		t.Fatal("expected the port-less out wire to be refused")
+	}
+	for _, want := range []string{`subflow "sf_a"`, `output 0`, `"fn"`, "port"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should contain %q: %v", want, err)
+		}
+	}
+	ok := strings.Replace(def, `"out":[{"x":300,"y":30,"wires":[{"id":"fn"}]}]`, `"out":[{"x":300,"y":30,"wires":[{"id":"fn","port":0}]}]`, 1)
+	if err := validateSubflowPorts(json.RawMessage(ok)); err != nil {
+		t.Fatalf("port 0 should be accepted: %v", err)
+	}
+}
+
 // A link out whose "links" field is null keeps its wires at runtime:
 // the runtime tests the field for truthiness, and null is falsy. The
 // guard has to test it the same way, or it would leave a dangling wire
@@ -500,5 +587,24 @@ func TestValidateFlowWires_RefusesALinkNodeWithANonArrayLinksField(t *testing.T)
 	}
 	if !strings.Contains(err.Error(), "links") {
 		t.Errorf("expected the error to name the links field: %v", err)
+	}
+}
+
+// The shapes the Node-RED editor exports stay accepted (#408: no false
+// positives): two outputs, a junction, a nested instance, a pass-through,
+// a status port, env and a subflow with no ports.
+func TestValidateEffectiveConfig_SubflowEditorShapesAccepted(t *testing.T) {
+	cfg := `[{"id":"t1","type":"tab"},
+	{"id":"sfX","type":"subflow","in":[{"x":1,"y":1,"wires":[{"id":"ch"}]}],
+	 "out":[{"x":1,"y":1,"wires":[{"id":"ch","port":0},{"id":"j","port":0},{"id":"nest","port":1}]}],
+	 "status":{"x":1,"y":1,"wires":[{"id":"st","port":0}]},"env":[{"name":"FOO","type":"str","value":"bar"}]},
+	{"id":"ch","type":"change","z":"sfX","rules":[],"x":1,"y":1,"wires":[["j"]]},
+	{"id":"j","type":"junction","z":"sfX","x":1,"y":1,"wires":[[]]},
+	{"id":"st","type":"status","z":"sfX","scope":null,"x":1,"y":1,"wires":[[]]},
+	{"id":"nest","type":"subflow:sfP","z":"sfX","x":1,"y":1,"wires":[[],[]]},
+	{"id":"sfP","type":"subflow","in":[{"x":1,"y":1,"wires":[]}],"out":[{"x":1,"y":1,"wires":[{"id":"sfP","port":0}]},{"x":2,"y":2,"wires":[]}]},
+	{"id":"sfN","type":"subflow","in":[],"out":[]}]`
+	if got := ValidateEffectiveConfig(RawFlow(cfg)); len(got) != 0 {
+		t.Fatalf("editor shapes must validate, got %+v", got)
 	}
 }

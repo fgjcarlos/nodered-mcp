@@ -153,6 +153,51 @@ func TestHandleCreateSubflow_RefusesDefinitionWithDanglingWire(t *testing.T) {
 	}
 }
 
+// Issue #408: an "out" port wire without a port is refused before any
+// backup or write, so no PUT /flow/global reaches the runtime.
+func TestHandleSubflowWrites_RefuseOutWireWithoutPort(t *testing.T) {
+	const def = `{
+	  "id":"sf_a","type":"subflow","name":"A",
+	  "in":[{"x":40,"y":40,"wires":[{"id":"fn"}]}],
+	  "out":[{"x":300,"y":30,"wires":[{"id":"fn"}]}],
+	  "nodes":[{"id":"fn","type":"function","z":"sf_a","x":140,"y":140,"wires":[[]]}]
+	}`
+	for name, args := range map[string]map[string]any{
+		"create_subflow": {"subflow": def},
+		"update_subflow": {"id": "sf_a", "subflow": def},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var seen []string
+			s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+				seen = append(seen, r.Method+" "+r.URL.Path)
+				http.Error(w, "the runtime must not be contacted", http.StatusBadRequest)
+			})
+			handler := s.handleCreateSubflow
+			if name == "update_subflow" {
+				handler = s.handleUpdateSubflow
+			}
+			res, err := call(t, handler, args)
+			if err != nil {
+				t.Fatalf("%s returned err=%v", name, err)
+			}
+			if !res.IsError {
+				t.Fatalf("expected an error result, got %+v", res.Content)
+			}
+			if text := resultFirstText(res); !strings.Contains(text, "port") || !strings.Contains(text, `"fn"`) {
+				t.Errorf("expected the error to name the port and the wire: %s", text)
+			}
+			for _, req := range seen {
+				if req == "PUT /flow/global" {
+					t.Errorf("a refused write must not deploy, got %v", seen)
+				}
+			}
+			if len(seen) != 0 {
+				t.Errorf("a refused write must not contact the runtime, got %v", seen)
+			}
+		})
+	}
+}
+
 // The tool descriptions have to advertise the guard and the recovery
 // path, so a caller knows both before it tries.
 func TestConfigValidationGuardIsAdvertised(t *testing.T) {
