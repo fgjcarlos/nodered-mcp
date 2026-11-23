@@ -10,6 +10,16 @@ succeeds for clients with a supported config target; for other clients it
 prints manual instructions and exits with an error so automation can detect
 that nothing was applied.
 
+Use `nodered-mcp init --name nodered-lab` to register a second Node-RED
+instance under a different server name. Names accept ASCII letters, digits,
+underscores, and hyphens, but cannot start with a hyphen. Enter the instance's
+URL and a distinct absolute backup directory when prompted.
+
+Both `--write` and `--dry-run` preserve other server entries. If a name passed
+with `--name` already exists, `--write` asks for confirmation, and `--dry-run`
+shows the prospective merge without asking. Omitting `--name` retains the
+previous behavior: `--write` updates the `nodered` entry without prompting.
+
 ## Previewing a merge
 
 `nodered-mcp init --dry-run` prints the configuration that `--write`
@@ -22,10 +32,10 @@ merge.
 
 The preview matches the file `--write` would produce, with one deliberate
 exception: where the preview shows `REDACTED`, the file keeps the real
-value. Everything else — keys, structure, the `nodered` entry, your other
+value. Everything else — keys, structure, the selected entry, your other
 servers — is identical.
 
-Secrets are redacted in the preview: the new `nodered` entry never
+Secrets are redacted in the preview: the generated server entry never
 carries `NODERED_TOKEN`, and secret-bearing values belonging to other
 servers already in your file are masked too. Redaction matches key names
 (`NODERED_TOKEN`, `TOKEN`, `API_KEY`, `PASSWORD`, `SECRET`) exactly, so a

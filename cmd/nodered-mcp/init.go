@@ -2,12 +2,14 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 )
@@ -126,9 +128,15 @@ func clientInstalled(c mcpClient) bool {
 	return false
 }
 
+const defaultServerName = "nodered"
+
+// A leading dash would make the name look like a Claude Code CLI option.
+var initServerName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_-]*$`)
+
 func runInit(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	all := fs.Bool("all", false, "show every known client, not just detected ones")
+	name := fs.String("name", defaultServerName, "MCP server entry name (letters, digits, underscores, and hyphens; no leading hyphen)")
 	write := fs.Bool("write", false, "write config without a token (configure NODERED_TOKEN outside the file)")
 	// --dry-run is a SIBLING of --write, not a mode of it: it previews the
 	// exact merged config in memory and prints it, then stops. Combining
@@ -145,6 +153,11 @@ func runInit(args []string) error {
 	if *write && *dryRun {
 		return fmt.Errorf("--write and --dry-run are mutually exclusive: --dry-run prints the merge without applying it, --write applies it")
 	}
+	if !initServerName.MatchString(*name) {
+		return fmt.Errorf("invalid --name %q: use ASCII letters, digits, underscores, or hyphens (no leading hyphen)", *name)
+	}
+	explicitName := false
+	fs.Visit(func(f *flag.Flag) { explicitName = explicitName || f.Name == "name" })
 
 	clients := detectClients(*all)
 	if len(clients) == 0 {
@@ -156,19 +169,29 @@ func runInit(args []string) error {
 	url := ask(in, "Node-RED URL", "http://localhost:1880")
 	token := ask(in, "Node-RED token (optional, Enter to skip)", "")
 	backupDir := ask(in, "Backup directory", "backups")
+	if *name != defaultServerName && backupDir == "backups" {
+		fmt.Fprintf(os.Stderr, "# For %q, use a distinct absolute backup directory to keep instances' backups separate.\n", *name)
+	}
 
 	target := chooseClient(in, clients)
 	env := buildEnv(url, token, backupDir)
 
 	switch {
 	case *dryRun:
-		return runInitDryRun(target, bin, env)
+		return runInitDryRun(target, *name, bin, env, explicitName)
 	case *write:
-		return writeClientConfig(target, bin, env, url, token, backupDir)
+		var confirmOverwrite func() bool
+		if explicitName {
+			confirmOverwrite = func() bool {
+				answer := ask(in, fmt.Sprintf("Overwrite existing server %q? Type yes to confirm", *name), "no")
+				return strings.EqualFold(answer, "yes")
+			}
+		}
+		return writeClientConfig(target, *name, bin, env, confirmOverwrite)
 	}
 
 	fmt.Fprintf(os.Stderr, "\n--- %s: %s ---\n", target.name, target.note)
-	fmt.Println(renderConfig(target.key, bin, url, token, backupDir))
+	fmt.Println(renderConfig(target.key, *name, bin, env))
 	if token != "" {
 		printTokenOmittedNote()
 	}
@@ -183,14 +206,13 @@ func runInit(args []string) error {
 // The preview is the merged config with secret-bearing values masked, so
 // it is NOT byte-identical to the file --write produces when the existing
 // config already holds a value under a secret-bearing key: the preview
-// shows REDACTED where the file keeps the real value. Structure, key set
-// and the nodered entry are identical.
-func runInitDryRun(target mcpClient, bin string, env map[string]string) error {
+// shows REDACTED where the file keeps the real value. The same entries
+// are merged, even when --write would first require confirmation.
+func runInitDryRun(target mcpClient, name, bin string, env map[string]string, explicitName bool) error {
 	path, rootKey, ok := writableTarget(target.key)
 	if !ok {
 		fmt.Fprintf(os.Stderr, "\n--- %s: %s ---\n", target.name, target.note)
-		// env holds the answers as buildEnv shaped them; renderConfig drops the token.
-		fmt.Println(renderConfig(target.key, bin, env["NODERED_URL"], "", env["NODERED_BACKUP_DIR"]))
+		fmt.Println(renderConfig(target.key, name, bin, env))
 		if _, ok := env["NODERED_TOKEN"]; ok {
 			printTokenOmittedNote()
 		}
@@ -203,10 +225,12 @@ func runInitDryRun(target mcpClient, bin string, env map[string]string) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	// The file exists, so label errors with its path exactly as --write does.
-	root, err := mergeServer(data, path, rootKey, bin, env)
+	root, replacing, err := mergeServer(data, path, rootKey, name, bin, env)
 	if err != nil {
 		return err
+	}
+	if replacing && explicitName {
+		fmt.Fprintf(os.Stderr, "\n# Replacing existing server %q with --write requires confirmation.\n", name)
 	}
 	preview, err := marshalIndentedJSON(redactSecrets(root))
 	if err != nil {
@@ -252,25 +276,23 @@ func executablePathFor(invoked, fallback string) string {
 	return fallback
 }
 
-// writeClientConfig merges the 'nodered' server into the client's config file
-// for clients whose target file is unambiguous. For workspace-scoped (VS Code)
-// or CLI-managed (Claude Code) clients it falls back to printing, since
-// auto-writing to a guessed location would be worse than a copy-paste.
-func writeClientConfig(c mcpClient, bin string, env map[string]string, url, token, backupDir string) error {
+// writeClientConfig merges the named server when the config target is known.
+// For clients without a safe write target, it prints the manual snippet.
+func writeClientConfig(c mcpClient, name, bin string, env map[string]string, confirmOverwrite func() bool) error {
 	path, rootKey, ok := writableTarget(c.key)
 	if !ok {
 		fmt.Fprintf(os.Stderr, "\n--- %s: %s ---\n", c.name, c.note)
-		fmt.Println(renderConfig(c.key, bin, url, token, backupDir))
-		if token != "" {
+		fmt.Println(renderConfig(c.key, name, bin, env))
+		if _, ok := env["NODERED_TOKEN"]; ok {
 			printTokenOmittedNote()
 		}
 		fmt.Fprintf(os.Stderr, "\n(--write isn't supported for %s — paste/run the above)\n", c.name)
 		return fmt.Errorf("--write is not supported for %s: configuration was not applied", c.name)
 	}
-	if err := mergeServerIntoFile(path, rootKey, bin, env); err != nil {
+	if err := mergeServerIntoFile(path, rootKey, name, bin, env, confirmOverwrite); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "✓ wrote 'nodered' server to %s\n", path)
+	fmt.Fprintf(os.Stderr, "✓ wrote '%s' server to %s\n", name, path)
 	if _, ok := env["NODERED_TOKEN"]; ok {
 		printTokenOmittedNote()
 	}
@@ -296,17 +318,12 @@ func writableTarget(key string) (path, rootKey string, ok bool) {
 
 // mergeServer is the pure half of mergeServerIntoFile: it parses the
 // existing JSON (or starts from empty for a missing/blank file), rejects a
-// non-object rootKey collection, and returns the merged root map. It does
-// not touch the filesystem. --dry-run calls this directly to preview the
-// exact merge that --write would commit; the seam guarantees both paths
-// produce the same bytes.
-//
-// path labels the error messages; pass "" when the bytes did not come from
-// a file on disk (the --dry-run preview of a file that may not exist).
-func mergeServer(data []byte, path, rootKey, bin string, env map[string]string) (map[string]any, error) {
+// non-object rootKey collection, and returns the merged root and whether the
+// selected entry already existed. path labels errors; it may be empty.
+func mergeServer(data []byte, path, rootKey, name, bin string, env map[string]string) (map[string]any, bool, error) {
 	root, err := parseJSONObject(data, path)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var servers map[string]any
 	value, exists := root[rootKey]
@@ -317,27 +334,40 @@ func mergeServer(data []byte, path, rootKey, bin string, env map[string]string) 
 		servers, ok = value.(map[string]any)
 		if !ok {
 			if path == "" {
-				return nil, fmt.Errorf("existing config has non-object %q; refusing to overwrite it", rootKey)
+				return nil, false, fmt.Errorf("existing config has non-object %q; refusing to overwrite it", rootKey)
 			}
-			return nil, fmt.Errorf("existing config at %s has non-object %q; refusing to overwrite it", path, rootKey)
+			return nil, false, fmt.Errorf("existing config at %s has non-object %q; refusing to overwrite it", path, rootKey)
 		}
 	}
-	servers["nodered"] = map[string]any{"command": bin, "env": envWithoutToken(env)}
+	_, replacing := servers[name]
+	servers[name] = map[string]any{"command": bin, "env": envWithoutToken(env)}
 	root[rootKey] = servers
-	return root, nil
+	return root, replacing, nil
 }
 
-// mergeServerIntoFile adds/replaces the 'nodered' entry under rootKey, leaving
-// every other key in the file untouched. Refuses to touch a file that exists
-// but isn't valid JSON, and backs up the previous content to path+".bak".
-func mergeServerIntoFile(path, rootKey, bin string, env map[string]string) error {
+// mergeServerIntoFile changes only the named entry and backs up the previous
+// config. A nil confirmOverwrite preserves the implicit name's legacy behavior.
+func mergeServerIntoFile(path, rootKey, name, bin string, env map[string]string, confirmOverwrite func() bool) error {
 	data, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	root, err := mergeServer(data, path, rootKey, bin, env)
+	root, replacing, err := mergeServer(data, path, rootKey, name, bin, env)
 	if err != nil {
 		return err
+	}
+	if replacing && confirmOverwrite != nil {
+		if !confirmOverwrite() {
+			return fmt.Errorf("refusing to overwrite existing server %q without confirmation", name)
+		}
+		// Don't apply a stale merge if the client saved changes during the prompt.
+		current, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("re-read config after overwrite confirmation: %w", err)
+		}
+		if !bytes.Equal(current, data) {
+			return fmt.Errorf("config changed while waiting for confirmation; rerun init")
+		}
 	}
 	return writeJSONObject(path, root)
 }
@@ -587,14 +617,14 @@ func marshalIndentedJSON(value any) ([]byte, error) {
 	return []byte(out.String()), nil
 }
 
-func renderConfig(key, bin, url, token, backupDir string) string {
-	env := envWithoutToken(buildEnv(url, token, backupDir))
+func renderConfig(key, name, bin string, answers map[string]string) string {
+	env := envWithoutToken(answers)
 	client := clientByKey(key)
 
 	if client.format == "claude-code" {
 		var b strings.Builder
 		// User scope avoids binding the server to the working directory.
-		b.WriteString("claude mcp add -s user nodered")
+		b.WriteString("claude mcp add -s user " + name)
 		for _, k := range []string{"NODERED_URL", "NODERED_TOKEN", "NODERED_BACKUP_DIR"} {
 			if v, ok := env[k]; ok {
 				fmt.Fprintf(&b, " -e %s", shellQuote(k+"="+v))
@@ -610,7 +640,7 @@ func renderConfig(key, bin, url, token, backupDir string) string {
 	case "opencode":
 		doc = map[string]any{
 			"$schema": "https://opencode.ai/config.json",
-			"mcp": map[string]any{"nodered": map[string]any{
+			"mcp": map[string]any{name: map[string]any{
 				"type": "local", "command": []string{bin}, "enabled": true, "environment": env,
 			}},
 		}
@@ -622,7 +652,7 @@ func renderConfig(key, bin, url, token, backupDir string) string {
 		if rootKey == "" {
 			rootKey = "mcpServers"
 		}
-		doc = map[string]any{rootKey: map[string]any{"nodered": server}}
+		doc = map[string]any{rootKey: map[string]any{name: server}}
 	}
 	out, _ := marshalIndentedJSON(doc)
 	return strings.TrimSuffix(string(out), "\n")

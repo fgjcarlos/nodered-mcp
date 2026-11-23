@@ -42,7 +42,7 @@ func TestMergeServerIntoFile_PreservesOtherKeys(t *testing.T) {
 	}
 
 	env := map[string]string{"NODERED_URL": "http://localhost:7880"}
-	if err := mergeServerIntoFile(path, "mcpServers", "/bin/nodered-mcp", env); err != nil {
+	if err := mergeServerIntoFile(path, "mcpServers", defaultServerName, "/bin/nodered-mcp", env, nil); err != nil {
 		t.Fatalf("mergeServerIntoFile: %v", err)
 	}
 
@@ -86,7 +86,7 @@ func TestMergeServerIntoFile_RejectsNonObjectServerCollection(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			err := mergeServerIntoFile(path, "mcpServers", "/bin/x", map[string]string{})
+			err := mergeServerIntoFile(path, "mcpServers", defaultServerName, "/bin/x", map[string]string{}, nil)
 			if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "mcpServers") {
 				t.Fatalf("expected actionable refusal naming path and key, got %v", err)
 			}
@@ -110,7 +110,7 @@ func TestMergeServerIntoFile_RefusesInvalidJSON(t *testing.T) {
 	if err := os.WriteFile(path, []byte("{ not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := mergeServerIntoFile(path, "mcpServers", "/bin/x", map[string]string{})
+	err := mergeServerIntoFile(path, "mcpServers", defaultServerName, "/bin/x", map[string]string{}, nil)
 	if err == nil {
 		t.Fatal("expected refusal to overwrite invalid JSON, got nil")
 	}
@@ -125,7 +125,7 @@ func TestMergeServerIntoFile_CreatesMissingFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sub", "mcp.json") // parent dir missing on purpose
 	env := map[string]string{"NODERED_URL": "http://localhost:1880"}
-	if err := mergeServerIntoFile(path, "mcpServers", "/bin/nodered-mcp", env); err != nil {
+	if err := mergeServerIntoFile(path, "mcpServers", defaultServerName, "/bin/nodered-mcp", env, nil); err != nil {
 		t.Fatalf("mergeServerIntoFile on missing file: %v", err)
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -154,7 +154,7 @@ func TestInit_WriteOmitsToken(t *testing.T) {
 	const literalToken = "supersecret-test-token-12345"
 	env := buildEnv("http://localhost:1880", literalToken, "backups")
 	client := mcpClient{key: "claude-desktop", name: "Claude Desktop"}
-	if err := writeClientConfig(client, "/bin/nodered-mcp", env, "http://localhost:1880", literalToken, "backups"); err != nil {
+	if err := writeClientConfig(client, defaultServerName, "/bin/nodered-mcp", env, nil); err != nil {
 		t.Fatalf("writeClientConfig: %v", err)
 	}
 
@@ -171,7 +171,7 @@ func TestInit_WriteOmitsToken(t *testing.T) {
 }
 
 func TestRenderConfig_ClaudeDesktop(t *testing.T) {
-	out := renderConfig("claude-desktop", "/path/to/nodered-mcp", "http://localhost:7880", "", "backups")
+	out := renderConfig("claude-desktop", defaultServerName, "/path/to/nodered-mcp", buildEnv("http://localhost:7880", "", "backups"))
 
 	var doc struct {
 		MCPServers map[string]struct {
@@ -208,7 +208,7 @@ func TestRenderConfig_OpenCodeAndPiFormats(t *testing.T) {
 		{"pi", "mcpServers"},
 	} {
 		t.Run(tc.key, func(t *testing.T) {
-			out := renderConfig(tc.key, "/bin/nodered-mcp", "http://localhost:1880", "", "backups")
+			out := renderConfig(tc.key, defaultServerName, "/bin/nodered-mcp", buildEnv("http://localhost:1880", "", "backups"))
 			var doc map[string]any
 			if err := json.Unmarshal([]byte(out), &doc); err != nil {
 				t.Fatalf("invalid JSON: %v", err)
@@ -240,7 +240,7 @@ func TestRenderConfig_OpenCodeAndPiFormats(t *testing.T) {
 
 func TestRenderConfig_VSCodeUsesServersKey(t *testing.T) {
 	const literalToken = "supersecret-test-token-12345"
-	out := renderConfig("vscode", "/bin/nodered-mcp", "http://localhost:1880", literalToken, "backups")
+	out := renderConfig("vscode", defaultServerName, "/bin/nodered-mcp", buildEnv("http://localhost:1880", literalToken, "backups"))
 	if !strings.Contains(out, `"servers"`) {
 		t.Errorf("VS Code snippet must use the 'servers' root key:\n%s", out)
 	}
@@ -263,7 +263,7 @@ func TestRenderConfig_VSCodeUsesServersKey(t *testing.T) {
 // command succeeded, `claude mcp list` was empty everywhere else, and
 // nothing reported an error.
 func TestInit_ClaudeCodeCommandIsUserScoped(t *testing.T) {
-	out := renderConfig("claude-code", "/bin/nodered-mcp", "http://localhost:1880", "", "backups")
+	out := renderConfig("claude-code", defaultServerName, "/bin/nodered-mcp", buildEnv("http://localhost:1880", "", "backups"))
 	if !strings.HasPrefix(out, "claude mcp add -s user nodered") {
 		t.Errorf("command must be user-scoped, or it registers per-directory:\n%s", out)
 	}
@@ -271,7 +271,7 @@ func TestInit_ClaudeCodeCommandIsUserScoped(t *testing.T) {
 
 func TestInit_ClaudeCodeOmitsToken(t *testing.T) {
 	const literalToken = "supersecret-test-token-12345"
-	out := renderConfig("claude-code", "/bin/nodered-mcp", "http://localhost:1880", literalToken, "custom-backups")
+	out := renderConfig("claude-code", defaultServerName, "/bin/nodered-mcp", buildEnv("http://localhost:1880", literalToken, "custom-backups"))
 	if !strings.HasPrefix(out, "claude mcp add -s user nodered") {
 		t.Errorf("expected a user-scoped `claude mcp add` command, got:\n%s", out)
 	}
@@ -319,7 +319,7 @@ func TestMergeServerIntoFile_BackupFailureFailsMerge(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
 	env := map[string]string{"NODERED_URL": "http://localhost:1880"}
-	err := mergeServerIntoFile(path, "mcpServers", "/bin/nodered-mcp", env)
+	err := mergeServerIntoFile(path, "mcpServers", defaultServerName, "/bin/nodered-mcp", env, nil)
 	if err == nil {
 		t.Fatal("expected merge to fail when .bak cannot be created, got nil")
 	}
@@ -343,7 +343,7 @@ func TestMergeServerIntoFile_NoStaleTempLeftBehind(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "claude_desktop_config.json")
 	env := map[string]string{"NODERED_URL": "http://localhost:1880"}
-	if err := mergeServerIntoFile(path, "mcpServers", "/bin/nodered-mcp", env); err != nil {
+	if err := mergeServerIntoFile(path, "mcpServers", defaultServerName, "/bin/nodered-mcp", env, nil); err != nil {
 		t.Fatalf("mergeServerIntoFile: %v", err)
 	}
 	entries, err := os.ReadDir(dir)
@@ -399,7 +399,7 @@ func TestMergeServerIntoFile_FileModeOwnerOnly(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "claude_desktop_config.json")
 	env := map[string]string{"NODERED_URL": "http://localhost:1880"}
-	if err := mergeServerIntoFile(path, "mcpServers", "/bin/nodered-mcp", env); err != nil {
+	if err := mergeServerIntoFile(path, "mcpServers", defaultServerName, "/bin/nodered-mcp", env, nil); err != nil {
 		t.Fatalf("mergeServerIntoFile: %v", err)
 	}
 	info, err := os.Stat(path)
