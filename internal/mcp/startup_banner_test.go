@@ -24,9 +24,13 @@ func TestDegradedTools_CountsVersionGatedBelowFloor(t *testing.T) {
 		{Name: "list_flows"}, // no minimum
 		{Name: "get_flows_state"},
 	}
+	nr2 := nodered.ParseVersion("2.2.2")
+	if got := degradedTools(nr2, tools); got != 4 {
+		t.Errorf("NR 2.2.2 with the same tools: degraded = %d, want 4", got)
+	}
 	nr3 := nodered.ParseVersion("3.0.0")
 	if got := degradedTools(nr3, tools); got != 3 {
-		t.Errorf("NR 3.0 with 3 gated tools + 2 ungated: degraded = %d, want 3", got)
+		t.Errorf("NR 3.0 with get_flows_state supported: degraded = %d, want 3", got)
 	}
 	nr5 := nodered.ParseVersion("5.0.1")
 	if got := degradedTools(nr5, tools); got != 0 {
@@ -64,8 +68,8 @@ func TestStartupBanner_NR5NoDegraded(t *testing.T) {
 	}
 }
 
-// TestStartupBanner_NR3FlagsThree — a NR 3.0 mock should report
-// 3 degraded tools (the three in nodered_min_version_for).
+// TestStartupBanner_NR3FlagsThree — NR 3.0 supports get_flows_state
+// but is below the minimum for get_diagnostics, set_context, and inject_node.
 func TestStartupBanner_NR3FlagsThree(t *testing.T) {
 	s, _ := serverWithMockVersionProbe(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/settings" {
@@ -78,9 +82,8 @@ func TestStartupBanner_NR3FlagsThree(t *testing.T) {
 	if !v.Known {
 		t.Fatalf("probe should succeed for the mock")
 	}
-	want := len(nodered_min_version_for)
-	if degraded := degradedTools(v, s.tools); degraded != want {
-		t.Errorf("NR 3.0 with full tool set: degraded = %d, want %d (every gated tool)", degraded, want)
+	if degraded := degradedTools(v, s.tools); degraded != 3 {
+		t.Errorf("NR 3.0 with full tool set: degraded = %d, want 3", degraded)
 	}
 }
 

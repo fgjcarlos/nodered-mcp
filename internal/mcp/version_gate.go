@@ -55,6 +55,7 @@ var nodered_min_version_for = map[string]nodered.Version{
 	"set_context":     nodered.Version{Major: 5, Minor: 0, Patch: 0, Known: true, Raw: "5.0.0"}, // helper inject body trick
 	"inject_node":     nodered.Version{Major: 5, Minor: 0, Patch: 0, Known: true, Raw: "5.0.0"}, // __user_inject_props__ payload override
 	"get_diagnostics": nodered.Version{Major: 3, Minor: 1, Patch: 0, Known: true, Raw: "3.1.0"}, // /diagnostics endpoint added
+	"get_flows_state": nodered.Version{Major: 3, Minor: 0, Patch: 0, Known: true, Raw: "3.0.0"}, // GET /flows/state endpoint added
 }
 
 // MinVersionFor returns the minimum Node-RED version a tool
