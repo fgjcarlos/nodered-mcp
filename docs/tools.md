@@ -355,7 +355,7 @@ node definitions.
 |---|---|---|---|
 | `get_settings` | `GET /settings` | read | |
 | `get_diagnostics` | `GET /diagnostics` | read | Requires Node-RED ≥3.1 |
-| `get_flows_state` | `GET /flows/state` | read | Not gated by `runtimeState` |
+| `get_flows_state` | `GET /flows/state` | read | Requires Node-RED ≥3.0.0; not gated by `runtimeState` |
 | `get_context` | `GET /context/...` | read | editor-api, no stability contract |
 | `set_context` | `GET /flows`, `POST /flow`, `POST /inject/:id` | write | Verified persistent inject/function helper |
 | `get_debug_messages` | `/comms` WebSocket | read | Buffer of 500, reconnects |
@@ -412,10 +412,11 @@ those clients. This is not a distributed transaction or a cross-process singleto
 
 A few tools need a minimum Node-RED version: `set_context` and
 `inject_node` with a payload need 5.0.0, `get_diagnostics` needs
-3.1.0. Those calls are gated on the version of the runtime this MCP
-is connected to. The MCP reads it from `GET /settings` at start-up
-and resolves it again before every gated operation, so the check does
-not depend on an earlier call having warmed the cache.
+3.1.0, and `get_flows_state` needs 3.0.0. The MCP reads the version from
+`GET /settings` at startup and reports these requirements in
+`get_runtime_info`. For `set_context` and `inject_node` with a payload,
+the MCP also checks the version before the operation, so that check
+does not depend on an earlier call having warmed the cache.
 
 Two properties are worth knowing:
 
@@ -426,11 +427,11 @@ Two properties are worth knowing:
   when the MCP starts, the version stays unknown until the next
   attempt, and a later gated operation probes again.
 
-When the version cannot be detected the call is **not** refused: the
-absence of evidence is not evidence of an old runtime. The success
-message then carries the suffix "Node-RED version was not detected;
-this call was not verified against the minimum version", and
-`get_runtime_info` reports the capability as `unknown`.
+When the version cannot be detected, `get_runtime_info` reports the
+capability as `unknown`. Calls that check the version are **not** refused
+on that basis alone. Their success message carries the suffix "Node-RED
+version was not detected; this call was not verified against the minimum
+version".
 
 ## Reading `get_runtime_info`
 
