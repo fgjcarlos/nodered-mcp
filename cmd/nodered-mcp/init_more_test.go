@@ -52,9 +52,8 @@ func TestWriteClientConfig_NonWritableTarget(t *testing.T) {
 		name: "Claude Code",
 		note: "run the command below",
 	}
-	err := writeClientConfig(client, "/bin/nodered-mcp",
-		map[string]string{"NODERED_URL": "http://localhost:1880"},
-		"http://localhost:1880", "", "backups")
+	err := writeClientConfig(client, defaultServerName, "/bin/nodered-mcp",
+		map[string]string{"NODERED_URL": "http://localhost:1880"}, nil)
 	if err == nil {
 		t.Fatal("writeClientConfig must fail when --write cannot apply configuration")
 	}

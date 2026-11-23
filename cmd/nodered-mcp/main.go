@@ -8,7 +8,7 @@
 // Usage:
 //
 //	nodered-mcp [serve] [flags]   run the server (default command)
-//	nodered-mcp init [--all]      interactively generate a client config snippet
+//	nodered-mcp init [--all] [--name <server>]  interactively generate a client config snippet
 //	nodered-mcp update [--check]  detect the install channel and upgrade in place
 //	nodered-mcp version           print the version and exit
 package main

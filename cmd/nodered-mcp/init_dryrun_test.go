@@ -29,7 +29,7 @@ func TestMergeServer_PureKeepsExistingSecretsAtKnownKeys(t *testing.T) {
   },
   "somePref": true
 }`
-	root, err := mergeServer([]byte(original), "", "mcpServers", "/bin/nodered-mcp", map[string]string{"NODERED_URL": "http://localhost:1880"})
+	root, _, err := mergeServer([]byte(original), "", "mcpServers", defaultServerName, "/bin/nodered-mcp", map[string]string{"NODERED_URL": "http://localhost:1880"})
 	if err != nil {
 		t.Fatalf("mergeServer: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestMergeServer_PureKeepsExistingSecretsAtKnownKeys(t *testing.T) {
 // is run with an env map that does include NODERED_TOKEN, simulating the
 // real flow where the operator typed one.
 func TestMergeServer_NewNoderedEntryNeverCarriesToken(t *testing.T) {
-	_, err := mergeServer([]byte(`{}`), "", "mcpServers", "/bin/nodered-mcp", map[string]string{
+	_, _, err := mergeServer([]byte(`{}`), "", "mcpServers", defaultServerName, "/bin/nodered-mcp", map[string]string{
 		"NODERED_URL":   "http://localhost:1880",
 		"NODERED_TOKEN": "leak-me",
 	})
@@ -76,7 +76,7 @@ func TestMergeServer_NewNoderedEntryNeverCarriesToken(t *testing.T) {
 	}
 	// We re-run the merge to capture the resulting root so we can assert
 	// against the same path the dry-run code uses.
-	root, err := mergeServer([]byte(`{}`), "", "mcpServers", "/bin/nodered-mcp", map[string]string{
+	root, _, err := mergeServer([]byte(`{}`), "", "mcpServers", defaultServerName, "/bin/nodered-mcp", map[string]string{
 		"NODERED_URL":   "http://localhost:1880",
 		"NODERED_TOKEN": "leak-me",
 	})
@@ -126,7 +126,7 @@ func TestDryRun_TouchesNoFilesystem(t *testing.T) {
 	}
 
 	// Run the pure merge (the same code path dry-run uses).
-	root, err := mergeServer(beforeBytes, "", "mcpServers", "/bin/nodered-mcp", map[string]string{"NODERED_URL": "http://localhost:1880"})
+	root, _, err := mergeServer(beforeBytes, "", "mcpServers", defaultServerName, "/bin/nodered-mcp", map[string]string{"NODERED_URL": "http://localhost:1880"})
 	if err != nil {
 		t.Fatalf("mergeServer: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestDryRun_TouchesNoFilesystem(t *testing.T) {
 	//    no-op and the two must match byte-for-byte. The case where they
 	//    deliberately differ (an existing secret) is covered by
 	//    TestDryRun_PreviewIsNotByteIdenticalToWrite.
-	mergedWriteShape, err := mergeServer(beforeBytes, "", "mcpServers", "/bin/nodered-mcp", map[string]string{"NODERED_URL": "http://localhost:1880"})
+	mergedWriteShape, _, err := mergeServer(beforeBytes, "", "mcpServers", defaultServerName, "/bin/nodered-mcp", map[string]string{"NODERED_URL": "http://localhost:1880"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestDryRun_MissingTargetFileStillPreviews(t *testing.T) {
 	// Simulate the missing-file case by handing mergeServer an empty
 	// document — the same shape readJSONObject returns for a non-existent
 	// file.
-	root, err := mergeServer([]byte(""), "", "mcpServers", "/bin/nodered-mcp", map[string]string{"NODERED_URL": "http://localhost:1880"})
+	root, _, err := mergeServer([]byte(""), "", "mcpServers", defaultServerName, "/bin/nodered-mcp", map[string]string{"NODERED_URL": "http://localhost:1880"})
 	if err != nil {
 		t.Fatalf("mergeServer on empty input: %v", err)
 	}
@@ -470,7 +470,7 @@ func equalStringSlices(a, b []string) bool {
 func TestDryRun_PreviewIsNotByteIdenticalToWrite(t *testing.T) {
 	existing := `{"mcpServers":{"other":{"command":"other-mcp","env":{"TOKEN":"shh"},"args":["--token=hunter2"]}}}`
 
-	merged, err := mergeServer([]byte(existing), "", "mcpServers", "/bin/nodered-mcp",
+	merged, _, err := mergeServer([]byte(existing), "", "mcpServers", defaultServerName, "/bin/nodered-mcp",
 		map[string]string{"NODERED_URL": "http://localhost:1880"})
 	if err != nil {
 		t.Fatal(err)
@@ -517,25 +517,31 @@ func TestDryRun_PreviewIsNotByteIdenticalToWrite(t *testing.T) {
 	}
 }
 
-// runInitStdout runs runInit with input on stdin and returns only its stdout
-// (the snippet); prompts and notes go to stderr and are discarded.
+// runInitStdout runs init with scripted input and discards its prompts and notes.
 func runInitStdout(t *testing.T, input string, args ...string) (string, error) {
+	t.Helper()
+	out, _, err := runInitOutput(t, input, args...)
+	return out, err
+}
+
+func runInitOutput(t *testing.T, input string, args ...string) (string, string, error) {
 	t.Helper()
 	oldStdin, oldStdout, oldStderr := os.Stdin, os.Stdout, os.Stderr
 	defer func() { os.Stdin, os.Stdout, os.Stderr = oldStdin, oldStdout, oldStderr }()
-	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	stderr, err := os.Create(filepath.Join(t.TempDir(), "stderr"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer devNull.Close()
+	defer stderr.Close()
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer r.Close()
 	stdin := inputAsFile(input)
 	defer os.Remove(stdin.Name())
 	defer stdin.Close()
-	os.Stdin, os.Stdout, os.Stderr = stdin, w, devNull
+	os.Stdin, os.Stdout, os.Stderr = stdin, w, stderr
 	done := make(chan string)
 	go func() {
 		var buf bytes.Buffer
@@ -544,7 +550,12 @@ func runInitStdout(t *testing.T, input string, args ...string) (string, error) {
 	}()
 	runErr := runInit(args)
 	w.Close()
-	return <-done, runErr
+	out := <-done
+	stderrData, err := os.ReadFile(stderr.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out, string(stderrData), runErr
 }
 
 // TestRunInit_DryRunUnsupportedTargetKeepsAnswers pins #394: for a client
