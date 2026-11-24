@@ -3,11 +3,32 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 
 	"github.com/mark3labs/mcp-go/mcp"
+
+	"github.com/fgjcarlos/nodered-mcp/internal/nodered"
 )
+
+const paletteInstallFailureRemedy = " Node-RED only includes npm's detailed output in the runtime's own output: check stdout (journalctl for a systemd service, docker logs for a container), or the file a logging handler writes if configured in settings.js. Common causes include a failing pre/postinstall script or an incompatible Node version. As a manual workaround, first verify that the package is trusted, then install it in Node-RED's user directory (for example, npm install --ignore-scripts <module>) and restart Node-RED. Skipping lifecycle scripts can make some packages unusable."
+
+func paletteFailureMessage(err error, message string) string {
+	var apiErr *nodered.APIError
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusBadRequest &&
+		(apiErr.Method == http.MethodPost || apiErr.Method == http.MethodDelete) {
+		var body struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		}
+		if json.Unmarshal([]byte(apiErr.Body), &body) == nil && body.Code == "unexpected_error" && body.Message == "Install failed" {
+			message += paletteInstallFailureRemedy
+		}
+	}
+	return message
+}
 
 // handleListNodes lists the installed palette modules.
 func (s *Server) handleListNodes(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -61,7 +82,7 @@ func (s *Server) handleInstallNode(ctx context.Context, req mcp.CallToolRequest)
 	info, err := s.nrClient.InstallNode(ctx, module, version)
 	if err != nil {
 		slog.Error("install_node failed", "error", err, "module", module)
-		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
+		return toolResultError(err, paletteFailureMessage(err, fmt.Sprintf("calling Node-RED: %v", err)))
 	}
 	out, err := json.MarshalIndent(info, "", "  ")
 	if err != nil {
@@ -82,7 +103,7 @@ func (s *Server) handleUninstallNode(ctx context.Context, req mcp.CallToolReques
 
 	if err := s.nrClient.UninstallNode(ctx, module); err != nil {
 		slog.Error("uninstall_node failed", "error", err, "module", module)
-		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
+		return toolResultError(err, paletteFailureMessage(err, fmt.Sprintf("calling Node-RED: %v", err)))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Uninstalled %q.", module)), nil
 }

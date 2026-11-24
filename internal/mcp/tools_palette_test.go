@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -86,6 +87,58 @@ func TestHandleInstallNode_RoundTrip(t *testing.T) {
 	tc := res.Content[0].(mcp.TextContent)
 	if !strings.Contains(tc.Text, "Installed") || !strings.Contains(tc.Text, "node-red-dashboard") {
 		t.Errorf("response should announce install, got %q", tc.Text)
+	}
+}
+
+func TestPaletteInstallFailureGuidance(t *testing.T) {
+	const generic = `{"code":"unexpected_error","message":"Install failed"}`
+	for _, tc := range []struct {
+		tool, method, path, body string
+		wantGuidance             bool
+	}{
+		{"install_node", http.MethodPost, "/nodes", generic, true},
+		{"uninstall_node", http.MethodDelete, "/nodes/example", generic, true},
+		{"install_node", http.MethodPost, "/nodes", `{"code":"other","message":"Install failed"}`, false},
+		{"uninstall_node", http.MethodDelete, "/nodes/example", `{"code":"unexpected_error","message":"Other failure"}`, false},
+	} {
+		t.Run(tc.tool+tc.body, func(t *testing.T) {
+			s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != tc.method || r.URL.Path != tc.path {
+					t.Errorf("request = %s %s, want %s %s", r.Method, r.URL.Path, tc.method, tc.path)
+				}
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(tc.body))
+			})
+			raw := registeredToolCall(t, s, tc.tool, map[string]any{"module": "example"})
+			var response struct {
+				Result struct {
+					IsError bool              `json:"isError"`
+					Content []mcp.TextContent `json:"content"`
+				} `json:"result"`
+			}
+			if err := json.Unmarshal(raw, &response); err != nil {
+				t.Fatal(err)
+			}
+			if !response.Result.IsError || len(response.Result.Content) != 1 || response.Result.Content[0].Type != "text" {
+				t.Fatalf("expected a tool error with one text item: %s", raw)
+			}
+			got := response.Result.Content[0].Text
+			original := "calling Node-RED: nodered " + tc.method + " " + tc.path + ": HTTP 400: " + tc.body
+			if !tc.wantGuidance {
+				if got != original {
+					t.Errorf("unrelated error = %q, want %q", got, original)
+				}
+				return
+			}
+			if !strings.HasPrefix(got, original+" ") {
+				t.Fatalf("error = %q, want original error %q followed by guidance", got, original)
+			}
+			for _, want := range []string{"stdout", "journalctl", "docker logs", "settings.js", "pre/postinstall", "Node version", "package is trusted", "npm install --ignore-scripts <module>", "restart Node-RED", "Skipping lifecycle scripts"} {
+				if !strings.Contains(got, want) {
+					t.Errorf("error missing %q: %s", want, got)
+				}
+			}
+		})
 	}
 }
 
