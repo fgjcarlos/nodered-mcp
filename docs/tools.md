@@ -349,6 +349,15 @@ node definitions.
 | `enable_node` | `PUT /nodes/:module[/:set]` | write | |
 | `disable_node` | `PUT /nodes/:module[/:set]` | write | |
 
+When Node-RED returns its generic `unexpected_error` / `Install failed` response
+for either palette operation, the error points operators to Node-RED's runtime
+output (stdout, `journalctl`, `docker logs`, or a configured `settings.js`
+logging handler), where npm's details are written. Common causes include failing
+lifecycle scripts and an incompatible Node version. A manual user-directory
+install with `npm install --ignore-scripts <module>` may be a workaround; verify
+the package is trusted first. Skipping lifecycle scripts can make some packages
+unusable.
+
 ## Runtime, diagnostics, recovery
 
 | Tool | HTTP | Risk | Notes |
