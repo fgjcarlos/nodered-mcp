@@ -139,6 +139,11 @@ func (c *Client) setFlows(ctx context.Context, flows []json.RawMessage, validate
 	if !hasTabEntry(flows) {
 		return &FlowGuardError{Message: `flows: array must contain at least one element with type "tab"; received only non-tab entries`}
 	}
+	if !validate {
+		if err := validateFunctionSyntaxInFlows(flows); err != nil {
+			return err
+		}
+	}
 	// Issue #334: a full deployment replaces the whole configuration, so
 	// the references of the configuration are checked before anything is
 	// snapshotted and before the runtime is contacted. A wire that names

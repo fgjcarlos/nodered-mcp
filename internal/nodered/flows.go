@@ -327,6 +327,9 @@ func (c *Client) RestoreFlowsUnchecked(ctx context.Context, backup RawFlow) erro
 	if !hasTabEntry(arr) {
 		return &FlowGuardError{Message: `backup must contain at least one element with type "tab"; received only non-tab entries`}
 	}
+	if err := validateFunctionSyntaxInFlows(arr); err != nil {
+		return err
+	}
 	return c.restoreFlowsLocked(ctx, arr)
 }
 
@@ -586,8 +589,19 @@ func SetDisabledInFlow(flow RawFlow, disabled bool) (RawFlow, error) {
 // A document the runtime cannot parse at all is also refused; the prior
 // implementation returned that error directly from json.Unmarshal.
 func validateFlowWires(raw RawFlow) error {
-	issues := ValidateFlow(raw)
+	return validateFlowWiresMode(raw, true)
+}
+
+func validateFlowWiresWithoutFunctionSyntax(raw RawFlow) error {
+	return validateFlowWiresMode(raw, false)
+}
+
+func validateFlowWiresMode(raw RawFlow, checkFunctionSyntax bool) error {
+	issues := validateFlow(raw, checkFunctionSyntax)
 	for _, issue := range issues {
+		if issue.Kind == IssueFunctionSyntax && !checkFunctionSyntax {
+			continue
+		}
 		switch issue.Kind {
 		case IssueDanglingWire:
 			return &FlowGuardError{Message: fmt.Sprintf("node %q wires to unknown node %q", issue.NodeID, issue.Target)}
@@ -603,6 +617,8 @@ func validateFlowWires(raw RawFlow) error {
 			// The runtime iterates the links field of a link node when it
 			// parses the configuration, so a value that is not an array
 			// stops the deploy with a TypeError.
+			return &FlowGuardError{Message: issue.Message}
+		case IssueFunctionSyntax:
 			return &FlowGuardError{Message: issue.Message}
 		case IssueMissingType:
 			// A node type the runtime cannot resolve stops every flow

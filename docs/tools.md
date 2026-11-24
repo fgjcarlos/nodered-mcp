@@ -194,12 +194,12 @@ proceed.
 | `create_flow` | `POST /flow` | write | |
 | `update_flow` | `GET /flows` + `POST /flows` | write | Full rewrite; prefer the granular tools; the written tab is judged in the context of the whole configuration |
 | `delete_flow` | `DELETE /flow/:id` | write | |
-| `set_flows` | `POST /flows` | write | Full deploy, most destructive; the configuration is validated first (`force=true` skips that) |
+| `set_flows` | `POST /flows` | write | Full deploy, most destructive; `force=true` skips structural-reference validation only; function-node JavaScript syntax is always checked |
 | `add_node` | `GET /flows` + `POST /flows` | write | Confirms when supplied outgoing wires were kept; suggests `connect_nodes` only when there are no outgoing wires |
 | `update_node` | `GET /flows` + `POST /flows` | write | Merges properties |
 | `delete_node` | `GET /flows` + `POST /flows` | write | Cleans incoming wires |
 | `connect_nodes` | `GET /flows` + `POST /flows` | write | |
-| `validate_flow` | local | read | Dry-run structural check plus advisory warnings for selected core nodes. A flat array is judged as a whole: unique ids across tabs, subflows and config nodes, a type on every entry, and an owner (tab or subflow) for every node and group. An instance of a subflow not in the payload is not a structural issue |
+| `validate_flow` | local | read | Dry-run structural and function-node JavaScript syntax checks plus advisory warnings for selected core nodes. `func`, `initialize` and `finalize` are parsed as async function bodies; syntax issues report the node, field and location. A flat array is judged as a whole: unique ids across tabs, subflows and config nodes, a type on every entry, and an owner (tab or subflow) for every node and group. An instance of a subflow not in the payload is not a structural issue |
 | `disable_flow` | `GET /flows` + `POST /flows` | write | |
 | `enable_flow` | `GET /flows` + `POST /flows` | write | |
 | `inject_node` | `POST /inject/:id` | action | Excluded from `--read-only`; optional payload |
@@ -271,14 +271,17 @@ backup that no longer validates — one taken from a runtime that carried
 a broken reference, or one edited by hand — is refused with the list
 of problems; `restore_backup` with `force=true` installs it anyway,
 and the result says that it was installed unvalidated. That is the
-recovery path, and it has to be asked for explicitly.
+recovery path, and it has to be asked for explicitly. Force skips
+structural-reference checks only: invalid function-node JavaScript is
+still refused before a backup or deployment.
 
-`set_flows` has the same escape hatch (`force=true`), for the same
-reason: the rules are the repository's, and one of them is stricter
+`set_flows` has the same structural escape hatch (`force=true`), for the
+same reason: the rules are the repository's, and one of them is stricter
 than the runtime. The node-type policy and the rule that a deployment
 must leave at least one tab are **not** skipped by it — they are not
 about the references of the configuration but about what a deployment
-may do to the runtime.
+may do to the runtime. Function syntax validation remains mandatory with
+or without force.
 
 That tab rule is decided by decoding the `type` of every entry, not by
 searching the payload for text. The same document behaves the same
@@ -375,7 +378,7 @@ unusable.
 | `set_flows_state` | `POST /flows/state` | write | Requires `settings.runtimeState.enabled: true` |
 | `list_backups` | local | read | |
 | `diff_flows` | local + `GET /flows` | read | |
-| `restore_backup` | `POST /flows` | write | The backup is validated first; `force=true` skips that |
+| `restore_backup` | `POST /flows` | write | The backup is structurally validated first; `force=true` skips structural checks only, not function syntax validation |
 
 ## Context helper recovery
 

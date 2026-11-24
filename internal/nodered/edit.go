@@ -75,6 +75,12 @@ func (c *Client) AddNode(ctx context.Context, flowID string, node json.RawMessag
 	if err := c.deniedNodeType(node); err != nil {
 		return err
 	}
+	var decoded map[string]json.RawMessage
+	if json.Unmarshal(node, &decoded) == nil {
+		if issues := validateFunctionNode(decoded); len(issues) > 0 {
+			return &FlowGuardError{Message: issues[0].Message}
+		}
+	}
 	return c.editFlow(ctx, flowID, func(f RawFlow, flows []json.RawMessage) (RawFlow, error) {
 		if err := c.deniedSubflowInstance(node, flows); err != nil {
 			return nil, err
@@ -100,7 +106,19 @@ func (c *Client) UpdateNode(ctx context.Context, flowID, nodeID string, patch ma
 		if err != nil {
 			return nil, err
 		}
-		return next, c.deniedNodeTypeOfNode(next, nodeID, flows)
+		if err := c.deniedNodeTypeOfNode(next, nodeID, flows); err != nil {
+			return nil, err
+		}
+		doc, err := decodeFlow(next)
+		if err != nil {
+			return nil, err
+		}
+		if collection, index, ok := doc.locate(nodeID); ok {
+			if issues := validateFunctionNode((*collection)[index]); len(issues) > 0 {
+				return nil, &FlowGuardError{Message: issues[0].Message}
+			}
+		}
+		return next, nil
 	})
 }
 

@@ -55,7 +55,8 @@ const (
 	// IssueMissingType is a node whose "type" is absent, null or empty. The runtime files it under a node type it cannot
 	// resolve, and a runtime with a missing node type refuses to start
 	// the flows at all (issue #336).
-	IssueMissingType FlowIssueKind = "missing_type"
+	IssueMissingType    FlowIssueKind = "missing_type"
+	IssueFunctionSyntax FlowIssueKind = "function_syntax"
 )
 
 // FlowGuardError is a refusal by the client-side guard of a flow
@@ -105,7 +106,9 @@ type FlowIssue struct {
 // lack them — that is how Node-RED decides between the two collections in
 // the first place. Flagging a config node as missing_xy would mark every
 // real-world tab as broken, so the check is scoped to nodes.
-func ValidateFlow(flow RawFlow) []FlowIssue {
+func ValidateFlow(flow RawFlow) []FlowIssue { return validateFlow(flow, true) }
+
+func validateFlow(flow RawFlow, checkFunctionSyntax bool) []FlowIssue {
 	doc, err := decodeFlow(flow)
 	if err != nil {
 		return []FlowIssue{{
@@ -122,10 +125,10 @@ func ValidateFlow(flow RawFlow) []FlowIssue {
 	seen := make(map[string]bool, len(doc.Nodes)+len(doc.Configs))
 
 	for _, node := range doc.Nodes {
-		issues = append(issues, nodeIssues(node, doc, seen, true)...)
+		issues = append(issues, nodeIssues(node, doc, seen, true, checkFunctionSyntax)...)
 	}
 	for _, node := range doc.Configs {
-		issues = append(issues, nodeIssues(node, doc, seen, false)...)
+		issues = append(issues, nodeIssues(node, doc, seen, false, checkFunctionSyntax)...)
 	}
 
 	// Wires are validated against the union of both collections.
@@ -143,7 +146,7 @@ func ValidateFlow(flow RawFlow) []FlowIssue {
 }
 
 // nodeIssues runs the per-node rules over one node of a tab document.
-func nodeIssues(node map[string]json.RawMessage, doc *flowDoc, seen map[string]bool, requireXY bool) []FlowIssue {
+func nodeIssues(node map[string]json.RawMessage, doc *flowDoc, seen map[string]bool, requireXY, checkFunctionSyntax bool) []FlowIssue {
 	var issues []FlowIssue
 	if issue := checkNode(node, seen, requireXY); issue != nil {
 		issues = append(issues, *issue)
@@ -153,6 +156,9 @@ func nodeIssues(node map[string]json.RawMessage, doc *flowDoc, seen map[string]b
 	}
 	if issue := checkZRef(node, doc); issue != nil {
 		issues = append(issues, *issue)
+	}
+	if checkFunctionSyntax {
+		issues = append(issues, validateFunctionNode(node)...)
 	}
 	return issues
 }
