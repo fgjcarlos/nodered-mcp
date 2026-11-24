@@ -93,31 +93,14 @@ func hasEscapedNewlineAt(source string, target int) bool {
 }
 
 func validateFunctionSyntaxInFlows(flows []json.RawMessage) error {
-	var visit func(json.RawMessage) error
-	visit = func(raw json.RawMessage) error {
+	// Full deployments use flat entries; nested properties are node data.
+	for _, raw := range flows {
 		var node map[string]json.RawMessage
-		if json.Unmarshal(raw, &node) != nil || node == nil {
-			return nil
+		if json.Unmarshal(raw, &node) != nil {
+			continue
 		}
 		if issues := validateFunctionNode(node); len(issues) > 0 {
 			return &FlowGuardError{Message: issues[0].Message}
-		}
-		for _, key := range []string{"nodes", "configs", "subflows"} {
-			var children []json.RawMessage
-			if json.Unmarshal(node[key], &children) != nil {
-				continue
-			}
-			for _, child := range children {
-				if err := visit(child); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-	for _, flow := range flows {
-		if err := visit(flow); err != nil {
-			return err
 		}
 	}
 	return nil

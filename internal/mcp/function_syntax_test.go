@@ -71,6 +71,48 @@ func TestFunctionSyntaxForceToolsRefuseBeforeWrite(t *testing.T) {
 	}
 }
 
+func TestForcedDeployPreservesCustomNodeData(t *testing.T) {
+	const custom = `{"id":"custom","type":"workflow","nodes":[{"type":"function","func":"SELECT 1"}]}`
+	const flows = `[{"id":"tab1","type":"tab"},` + custom + `]`
+	for _, tool := range []string{"set_flows", "restore_backup"} {
+		t.Run(tool, func(t *testing.T) {
+			dir := t.TempDir()
+			args := map[string]any{"force": true, "flows": flows}
+			if tool == "restore_backup" {
+				args = map[string]any{"force": true, "backup": "custom.json"}
+				if err := os.WriteFile(filepath.Join(dir, "custom.json"), []byte(flows), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			posts := 0
+			allowed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method + " " + r.URL.Path {
+				case "GET /flows":
+					_, _ = w.Write([]byte(`[{"id":"tab1","type":"tab"}]`))
+				case "POST /flows":
+					posts++
+					var deployed []json.RawMessage
+					if err := json.NewDecoder(r.Body).Decode(&deployed); err != nil || len(deployed) != 2 || string(deployed[1]) != custom {
+						t.Errorf("deployment did not preserve custom node: %s (%v)", deployed, err)
+					}
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				}
+			}))
+			defer allowed.Close()
+			client, err := nodered.NewClient(nodered.Options{BaseURL: allowed.URL, BackupDir: dir, SkipVersionProbe: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			res, err := callHelperTool(context.Background(), New(client, Options{Version: "test"}), tool, args)
+			if err != nil || res == nil || res.IsError || posts != 1 {
+				t.Fatalf("%s: result=%+v err=%v deploys=%d, want success and one deploy", tool, res, err, posts)
+			}
+		})
+	}
+}
+
 func TestFunctionSyntaxRegisteredToolsRefuseBeforeWrite(t *testing.T) {
 	const invalidTab = `{"id":"tab1","label":"Home","nodes":[{"id":"fn","type":"function","z":"tab1","x":1,"y":1,"func":"const = ;","wires":[]}]}`
 	const invalidFlows = `[{"id":"tab1","type":"tab"},{"id":"fn","type":"function","z":"tab1","x":1,"y":1,"func":"const = ;","wires":[]}]`
