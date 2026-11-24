@@ -34,13 +34,17 @@ func TestRunHTTP_RateLimit_BurstThen429(t *testing.T) {
 
 	var firstOK, firstThrottled int
 	for i := 0; i < totalRequests; i++ {
-		code, headers, _ := postJSON(t, addr, body)
+		code, headers, response := postJSON(t, addr, body)
 		switch {
 		case code == http.StatusTooManyRequests:
 			if firstThrottled == 0 {
 				firstThrottled = i + 1
-				if got := headers.Get("Retry-After"); got == "" {
-					t.Errorf("request #%d returned 429 but no Retry-After header", i+1)
+				if got := headers.Get("Retry-After"); got != "1" {
+					t.Errorf("Retry-After = %q, want %q", got, "1")
+				}
+				const want = "rate limit exceeded (0.1 req/s per IP, burst 5): reuse the MCP session instead of re-initializing per call, or tune MCP_HTTP_RATE_PER_SEC / MCP_HTTP_RATE_BURST / MCP_HTTP_RATE_DISABLED\n"
+				if got := string(response); got != want {
+					t.Errorf("429 body = %q, want %q", got, want)
 				}
 			}
 		case code == http.StatusOK:

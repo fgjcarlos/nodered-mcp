@@ -154,6 +154,18 @@ Sustituye `node-red` por el nombre real del contenedor o servicio de Compose.
 No publiques el puerto `8090` más allá de loopback salvo que el firewall del
 host y la autenticación del transporte estén configurados para esa exposición.
 
+## Límite de solicitudes HTTP
+
+El transporte HTTP limita las solicitudes a **1 solicitud por segundo por IP de origen**, con una ráfaga de **10**. Los clientes MCP deben inicializar una vez y reutilizar la sesión MCP para las llamadas posteriores, en lugar de volver a inicializar en cada solicitud.
+
+Configura el límite con estas variables de entorno:
+
+| Variable | Predeterminado | Descripción |
+|---|---:|---|
+| `MCP_HTTP_RATE_PER_SEC` | `1` | Solicitudes sostenidas por segundo por IP de origen. |
+| `MCP_HTTP_RATE_BURST` | `10` | Máxima ráfaga de solicitudes por IP de origen. |
+| `MCP_HTTP_RATE_DISABLED` | `false` | Usa `true` para desactivar el límite de solicitudes. |
+
 ## Documentación
 
 La referencia completa está en [`docs/`](./docs/):

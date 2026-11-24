@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 	"sync"
@@ -84,11 +85,12 @@ func (l *perIPLimiter) get(ip string) *rate.Limiter {
 }
 
 func rateLimitByIP(limiter *perIPLimiter, next http.Handler) http.Handler {
+	message := fmt.Sprintf("rate limit exceeded (%g req/s per IP, burst %d): reuse the MCP session instead of re-initializing per call, or tune MCP_HTTP_RATE_PER_SEC / MCP_HTTP_RATE_BURST / MCP_HTTP_RATE_DISABLED", limiter.rate, limiter.burst)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r)
 		if !limiter.get(ip).Allow() {
 			w.Header().Set("Retry-After", "1")
-			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+			http.Error(w, message, http.StatusTooManyRequests)
 			return
 		}
 		next.ServeHTTP(w, r)
