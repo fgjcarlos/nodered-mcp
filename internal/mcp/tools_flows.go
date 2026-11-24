@@ -210,9 +210,18 @@ func (s *Server) handleAddNode(ctx context.Context, req mcp.CallToolRequest) (*m
 		slog.Error("add_node failed", "error", err, "flow_id", flowID)
 		return toolResultError(err, fmt.Sprintf("adding node: %v", err))
 	}
-	return mcp.NewToolResultText(fmt.Sprintf(
-		"Node added to flow %q (a backup was taken first). Wire it up with connect_nodes.", flowID,
-	)), nil
+	message := fmt.Sprintf("Node added to flow %q (a backup was taken first). ", flowID)
+	var added struct {
+		Wires [][]string `json:"wires"`
+	}
+	if json.Unmarshal(node, &added) == nil {
+		for _, targets := range added.Wires {
+			if len(targets) > 0 {
+				return mcp.NewToolResultText(message + "The node was added with its wires."), nil
+			}
+		}
+	}
+	return mcp.NewToolResultText(message + "Wire it up with connect_nodes."), nil
 }
 
 // handleUpdateNode merges properties into one node.

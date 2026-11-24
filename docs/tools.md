@@ -195,7 +195,7 @@ proceed.
 | `update_flow` | `GET /flows` + `POST /flows` | write | Full rewrite; prefer the granular tools; the written tab is judged in the context of the whole configuration |
 | `delete_flow` | `DELETE /flow/:id` | write | |
 | `set_flows` | `POST /flows` | write | Full deploy, most destructive; the configuration is validated first (`force=true` skips that) |
-| `add_node` | `GET /flows` + `POST /flows` | write | |
+| `add_node` | `GET /flows` + `POST /flows` | write | Confirms when supplied outgoing wires were kept; suggests `connect_nodes` only when there are no outgoing wires |
 | `update_node` | `GET /flows` + `POST /flows` | write | Merges properties |
 | `delete_node` | `GET /flows` + `POST /flows` | write | Cleans incoming wires |
 | `connect_nodes` | `GET /flows` + `POST /flows` | write | |
