@@ -161,8 +161,8 @@ func (s *Server) registerTools() {
 				"every node exactly, and any field not reproduced is destroyed. This "+
 				"appends and leaves the rest of the tab byte-for-byte identical. The "+
 				"wires are validated before the write.\n\n"+
-				"The node needs at least an id and a type. Wire it up afterwards with "+
-				"connect_nodes rather than hand-writing the wires array.\n\n"+
+				"The node needs at least an id and a type. If you add it without any "+
+				"outgoing wires, use connect_nodes to wire it up afterwards.\n\n"+
 				"WARNING: this tool can deploy any node type, including exec/system "+
 				"nodes that execute shell commands on the Node-RED host. The MCP "+
 				"server blocks a configurable set of node types (MCP_NODE_DENYLIST, "+

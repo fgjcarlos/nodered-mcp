@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -135,7 +136,73 @@ func TestHandleGetFlow_MissingIDIsError(t *testing.T) {
 	}
 }
 
-// --- node CRUD (handleUpdateNode, handleDeleteNode) ---
+// --- node CRUD (handleAddNode, handleUpdateNode, handleDeleteNode) ---
+
+func TestAddNodeWiringMessage(t *testing.T) {
+	const snapshot = `{"rev":"r","flows":[{"id":"tab1","type":"tab"},{"id":"n2","type":"debug","z":"tab1","x":300,"y":100,"wires":[]}]}`
+	const prefix = `Node added to flow "tab1" (a backup was taken first). `
+	const unwired = prefix + "Wire it up with connect_nodes."
+	const wired = prefix + "The node was added with its wires."
+
+	for _, tc := range []struct {
+		name, wires, want string
+	}{
+		{"absent", "", unwired},
+		{"empty", `[]`, unwired},
+		{"empty output", `[[]]`, unwired},
+		{"wired", `[["n2"]]`, wired},
+		{"wired later output", `[[],["n2"]]`, wired},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/flows":
+					_, _ = w.Write([]byte(snapshot))
+				case r.Method == http.MethodPost && r.URL.Path == "/flows":
+					var deploy struct {
+						Flows []struct {
+							ID    string
+							Wires json.RawMessage
+						}
+					}
+					if err := json.NewDecoder(r.Body).Decode(&deploy); err != nil {
+						t.Error(err)
+						http.Error(w, "invalid deployment", http.StatusBadRequest)
+						return
+					}
+					found := false
+					for _, node := range deploy.Flows {
+						if node.ID == "n1" {
+							found = true
+							if string(node.Wires) != tc.wires {
+								t.Errorf("deployed wires = %s, want %s", node.Wires, tc.wires)
+							}
+						}
+					}
+					if !found {
+						t.Error("deployment did not include n1")
+					}
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					http.Error(w, "unexpected "+r.Method+" "+r.URL.Path, http.StatusBadRequest)
+				}
+			})
+			node := map[string]any{"id": "n1", "type": "inject", "x": 100, "y": 100}
+			if tc.wires != "" {
+				node["wires"] = json.RawMessage(tc.wires)
+			}
+			res, err := callHelperTool(context.Background(), s, "add_node", map[string]any{
+				"flow_id": "tab1", "node": node,
+			})
+			if err != nil || res.IsError || len(res.Content) != 1 {
+				t.Fatalf("add_node: result = %+v, err = %v", res, err)
+			}
+			if got, ok := res.Content[0].(mcp.TextContent); !ok || got.Text != tc.want {
+				t.Errorf("add_node content = %+v, want text %q", res.Content[0], tc.want)
+			}
+		})
+	}
+}
 
 func TestHandleUpdateNode_PartialPatch(t *testing.T) {
 	// UpdateNode reads the nested tab, then deploys a revisioned flat config.
