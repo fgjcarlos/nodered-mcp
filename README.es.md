@@ -164,7 +164,7 @@ La referencia completa está en [`docs/`](./docs/):
 | [`docs/tools.md`](./docs/tools.md) | Catálogo de las 44 tools MCP (read / write / action) |
 | [`docs/configuration.md`](./docs/configuration.md) | Variables de entorno y flags de línea de comandos |
 | [`docs/transports.md`](./docs/transports.md) | Transportes stdio y streamable HTTP, bearer auth, OAuth 2.1 |
-| [`docs/clients.md`](./docs/clients.md) | Snippets de configuración por cliente MCP |
+| [`docs/clients.md`](./docs/clients.md) | Snippets de configuración por cliente MCP, incluido el uso con [varias instancias de Node-RED](./docs/clients.md#several-node-red-instances) |
 | [`docs/troubleshooting.md`](./docs/troubleshooting.md) | Modos de fallo habituales y cómo recuperarse |
 | [`docs/roadmap.md`](./docs/roadmap.md) | Trabajo abierto, riesgos aceptados, versiones planeadas |
 
