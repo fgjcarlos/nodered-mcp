@@ -19,10 +19,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- `connect_nodes` refuses a port at or past the source node's declared
-  `outputs` (function and switch nodes) instead of reporting a wire the
-  runtime never sends on. `validate_flow` reports such wires as
-  `wire_beyond_outputs`; the issue is advisory and does not block writes.
+- `connect_nodes` refuses a port at or past the source node's output count
+  (a function or trigger node's `outputs`, a switch node's rules) instead of
+  reporting a wire the runtime never sends on.
 
 ### Fixed
 

@@ -149,15 +149,19 @@ nodes and credentials; the automatic pre-restore snapshot is structural too.
    re-enter the credentials in the Node-RED editor, and deploy. Check the
    affected nodes' authentication and operation before declaring recovery done.
 
-The write tools that change the flow configuration advertise these limits
-before execution. The palette tools and `inject_node` do not advertise them:
-the palette changes the installed modules and `inject_node` fires a message,
-and neither changes the flow configuration. `set_context` does not advertise
-them either, even though provisioning its helper tab is a flow-configuration
-write: the tool writes into the helper's context, and only the provisioning of
-the helper tab touches the flows. `restore_backup` repeats the limits in its
-successful response. No additional filesystem or secret access is granted to
-the MCP server.
+The read-write server sends the full notice in its MCP initialization
+instructions. Flow-configuration write tools still warn in their descriptions
+that backups omit credentials, even if the client does not show the server
+instructions. `delete_flow` and `restore_backup` repeat the full notice in
+their successful responses.
+
+The palette tools and `inject_node` do not advertise these limits: the palette
+changes the installed modules and `inject_node` fires a message, and neither
+changes the flow configuration. `set_context` does not advertise them either,
+even though provisioning its helper tab is a flow-configuration write: the
+tool writes into the helper's context, and only provisioning the helper tab
+touches the flows. No additional filesystem or secret access is granted to the
+MCP server.
 
 ### Which writes snapshot the flow configuration
 
@@ -186,6 +190,12 @@ proceed.
 
 ## Flows
 
+`get_flow`, `export_flow`, `update_flow`, `delete_flow`, `disable_flow`, and
+`enable_flow` require a tab identifier. Pass `flow_id` or the original `id`.
+If you pass both, they must match; conflicts are rejected before Node-RED is
+contacted. Node tools such as `add_node` still use `flow_id` for the tab, and
+`get_context` and `set_context` still use `id` for flow and node scopes.
+
 | Tool | HTTP | Risk | Notes |
 |---|---|---|---|
 | `list_flows` | `GET /flows` | read | Summary by default, `detail="full"` opt-in |
@@ -194,12 +204,12 @@ proceed.
 | `create_flow` | `POST /flow` | write | |
 | `update_flow` | `GET /flows` + `POST /flows` | write | Full rewrite; prefer the granular tools; the written tab is judged in the context of the whole configuration |
 | `delete_flow` | `DELETE /flow/:id` | write | |
-| `set_flows` | `POST /flows` | write | Full deploy, most destructive; the configuration is validated first (`force=true` skips that) |
-| `add_node` | `GET /flows` + `POST /flows` | write | |
+| `set_flows` | `POST /flows` | write | Full deploy, most destructive; `force=true` skips structural-reference validation only; function-node JavaScript syntax is always checked |
+| `add_node` | `GET /flows` + `POST /flows` | write | Confirms when supplied outgoing wires were kept; suggests `connect_nodes` only when there are no outgoing wires |
 | `update_node` | `GET /flows` + `POST /flows` | write | Merges properties |
 | `delete_node` | `GET /flows` + `POST /flows` | write | Cleans incoming wires |
-| `connect_nodes` | `GET /flows` + `POST /flows` | write | Refuses a port at or past the source's declared `outputs` |
-| `validate_flow` | local | read | Dry-run structural check; a flat array is judged as a whole: unique ids across tabs, subflows and config nodes, a type on every entry, and an owner (tab or subflow) for every node and group. An instance of a subflow not in the payload is not reported. A wire on a port past a node's declared `outputs` is reported as `wire_beyond_outputs` (advisory; writes are not blocked) |
+| `connect_nodes` | `GET /flows` + `POST /flows` | write | Refuses a port at or past the source's output count (function and trigger `outputs`, switch rules) |
+| `validate_flow` | local | read | Dry-run structural and function-node JavaScript syntax checks plus advisory warnings for selected core nodes. `func`, `initialize` and `finalize` are parsed as async function bodies; syntax issues report the node, field and location. A flat array is judged as a whole: unique ids across tabs, subflows and config nodes, a type on every entry, and an owner (tab or subflow) for every node and group. An instance of a subflow not in the payload is not a structural issue |
 | `disable_flow` | `GET /flows` + `POST /flows` | write | |
 | `enable_flow` | `GET /flows` + `POST /flows` | write | |
 | `inject_node` | `POST /inject/:id` | action | Excluded from `--read-only`; optional payload |
@@ -271,14 +281,17 @@ backup that no longer validates — one taken from a runtime that carried
 a broken reference, or one edited by hand — is refused with the list
 of problems; `restore_backup` with `force=true` installs it anyway,
 and the result says that it was installed unvalidated. That is the
-recovery path, and it has to be asked for explicitly.
+recovery path, and it has to be asked for explicitly. Force skips
+structural-reference checks only: invalid function-node JavaScript is
+still refused before a backup or deployment.
 
-`set_flows` has the same escape hatch (`force=true`), for the same
-reason: the rules are the repository's, and one of them is stricter
+`set_flows` has the same structural escape hatch (`force=true`), for the
+same reason: the rules are the repository's, and one of them is stricter
 than the runtime. The node-type policy and the rule that a deployment
 must leave at least one tab are **not** skipped by it — they are not
 about the references of the configuration but about what a deployment
-may do to the runtime.
+may do to the runtime. Function syntax validation remains mandatory with
+or without force.
 
 That tab rule is decided by decoding the `type` of every entry, not by
 searching the payload for text. The same document behaves the same
@@ -316,6 +329,27 @@ reported as `invalid_subflow_port` by `create_subflow`, `update_subflow`,
 `set_flows`, `restore_backup` and `validate_flow`. The wires of an `in`
 port carry only an `id`.
 
+### Semantic warnings in `validate_flow`
+
+`ok` and `issues` still describe structural validation. The optional
+`warnings` array is advisory and never affects writes. It reports:
+
+- `output_count_mismatch`: the number of groups in `wires` differs from
+  the declared outputs of a Function or Trigger node, or from the number
+  of Switch rules when available. Empty groups count as output slots.
+- `invalid_property_type`: a Change rule's `pt` (or a Move rule's
+  destination `tot`) is not `msg`, `flow` or `global`, or a Switch's
+  `propertyType` is not one of those types, `jsonata` or `env`.
+  This does not check comparison or literal value types.
+- `http_response_unreachable`: no HTTP Response is reachable from an
+  HTTP In by following wires and static links in the supplied document.
+  A path through a subflow, Link Call or link to a missing target is
+  inconclusive and suppresses the warning. This does not guarantee a
+  response at runtime or check for multiple reachable responses.
+
+The checks are local; they do not query the runtime or inspect contributed
+node definitions.
+
 ## Palette
 
 | Tool | HTTP | Risk | Notes |
@@ -328,13 +362,22 @@ port carry only an `id`.
 | `enable_node` | `PUT /nodes/:module[/:set]` | write | |
 | `disable_node` | `PUT /nodes/:module[/:set]` | write | |
 
+When Node-RED returns its generic `unexpected_error` / `Install failed` response
+for either palette operation, the error points operators to Node-RED's runtime
+output (stdout, `journalctl`, `docker logs`, or a configured `settings.js`
+logging handler), where npm's details are written. Common causes include failing
+lifecycle scripts and an incompatible Node version. A manual user-directory
+install with `npm install --ignore-scripts <module>` may be a workaround; verify
+the package is trusted first. Skipping lifecycle scripts can make some packages
+unusable.
+
 ## Runtime, diagnostics, recovery
 
 | Tool | HTTP | Risk | Notes |
 |---|---|---|---|
 | `get_settings` | `GET /settings` | read | |
 | `get_diagnostics` | `GET /diagnostics` | read | Requires Node-RED ≥3.1 |
-| `get_flows_state` | `GET /flows/state` | read | Not gated by `runtimeState` |
+| `get_flows_state` | `GET /flows/state` | read | Requires Node-RED ≥3.0.0; not gated by `runtimeState` |
 | `get_context` | `GET /context/...` | read | editor-api, no stability contract |
 | `set_context` | `GET /flows`, `POST /flow`, `POST /inject/:id` | write | Verified persistent inject/function helper |
 | `get_debug_messages` | `/comms` WebSocket | read | Buffer of 500, reconnects |
@@ -345,7 +388,7 @@ port carry only an `id`.
 | `set_flows_state` | `POST /flows/state` | write | Requires `settings.runtimeState.enabled: true` |
 | `list_backups` | local | read | |
 | `diff_flows` | local + `GET /flows` | read | |
-| `restore_backup` | `POST /flows` | write | The backup is validated first; `force=true` skips that |
+| `restore_backup` | `POST /flows` | write | The backup is structurally validated first; `force=true` skips structural checks only, not function syntax validation |
 
 ## Context helper recovery
 
@@ -391,10 +434,11 @@ those clients. This is not a distributed transaction or a cross-process singleto
 
 A few tools need a minimum Node-RED version: `set_context` and
 `inject_node` with a payload need 5.0.0, `get_diagnostics` needs
-3.1.0. Those calls are gated on the version of the runtime this MCP
-is connected to. The MCP reads it from `GET /settings` at start-up
-and resolves it again before every gated operation, so the check does
-not depend on an earlier call having warmed the cache.
+3.1.0, and `get_flows_state` needs 3.0.0. The MCP reads the version from
+`GET /settings` at startup and reports these requirements in
+`get_runtime_info`. For `set_context` and `inject_node` with a payload,
+the MCP also checks the version before the operation, so that check
+does not depend on an earlier call having warmed the cache.
 
 Two properties are worth knowing:
 
@@ -405,11 +449,11 @@ Two properties are worth knowing:
   when the MCP starts, the version stays unknown until the next
   attempt, and a later gated operation probes again.
 
-When the version cannot be detected the call is **not** refused: the
-absence of evidence is not evidence of an old runtime. The success
-message then carries the suffix "Node-RED version was not detected;
-this call was not verified against the minimum version", and
-`get_runtime_info` reports the capability as `unknown`.
+When the version cannot be detected, `get_runtime_info` reports the
+capability as `unknown`. Calls that check the version are **not** refused
+on that basis alone. Their success message carries the suffix "Node-RED
+version was not detected; this call was not verified against the minimum
+version".
 
 ## Reading `get_runtime_info`
 

@@ -46,10 +46,6 @@ const (
 	// silently skipped such nodes, which let the corruption be written to
 	// the runtime and break every later edit through the MCP.
 	IssueInvalidWires FlowIssueKind = "invalid_wires"
-	// IssueWireBeyondOutputs is a wire on a port at or past the node's
-	// declared "outputs". The runtime never sends on it, so the target
-	// never receives anything. Advisory: the write guard does not block it.
-	IssueWireBeyondOutputs FlowIssueKind = "wire_beyond_outputs"
 	// IssueBadZ is a node whose "z" field references neither the owning
 	// tab nor any existing node in this document. Node-RED silently
 	// rewrites a bad z to the owning tab id, which loses the wire the
@@ -59,7 +55,8 @@ const (
 	// IssueMissingType is a node whose "type" is absent, null or empty. The runtime files it under a node type it cannot
 	// resolve, and a runtime with a missing node type refuses to start
 	// the flows at all (issue #336).
-	IssueMissingType FlowIssueKind = "missing_type"
+	IssueMissingType    FlowIssueKind = "missing_type"
+	IssueFunctionSyntax FlowIssueKind = "function_syntax"
 )
 
 // FlowGuardError is a refusal by the client-side guard of a flow
@@ -109,7 +106,9 @@ type FlowIssue struct {
 // lack them — that is how Node-RED decides between the two collections in
 // the first place. Flagging a config node as missing_xy would mark every
 // real-world tab as broken, so the check is scoped to nodes.
-func ValidateFlow(flow RawFlow) []FlowIssue {
+func ValidateFlow(flow RawFlow) []FlowIssue { return validateFlow(flow, true) }
+
+func validateFlow(flow RawFlow, checkFunctionSyntax bool) []FlowIssue {
 	doc, err := decodeFlow(flow)
 	if err != nil {
 		return []FlowIssue{{
@@ -126,10 +125,10 @@ func ValidateFlow(flow RawFlow) []FlowIssue {
 	seen := make(map[string]bool, len(doc.Nodes)+len(doc.Configs))
 
 	for _, node := range doc.Nodes {
-		issues = append(issues, nodeIssues(node, doc, seen, true)...)
+		issues = append(issues, nodeIssues(node, doc, seen, true, checkFunctionSyntax)...)
 	}
 	for _, node := range doc.Configs {
-		issues = append(issues, nodeIssues(node, doc, seen, false)...)
+		issues = append(issues, nodeIssues(node, doc, seen, false, checkFunctionSyntax)...)
 	}
 
 	// Wires are validated against the union of both collections.
@@ -147,7 +146,7 @@ func ValidateFlow(flow RawFlow) []FlowIssue {
 }
 
 // nodeIssues runs the per-node rules over one node of a tab document.
-func nodeIssues(node map[string]json.RawMessage, doc *flowDoc, seen map[string]bool, requireXY bool) []FlowIssue {
+func nodeIssues(node map[string]json.RawMessage, doc *flowDoc, seen map[string]bool, requireXY, checkFunctionSyntax bool) []FlowIssue {
 	var issues []FlowIssue
 	if issue := checkNode(node, seen, requireXY); issue != nil {
 		issues = append(issues, *issue)
@@ -157,6 +156,9 @@ func nodeIssues(node map[string]json.RawMessage, doc *flowDoc, seen map[string]b
 	}
 	if issue := checkZRef(node, doc); issue != nil {
 		issues = append(issues, *issue)
+	}
+	if checkFunctionSyntax {
+		issues = append(issues, validateFunctionNode(node)...)
 	}
 	return issues
 }
@@ -221,22 +223,6 @@ func wireDanglingMessage(src string, port int, tgt string) string {
 	return "node \"" + src + "\" wires port " + strconv.Itoa(port) + " to unknown node \"" + tgt + "\"; Node-RED accepts dangling wires silently and the flow never delivers to that endpoint"
 }
 
-// portIssues reports the problems of one output port's targets: targets
-// missing from the document, and any target at all on a port the node does
-// not have (dead).
-func portIssues(src string, port int, targets []string, ids map[string]bool, dead bool) []FlowIssue {
-	var issues []FlowIssue
-	for _, tgt := range targets {
-		if !ids[tgt] {
-			issues = append(issues, FlowIssue{Kind: IssueDanglingWire, NodeID: src, Target: tgt, Message: wireDanglingMessage(src, port, tgt)})
-		} else if dead {
-			issues = append(issues, FlowIssue{Kind: IssueWireBeyondOutputs, NodeID: src, Target: tgt,
-				Message: fmt.Sprintf("node %q wires port %d to %q but declares fewer outputs; the runtime never sends on that port", src, port, tgt)})
-		}
-	}
-	return issues
-}
-
 // validateWires walks every node in nodes+configs, reports wires whose
 // shape decodeWires rejects (IssueInvalidWires) and wires that point at
 // ids absent from the union of both collections (IssueDanglingWire).
@@ -277,9 +263,17 @@ func validateWires(nodes, configs []map[string]json.RawMessage, ids map[string]b
 				continue
 			}
 			src := nodeID(node)
-			outputs, declared := declaredOutputs(node)
 			for port, targets := range wires {
-				issues = append(issues, portIssues(src, port, targets, ids, declared && port >= outputs)...)
+				for _, tgt := range targets {
+					if !ids[tgt] {
+						issues = append(issues, FlowIssue{
+							Kind:    IssueDanglingWire,
+							NodeID:  src,
+							Target:  tgt,
+							Message: wireDanglingMessage(src, port, tgt),
+						})
+					}
+				}
 			}
 		}
 	}

@@ -144,11 +144,15 @@ func (c *Client) setFlows(ctx context.Context, flows []json.RawMessage, validate
 	// snapshotted and before the runtime is contacted. A wire that names
 	// a node which is not in the same tab, a node whose z names no tab at
 	// all, and an instance of a subflow whose definition is missing are
-	// all refused here instead of being installed.
+	// all refused here instead of being installed. Unchecked recovery
+	// skips those references, but never JavaScript syntax.
 	if validate {
-		if err := validateEffectiveConfig(flows); err != nil {
-			return err
-		}
+		err = validateEffectiveConfig(flows)
+	} else {
+		err = validateFunctionSyntaxInFlows(flows)
+	}
+	if err != nil {
+		return err
 	}
 	ctx, cancel := context.WithTimeout(ctx, SettingsStateTimeout)
 	defer cancel()

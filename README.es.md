@@ -154,7 +154,24 @@ Sustituye `node-red` por el nombre real del contenedor o servicio de Compose.
 No publiques el puerto `8090` más allá de loopback salvo que el firewall del
 host y la autenticación del transporte estén configurados para esa exposición.
 
+## Límite de solicitudes HTTP
+
+El transporte HTTP limita las solicitudes a **1 solicitud por segundo por IP de origen**, con una ráfaga de **10**. Los clientes MCP deben inicializar una vez y reutilizar la sesión MCP para las llamadas posteriores, en lugar de volver a inicializar en cada solicitud.
+
+Configura el límite con estas variables de entorno:
+
+| Variable | Predeterminado | Descripción |
+|---|---:|---|
+| `MCP_HTTP_RATE_PER_SEC` | `1` | Solicitudes sostenidas por segundo por IP de origen. |
+| `MCP_HTTP_RATE_BURST` | `10` | Máxima ráfaga de solicitudes por IP de origen. |
+| `MCP_HTTP_RATE_DISABLED` | `false` | Usa `true` para desactivar el límite de solicitudes. |
+
 ## Documentación
+
+En las [herramientas de pestañas de flujo](./docs/tools.md#flows), como
+`get_flow`, pasa `flow_id` o el parámetro original `id`. Si pasas ambos,
+deben coincidir. Las herramientas de nodo, como `add_node`, siguen usando
+`flow_id` para identificar la pestaña.
 
 La referencia completa está en [`docs/`](./docs/):
 
@@ -164,7 +181,7 @@ La referencia completa está en [`docs/`](./docs/):
 | [`docs/tools.md`](./docs/tools.md) | Catálogo de las 44 tools MCP (read / write / action) |
 | [`docs/configuration.md`](./docs/configuration.md) | Variables de entorno y flags de línea de comandos |
 | [`docs/transports.md`](./docs/transports.md) | Transportes stdio y streamable HTTP, bearer auth, OAuth 2.1 |
-| [`docs/clients.md`](./docs/clients.md) | Snippets de configuración por cliente MCP |
+| [`docs/clients.md`](./docs/clients.md) | Snippets de configuración por cliente MCP, incluido el uso con [varias instancias de Node-RED](./docs/clients.md#several-node-red-instances) |
 | [`docs/troubleshooting.md`](./docs/troubleshooting.md) | Modos de fallo habituales y cómo recuperarse |
 | [`docs/roadmap.md`](./docs/roadmap.md) | Trabajo abierto, riesgos aceptados, versiones planeadas |
 

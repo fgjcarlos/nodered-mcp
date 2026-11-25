@@ -26,7 +26,7 @@ import (
 // are the bytes Node-RED itself stores, so wires and every node field
 // round-trip intact.
 func (s *Server) handleExportFlow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	id, err := req.RequireString("id")
+	id, err := flowIDArg(req)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

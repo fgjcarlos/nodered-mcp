@@ -476,4 +476,12 @@ func TestConnectNodesRefusesAPortBeyondDeclaredOutputs(t *testing.T) {
 	if _, err := ConnectNodesInFlow(RawFlow(sampleTab), "n2", 0, "n1"); err != nil {
 		t.Errorf("port 0 of a 1-output node must still connect: %v", err)
 	}
+	// A switch has one output per rule.
+	sw := `{"id":"t","nodes":[{"id":"s","type":"switch","x":1,"y":1,"rules":[{"t":"eq"},{"t":"else"}],"wires":[[],[]]},{"id":"d","type":"debug","x":2,"y":1,"wires":[]}]}`
+	if _, err := ConnectNodesInFlow(RawFlow(sw), "s", 1, "d"); err != nil {
+		t.Errorf("port 1 of a 2-rule switch must connect: %v", err)
+	}
+	if _, err := ConnectNodesInFlow(RawFlow(sw), "s", 2, "d"); err == nil {
+		t.Errorf("port 2 of a 2-rule switch must be refused")
+	}
 }

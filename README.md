@@ -151,7 +151,23 @@ Replace `node-red` with the actual container or Compose service name. Do not
 publish port `8090` beyond loopback unless the host firewall and transport
 authentication are configured for that exposure.
 
+## HTTP rate limiting
+
+The HTTP transport limits requests to **1 request per second per source IP**, with a burst of **10**. MCP clients should initialize once and reuse the MCP session for subsequent calls rather than re-initializing for every request.
+
+Configure the limiter with these environment variables:
+
+| Variable | Default | Description |
+|---|---:|---|
+| `MCP_HTTP_RATE_PER_SEC` | `1` | Steady-state requests per second per source IP. |
+| `MCP_HTTP_RATE_BURST` | `10` | Maximum burst of requests per source IP. |
+| `MCP_HTTP_RATE_DISABLED` | `false` | Set to `true` to disable rate limiting. |
+
 ## Documentation
+
+When using [flow-tab tools](./docs/tools.md#flows) such as `get_flow`, pass
+`flow_id` or the original `id`. If you pass both, they must match. Node tools
+such as `add_node` still use `flow_id` for the tab.
 
 The full reference lives in [`docs/`](./docs/):
 
@@ -161,7 +177,7 @@ The full reference lives in [`docs/`](./docs/):
 | [`docs/tools.md`](./docs/tools.md) | Catalog of the 44 MCP tools (read / write / action) |
 | [`docs/configuration.md`](./docs/configuration.md) | Environment variables and command-line flags |
 | [`docs/transports.md`](./docs/transports.md) | stdio and streamable HTTP transports, bearer auth, OAuth 2.1 |
-| [`docs/clients.md`](./docs/clients.md) | Per-MCP-client configuration snippets |
+| [`docs/clients.md`](./docs/clients.md) | Per-MCP-client configuration snippets, including [several Node-RED instances](./docs/clients.md#several-node-red-instances) |
 | [`docs/troubleshooting.md`](./docs/troubleshooting.md) | Common failure modes and how to recover |
 | [`docs/roadmap.md`](./docs/roadmap.md) | Open work, accepted risks, planned versions |
 

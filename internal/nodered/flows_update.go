@@ -256,7 +256,7 @@ func validateDeployedTab(entries []json.RawMessage, id string, submitted RawFlow
 	if err != nil {
 		return err
 	}
-	if err := validateFlowWires(tab); err != nil {
+	if err := validateFlowWiresWithoutFunctionSyntax(tab); err != nil {
 		return err
 	}
 	return validateZRefsInFlow(tab, id)

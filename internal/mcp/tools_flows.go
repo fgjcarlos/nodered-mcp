@@ -14,6 +14,28 @@ import (
 	"github.com/fgjcarlos/nodered-mcp/internal/nodered"
 )
 
+func flowIDArg(req mcp.CallToolRequest) (string, error) {
+	args := req.GetArguments()
+	id, idOK := args["id"].(string)
+	if _, supplied := args["id"]; supplied && !idOK {
+		return "", errors.New(`argument "id" is not a string`)
+	}
+	flowID, flowIDOK := args["flow_id"].(string)
+	if _, supplied := args["flow_id"]; supplied && !flowIDOK {
+		return "", errors.New(`argument "flow_id" is not a string`)
+	}
+	if idOK && flowIDOK && id != flowID {
+		return "", errors.New("id and flow_id must match")
+	}
+	if id == "" {
+		id = flowID
+	}
+	if id == "" {
+		return "", errors.New("id or flow_id is required")
+	}
+	return id, nil
+}
+
 // handleListFlows returns a map of the instance, compact by default.
 //
 // The full flow config of a real instance runs to tens of thousands of tokens,
@@ -115,7 +137,7 @@ func (s *Server) handleSearchFlows(ctx context.Context, req mcp.CallToolRequest)
 
 // handleGetFlow returns a single flow tab as JSON.
 func (s *Server) handleGetFlow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	id, err := req.RequireString("id")
+	id, err := flowIDArg(req)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -163,7 +185,7 @@ func (s *Server) handleCreateFlow(ctx context.Context, req mcp.CallToolRequest) 
 // handleUpdateFlow replaces an existing flow tab with a new JSON document.
 // The flow argument accepts either a JSON-encoded string or a flow object.
 func (s *Server) handleUpdateFlow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	id, err := req.RequireString("id")
+	id, err := flowIDArg(req)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -210,9 +232,18 @@ func (s *Server) handleAddNode(ctx context.Context, req mcp.CallToolRequest) (*m
 		slog.Error("add_node failed", "error", err, "flow_id", flowID)
 		return toolResultError(err, fmt.Sprintf("adding node: %v", err))
 	}
-	return mcp.NewToolResultText(fmt.Sprintf(
-		"Node added to flow %q (a backup was taken first). Wire it up with connect_nodes.", flowID,
-	)), nil
+	message := fmt.Sprintf("Node added to flow %q (a backup was taken first). ", flowID)
+	var added struct {
+		Wires [][]string `json:"wires"`
+	}
+	if json.Unmarshal(node, &added) == nil {
+		for _, targets := range added.Wires {
+			if len(targets) > 0 {
+				return mcp.NewToolResultText(message + "The node was added with its wires."), nil
+			}
+		}
+	}
+	return mcp.NewToolResultText(message + "Wire it up with connect_nodes."), nil
 }
 
 // handleUpdateNode merges properties into one node.
@@ -319,7 +350,7 @@ func (s *Server) handleConnectNodes(ctx context.Context, req mcp.CallToolRequest
 
 // handleDeleteFlow deletes a flow tab and all its nodes.
 func (s *Server) handleDeleteFlow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	id, err := req.RequireString("id")
+	id, err := flowIDArg(req)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -332,21 +363,8 @@ func (s *Server) handleDeleteFlow(ctx context.Context, req mcp.CallToolRequest) 
 	return mcp.NewToolResultText(fmt.Sprintf("Flow %q deleted (a backup was taken first).", id) + "\n\n" + backupRecoveryNotice), nil
 }
 
-// handleValidateFlow runs the structural checks against an in-memory flow
-// document. It does not contact the runtime. The "flow" argument accepts
-// either a JSON-encoded string, a flow object directly, or a flat array
-// of tabs and nodes — the same shapes create_flow / update_flow accept
-// — so a model can copy the same payload it would have written, run
-// validate_flow over it, and only call the write tool after the issue
-// list comes back empty.
-
-// handleValidateFlow runs the structural checks against an in-memory flow
-// document. It does not contact the runtime. The "flow" argument accepts
-// either a JSON-encoded string, a flow object directly, or a flat array
-// of tabs and nodes — the same shapes create_flow / update_flow accept
-// — so a model can copy the same payload it would have written, run
-// validate_flow over it, and only call the write tool after the issue
-// list comes back empty.
+// handleValidateFlow runs structural checks and advisory semantic checks
+// without contacting the runtime. Only structural issues affect ok.
 func (s *Server) handleValidateFlow(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	raw, err := flowParam(req, "flow")
 	if err != nil {
@@ -354,31 +372,41 @@ func (s *Server) handleValidateFlow(_ context.Context, req mcp.CallToolRequest) 
 	}
 	slog.Debug("tool: validate_flow")
 
-	issues := nodered.ValidateFlows(nodered.RawFlow(raw))
+	flow := nodered.RawFlow(raw)
+	issues := nodered.ValidateFlows(flow)
+	warnings := nodered.ValidateFlowSemantics(flow)
 	resp := struct {
-		OK     bool                `json:"ok"`
-		Issues []nodered.FlowIssue `json:"issues"`
+		OK       bool                  `json:"ok"`
+		Issues   []nodered.FlowIssue   `json:"issues"`
+		Warnings []nodered.FlowWarning `json:"warnings,omitempty"`
 	}{
-		OK:     len(issues) == 0,
-		Issues: issues,
+		OK:       len(issues) == 0,
+		Issues:   issues,
+		Warnings: warnings,
 	}
 	out, err := json.MarshalIndent(resp, "", "  ")
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("encoding response: %v", err)), nil
 	}
+
+	summary := fmt.Sprintf("%d issue(s)", len(issues))
 	if resp.OK {
-		return mcp.NewToolResultText(fmt.Sprintf("ok — 0 issues\n\n```json\n%s\n```", string(out))), nil
+		summary = "ok — 0 issues"
 	}
-	return mcp.NewToolResultText(fmt.Sprintf(
-		"%d issue(s) found:\n\n```json\n%s\n```", len(issues), string(out),
-	)), nil
+	if len(warnings) != 0 {
+		summary += fmt.Sprintf(", %d warning(s)", len(warnings))
+	}
+	if !resp.OK {
+		summary += " found:"
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("%s\n\n```json\n%s\n```", summary, out)), nil
 }
 
 // handleDisableFlow stops a flow tab from running without deleting it.
 
 // handleDisableFlow stops a flow tab from running without deleting it.
 func (s *Server) handleDisableFlow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	id, err := req.RequireString("id")
+	id, err := flowIDArg(req)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -395,7 +423,7 @@ func (s *Server) handleDisableFlow(ctx context.Context, req mcp.CallToolRequest)
 
 // handleEnableFlow re-enables a previously disabled flow tab.
 func (s *Server) handleEnableFlow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	id, err := req.RequireString("id")
+	id, err := flowIDArg(req)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

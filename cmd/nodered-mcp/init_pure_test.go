@@ -290,7 +290,11 @@ func TestClientCatalogMatchesDocumentationAndExamples(t *testing.T) {
 	}
 	// Non-client sections are allowed, but the list is explicit so a new
 	// heading cannot slip in unnoticed.
-	expectedSections := map[string]bool{"HTTP variant": true, "Previewing a merge": true}
+	expectedSections := map[string]bool{
+		"HTTP variant":               true,
+		"Previewing a merge":         true,
+		"Several Node-RED instances": true,
+	}
 	expectedExamples := make(map[string]bool)
 	for _, client := range clients {
 		expectedSections[client.name] = true

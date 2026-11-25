@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -65,6 +66,95 @@ func TestHandleGetRuntimeInfo_NR5FullOk(t *testing.T) {
 	}
 	if !strings.Contains(tc.Text, `"get_diagnostics": "ok"`) {
 		t.Errorf("/diagnostics returned 200, should be ok, got %q", tc.Text)
+	}
+}
+
+func TestHandleGetRuntimeInfo_FlowsStateVersion(t *testing.T) {
+	tests := []struct {
+		name           string
+		settings       string
+		status         int
+		wantCapability string
+		wantReason     string
+		wantRemedy     string
+		wantSetState   string
+	}{
+		{
+			name:           "below minimum",
+			settings:       `{"version":"2.2.2"}`,
+			wantCapability: "version_too_low",
+			wantReason:     "Node-RED 2.2.2 is below the 3.0.0 minimum required by get_flows_state",
+			wantRemedy:     "Upgrade Node-RED to at least 3.0.0",
+		},
+		{
+			name:           "unknown version",
+			status:         http.StatusInternalServerError,
+			wantCapability: "unknown",
+			wantReason:     "Node-RED version was not detected; capability is unknown until the runtime's version is visible to the MCP",
+		},
+		{
+			name:           "supported independently of runtime state setting",
+			settings:       `{"version":"3.0.0","runtimeState":{"enabled":false}}`,
+			wantCapability: "ok",
+			wantSetState:   "setting_disabled",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, _ := serverWithMockVersionProbe(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/settings" {
+					if tt.status != 0 {
+						w.WriteHeader(tt.status)
+						return
+					}
+					_, _ = w.Write([]byte(tt.settings))
+					return
+				}
+				w.WriteHeader(http.StatusNotFound)
+			})
+			res, err := call(t, s.handleGetRuntimeInfo, map[string]any{})
+			if err != nil {
+				t.Fatalf("handler returned error: %v", err)
+			}
+			if res.IsError {
+				t.Fatalf("handler reported error: %v", res.Content)
+			}
+			tc := res.Content[0].(mcp.TextContent)
+			var got struct {
+				MCP struct {
+					CapabilityMatrix   map[string]string `json:"capabilityMatrix"`
+					CapabilityGuidance map[string]struct {
+						Reason string `json:"reason"`
+						Remedy string `json:"remedy"`
+					} `json:"capabilityGuidance"`
+				} `json:"mcp"`
+			}
+			body := strings.TrimSuffix(strings.TrimPrefix(tc.Text, "```json\n"), "\n```")
+			if err := json.Unmarshal([]byte(body), &got); err != nil {
+				t.Fatalf("decode runtime info: %v\n%s", err, tc.Text)
+			}
+
+			if got.MCP.CapabilityMatrix["get_flows_state"] != tt.wantCapability {
+				t.Errorf("get_flows_state capability = %q, want %q", got.MCP.CapabilityMatrix["get_flows_state"], tt.wantCapability)
+			}
+			guidance, hasGuidance := got.MCP.CapabilityGuidance["get_flows_state"]
+			if tt.wantReason == "" {
+				if hasGuidance {
+					t.Errorf("ok get_flows_state should have no guidance, got %+v", guidance)
+				}
+			} else {
+				if !hasGuidance || guidance.Reason != tt.wantReason {
+					t.Errorf("get_flows_state guidance reason = %q (present %t), want %q", guidance.Reason, hasGuidance, tt.wantReason)
+				}
+				if guidance.Remedy != tt.wantRemedy {
+					t.Errorf("get_flows_state guidance remedy = %q, want %q", guidance.Remedy, tt.wantRemedy)
+				}
+			}
+			if tt.wantSetState != "" && got.MCP.CapabilityMatrix["set_flows_state"] != tt.wantSetState {
+				t.Errorf("set_flows_state capability = %q, want %q", got.MCP.CapabilityMatrix["set_flows_state"], tt.wantSetState)
+			}
+		})
 	}
 }
 

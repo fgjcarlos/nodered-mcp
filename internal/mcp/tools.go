@@ -6,6 +6,13 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+func flowTabIDArgs(description string) mcp.ToolOption {
+	return func(tool *mcp.Tool) {
+		mcp.WithString("id", mcp.Description(description+" Supply id or flow_id."))(tool)
+		mcp.WithString("flow_id", mcp.Description("Alias for id. Supply one or the other; if both are set, they must match."))(tool)
+	}
+}
+
 // registerTools wires every MCP tool to its handler.
 //
 // Each tool is registered through addReadTool or addWriteTool. That choice is
@@ -69,8 +76,7 @@ func (s *Server) registerTools() {
 				"Note: Node-RED redacts credential values in API responses; credential "+
 				"fields are present but their values are always empty strings.",
 		),
-		mcp.WithString("id", mcp.Required(),
-			mcp.Description("The flow tab ID (as shown by list_flows).")),
+		flowTabIDArgs("The flow tab ID (as shown by list_flows)."),
 	)
 	s.addReadTool(getFlow, s.handleGetFlow)
 
@@ -85,7 +91,7 @@ func (s *Server) registerTools() {
 				"the Node-RED host. The MCP server blocks a configurable set of node "+
 				"types (MCP_NODE_DENYLIST, default: exec,system); see SECURITY.md.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
-				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
+				"write; restore_backup recovers the flow structure only. "+backupRecoveryWarning,
 		),
 		mcp.WithString("flow", mcp.Required(),
 			mcp.Description("The flow document as a JSON string.")),
@@ -105,8 +111,7 @@ func (s *Server) registerTools() {
 				"another instance (or paste it into the editor). Wires round-trip intact. "+
 				"Read-only.",
 		),
-		mcp.WithString("id", mcp.Required(),
-			mcp.Description("The flow tab ID to export.")),
+		flowTabIDArgs("The flow tab ID to export."),
 	)
 	s.addReadTool(exportFlow, s.handleExportFlow)
 
@@ -126,7 +131,7 @@ func (s *Server) registerTools() {
 				"the Node-RED host. The MCP server blocks a configurable set of node "+
 				"types (MCP_NODE_DENYLIST, default: exec,system); see SECURITY.md.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
-				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
+				"write; restore_backup recovers the flow structure only. "+backupRecoveryWarning,
 		),
 		mcp.WithString("clipboard", mcp.Required(),
 			mcp.Description("Editor clipboard JSON: a flat array with one tab element plus its nodes and dependencies. Either the raw array or a JSON-encoded string is accepted.")),
@@ -144,10 +149,9 @@ func (s *Server) registerTools() {
 				"server blocks a configurable set of node types (MCP_NODE_DENYLIST, "+
 				"default: exec,system); see SECURITY.md.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
-				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
+				"write; restore_backup recovers the flow structure only. "+backupRecoveryWarning,
 		),
-		mcp.WithString("id", mcp.Required(),
-			mcp.Description("The flow tab ID to replace.")),
+		flowTabIDArgs("The flow tab ID to replace."),
 		mcp.WithString("flow", mcp.Required(),
 			mcp.Description("The complete new flow document as a JSON string.")),
 	)
@@ -161,14 +165,14 @@ func (s *Server) registerTools() {
 				"every node exactly, and any field not reproduced is destroyed. This "+
 				"appends and leaves the rest of the tab byte-for-byte identical. The "+
 				"wires are validated before the write.\n\n"+
-				"The node needs at least an id and a type. Wire it up afterwards with "+
-				"connect_nodes rather than hand-writing the wires array.\n\n"+
+				"The node needs at least an id and a type. If you add it without any "+
+				"outgoing wires, use connect_nodes to wire it up afterwards.\n\n"+
 				"WARNING: this tool can deploy any node type, including exec/system "+
 				"nodes that execute shell commands on the Node-RED host. The MCP "+
 				"server blocks a configurable set of node types (MCP_NODE_DENYLIST, "+
 				"default: exec,system); see SECURITY.md.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
-				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
+				"write; restore_backup recovers the flow structure only. "+backupRecoveryWarning,
 		),
 		mcp.WithString("flow_id", mcp.Required(),
 			mcp.Description("The flow tab to add the node to (from list_flows or search_flows).")),
@@ -196,7 +200,7 @@ func (s *Server) registerTools() {
 				"merged, so changing a node's type to a blocked one is refused; see "+
 				"SECURITY.md.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
-				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
+				"write; restore_backup recovers the flow structure only. "+backupRecoveryWarning,
 		),
 		mcp.WithString("flow_id", mcp.Required(),
 			mcp.Description("The flow tab that owns the node.")),
@@ -215,7 +219,7 @@ func (s *Server) registerTools() {
 				"a node that no longer exists and simply never delivers to them, leaving "+
 				"a flow that looks intact and quietly does less than it should.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
-				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
+				"write; restore_backup recovers the flow structure only. "+backupRecoveryWarning,
 		),
 		mcp.WithString("flow_id", mcp.Required(),
 			mcp.Description("The flow tab that owns the node.")),
@@ -233,11 +237,11 @@ func (s *Server) registerTools() {
 				"adding to it silently drops existing connections. This appends to the "+
 				"port you name, grows the array if that port does not exist yet (a switch "+
 				"node's later outputs), and does nothing if the connection already exists. "+
-				"A port at or past the source's declared outputs (function and switch nodes "+
-				"carry an outputs count) is refused: the runtime would never send on it.\n\n"+
+				"A port at or past the source's output count (a function or trigger node's "+
+				"outputs, a switch node's rules) is refused: the runtime would never send on it.\n\n"+
 				"Both nodes must be in the same tab.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
-				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
+				"write; restore_backup recovers the flow structure only. "+backupRecoveryWarning,
 		),
 		mcp.WithString("flow_id", mcp.Required(),
 			mcp.Description("The flow tab holding both nodes.")),
@@ -255,10 +259,9 @@ func (s *Server) registerTools() {
 		mcp.WithDescription(
 			"Delete a flow tab and all its nodes.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
-				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
+				"write; restore_backup recovers the flow structure only. "+backupRecoveryWarning,
 		),
-		mcp.WithString("id", mcp.Required(),
-			mcp.Description("The flow tab ID to delete.")),
+		flowTabIDArgs("The flow tab ID to delete."),
 	)
 	s.addWriteTool(deleteFlow, s.handleDeleteFlow)
 
@@ -271,13 +274,16 @@ func (s *Server) registerTools() {
 	validateFlow := mcp.NewTool("validate_flow",
 		mcp.WithDescription(
 			"Run the structural checks the write path applies (dangling wires, "+
-				"duplicate or missing ids, missing types, missing x/y canvas coordinates) "+
+				"duplicate or missing ids, missing types, missing x/y canvas coordinates, and "+
+				"JavaScript syntax in function-node func/initialize/finalize bodies) "+
 				"against a flow document WITHOUT writing it. A flat array (the GET /flows "+
 				"shape) is checked as a whole: ids must be unique across every tab, "+
 				"subflow and config node, and every node and group must belong to a tab "+
 				"or a subflow definition. Returns every issue found so the "+
 				"caller can fix them all at once, rather than discover one per failed "+
-				"deploy. Read-only — nothing is sent to the runtime.",
+				"deploy. Also reports advisory warnings for selected core nodes: output counts, "+
+				"Change/Switch property types and HTTP In without a reachable HTTP Response. "+
+				"Warnings do not change ok or block writes. Read-only — nothing is sent to the runtime.",
 		),
 		mcp.WithString("flow", mcp.Required(),
 			mcp.Description("The flow document as a JSON string (same shape as create_flow).")),
@@ -297,10 +303,9 @@ func (s *Server) registerTools() {
 				"\"disabled\" flag via PUT /flow/:id. The tab stays in the editor "+
 				"and can be re-enabled with enable_flow.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
-				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
+				"write; restore_backup recovers the flow structure only. "+backupRecoveryWarning,
 		),
-		mcp.WithString("id", mcp.Required(),
-			mcp.Description("The flow tab ID to disable (as shown by list_flows).")),
+		flowTabIDArgs("The flow tab ID to disable (as shown by list_flows)."),
 	)
 	s.addWriteTool(disableFlow, s.handleDisableFlow)
 
@@ -310,10 +315,9 @@ func (s *Server) registerTools() {
 				"\"disabled\" flag back to false via PUT /flow/:id. The tab starts "+
 				"running again with whatever nodes were already on it — no redeploy needed.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
-				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
+				"write; restore_backup recovers the flow structure only. "+backupRecoveryWarning,
 		),
-		mcp.WithString("id", mcp.Required(),
-			mcp.Description("The flow tab ID to enable (as shown by list_flows).")),
+		flowTabIDArgs("The flow tab ID to enable (as shown by list_flows)."),
 	)
 	s.addWriteTool(enableFlow, s.handleEnableFlow)
 
@@ -370,7 +374,7 @@ func (s *Server) registerTools() {
 				"default: exec,system), including inside the subflow's own nodes; see "+
 				"SECURITY.md.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
-				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
+				"write; restore_backup recovers the flow structure only. "+backupRecoveryWarning,
 		),
 		mcp.WithString("subflow", mcp.Required(),
 			mcp.Description("The subflow definition as a JSON object or JSON-encoded string.")),
@@ -393,7 +397,7 @@ func (s *Server) registerTools() {
 				"default: exec,system), including inside the subflow's own nodes; see "+
 				"SECURITY.md.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
-				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
+				"write; restore_backup recovers the flow structure only. "+backupRecoveryWarning,
 		),
 		mcp.WithString("id", mcp.Required(),
 			mcp.Description("The subflow definition ID to replace.")),
@@ -415,7 +419,7 @@ func (s *Server) registerTools() {
 				"enclosing definition with update_subflow (an instance nested in another "+
 				"subflow); this tool never removes them for you.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
-				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
+				"write; restore_backup recovers the flow structure only. "+backupRecoveryWarning,
 		),
 		mcp.WithString("id", mcp.Required(),
 			mcp.Description("The subflow definition ID to remove.")),
@@ -436,7 +440,7 @@ func (s *Server) registerTools() {
 				"before anything is written. Read /list_subflows first to discover "+
 				"available subflow ids, and /get_flow first to find tab ids.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
-				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
+				"write; restore_backup recovers the flow structure only. "+backupRecoveryWarning,
 		),
 		mcp.WithString("flow_id", mcp.Required(),
 			mcp.Description("The flow tab to add the instance to (from list_flows or search_flows).")),
@@ -592,12 +596,13 @@ func (s *Server) registerTools() {
 				"a node that belongs to no tab, an instance of a subflow whose definition "+
 				"is missing) is refused before the runtime is contacted. Pass force=true "+
 				"to install such a backup anyway — that is the recovery path for a "+
-				"configuration that was valid on an older runtime.\n\n"+backupRecoveryNotice,
+				"configuration that was valid on an older runtime. Function-node JavaScript "+
+				"syntax is still checked and cannot be bypassed by force.\n\n"+backupRecoveryWarning,
 		),
 		mcp.WithString("backup", mcp.Required(),
 			mcp.Description("Backup filename (from list_backups), or \"latest\".")),
 		mcp.WithBoolean("force",
-			mcp.Description("Set to true to restore the backup without validating its references. Use it only for a backup that no longer validates and that you know is worth restoring.")),
+			mcp.Description("Set to true to restore the backup without validating its structural references. Function-node JavaScript syntax is still validated. Use it only for a backup that no longer validates and that you know is worth restoring.")),
 	)
 	s.addWriteTool(restoreBackup, s.handleRestoreBackup)
 
@@ -788,7 +793,7 @@ func (s *Server) registerTools() {
 			"Start or stop the Node-RED runtime (\"start\" or \"stop\"). MUTATES the "+
 				"runtime: stopping pauses all flow execution, starting resumes it.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
-				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
+				"write; restore_backup recovers the flow structure only. "+backupRecoveryWarning,
 		),
 		mcp.WithString("state", mcp.Required(),
 			mcp.Description("Either \"start\" or \"stop\".")),
@@ -814,14 +819,15 @@ func (s *Server) registerTools() {
 				"and nothing is sent to the runtime. Pass force=true to deploy a "+
 				"configuration the guard refuses anyway — the rules are the repository's "+
 				"and one of them (a wire that leaves the tab that owns it) is stricter "+
-				"than the runtime, which does resolve such a wire across tabs.\n\n"+
+				"than the runtime, which does resolve such a wire across tabs. Function-node "+
+				"JavaScript syntax is still checked and cannot be bypassed by force.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
-				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
+				"write; restore_backup recovers the flow structure only. "+backupRecoveryWarning,
 		),
 		mcp.WithString("flows", mcp.Required(),
 			mcp.Description("A JSON array of flow objects (the same shape returned by list_flows).")),
 		mcp.WithBoolean("force",
-			mcp.Description("Set to true to deploy the configuration without validating its references. Use it only for a configuration that the guard refuses and that you know is worth deploying.")),
+			mcp.Description("Set to true to deploy without validating structural references. Function-node JavaScript syntax is still validated. Use it only for a configuration that the guard refuses and that you know is worth deploying.")),
 	)
 	s.addWriteTool(setFlows, s.handleSetFlows)
 

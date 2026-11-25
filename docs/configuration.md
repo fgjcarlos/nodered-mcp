@@ -36,14 +36,19 @@ in the error.
 
 | Variable | Default | Flag | Description |
 |---|---|---|---|
-| `NODERED_BACKUP_DIR` | `backups` | — | Where snapshots are written |
+| `NODERED_BACKUP_DIR` | `backups` | — | Where snapshots are written. Relative paths resolve against the MCP process's working directory. |
 | `NODERED_BACKUP_KEEP` | `50` | — | How many backup files to retain. Older ones are pruned after each new snapshot; `0` disables pruning entirely |
+
+When connecting to [several Node-RED instances](clients.md#several-node-red-instances),
+set a different absolute backup directory for each MCP server. Servers that
+share a directory can pick up one another's snapshots.
 
 In the container image the backup directory is `/var/lib/nodered-mcp/backups`
 (the image sets `NODERED_BACKUP_DIR` to it and runs as the `nonroot` user, so
 the path is writable). The image ships that directory with the `nonroot`
 user's ownership, so a volume mounted on it inherits that ownership. Mount
-a volume there to keep the snapshots when the container is recreated:
+a separate volume per container at that path to keep snapshots when a
+container is recreated without sharing backups across instances:
 
 ```bash
 docker run --rm --name nodered-mcp \

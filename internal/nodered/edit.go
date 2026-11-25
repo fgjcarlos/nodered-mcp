@@ -75,6 +75,12 @@ func (c *Client) AddNode(ctx context.Context, flowID string, node json.RawMessag
 	if err := c.deniedNodeType(node); err != nil {
 		return err
 	}
+	var decoded map[string]json.RawMessage
+	if json.Unmarshal(node, &decoded) == nil {
+		if issues := validateFunctionNode(decoded); len(issues) > 0 {
+			return &FlowGuardError{Message: issues[0].Message}
+		}
+	}
 	return c.editFlow(ctx, flowID, func(f RawFlow, flows []json.RawMessage) (RawFlow, error) {
 		if err := c.deniedSubflowInstance(node, flows); err != nil {
 			return nil, err
@@ -100,7 +106,19 @@ func (c *Client) UpdateNode(ctx context.Context, flowID, nodeID string, patch ma
 		if err != nil {
 			return nil, err
 		}
-		return next, c.deniedNodeTypeOfNode(next, nodeID, flows)
+		if err := c.deniedNodeTypeOfNode(next, nodeID, flows); err != nil {
+			return nil, err
+		}
+		doc, err := decodeFlow(next)
+		if err != nil {
+			return nil, err
+		}
+		if collection, index, ok := doc.locate(nodeID); ok {
+			if issues := validateFunctionNode((*collection)[index]); len(issues) > 0 {
+				return nil, &FlowGuardError{Message: issues[0].Message}
+			}
+		}
+		return next, nil
 	})
 }
 
@@ -464,7 +482,9 @@ func ConnectNodesInFlow(flow RawFlow, fromID string, port int, toID string) (Raw
 		return nil, fmt.Errorf("cannot wire to %q: no node with that id in this flow", toID)
 	}
 
-	if n, ok := declaredOutputs((*fromCollection)[from]); ok && port >= n {
+	src := (*fromCollection)[from]
+	srcType, _ := jsTypeString(src["type"])
+	if n, ok := declaredOutputs(semanticNode{fromID, srcType, src}); ok && port >= n {
 		return nil, fmt.Errorf("node %q has %d output(s); port %d does not exist and a wire there would never fire", fromID, n, port)
 	}
 
@@ -488,18 +508,6 @@ func ConnectNodesInFlow(flow RawFlow, fromID string, port int, toID string) (Raw
 		return nil, err
 	}
 	return doc.encode()
-}
-
-// declaredOutputs returns the node's numeric "outputs" field (function and
-// switch nodes carry one). ok is false when the node does not declare it, as
-// for most core nodes and for subflow instances, whose count lives on the
-// definition.
-func declaredOutputs(node map[string]json.RawMessage) (n int, ok bool) {
-	var f float64
-	if raw, has := node["outputs"]; !has || json.Unmarshal(raw, &f) != nil || f < 0 {
-		return 0, false
-	}
-	return int(f), true
 }
 
 // decodeWires reads a node's wires array. A node without wires (a config node,
