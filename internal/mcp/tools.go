@@ -269,7 +269,8 @@ func (s *Server) registerTools() {
 	validateFlow := mcp.NewTool("validate_flow",
 		mcp.WithDescription(
 			"Run the structural checks the write path applies (dangling wires, "+
-				"duplicate or missing ids, missing types, missing x/y canvas coordinates) "+
+				"duplicate or missing ids, missing types, missing x/y canvas coordinates, and "+
+				"JavaScript syntax in function-node func/initialize/finalize bodies) "+
 				"against a flow document WITHOUT writing it. A flat array (the GET /flows "+
 				"shape) is checked as a whole: ids must be unique across every tab, "+
 				"subflow and config node, and every node and group must belong to a tab "+
@@ -592,12 +593,13 @@ func (s *Server) registerTools() {
 				"a node that belongs to no tab, an instance of a subflow whose definition "+
 				"is missing) is refused before the runtime is contacted. Pass force=true "+
 				"to install such a backup anyway — that is the recovery path for a "+
-				"configuration that was valid on an older runtime.\n\n"+backupRecoveryNotice,
+				"configuration that was valid on an older runtime. Function-node JavaScript "+
+				"syntax is still checked and cannot be bypassed by force.\n\n"+backupRecoveryNotice,
 		),
 		mcp.WithString("backup", mcp.Required(),
 			mcp.Description("Backup filename (from list_backups), or \"latest\".")),
 		mcp.WithBoolean("force",
-			mcp.Description("Set to true to restore the backup without validating its references. Use it only for a backup that no longer validates and that you know is worth restoring.")),
+			mcp.Description("Set to true to restore the backup without validating its structural references. Function-node JavaScript syntax is still validated. Use it only for a backup that no longer validates and that you know is worth restoring.")),
 	)
 	s.addWriteTool(restoreBackup, s.handleRestoreBackup)
 
@@ -814,14 +816,15 @@ func (s *Server) registerTools() {
 				"and nothing is sent to the runtime. Pass force=true to deploy a "+
 				"configuration the guard refuses anyway — the rules are the repository's "+
 				"and one of them (a wire that leaves the tab that owns it) is stricter "+
-				"than the runtime, which does resolve such a wire across tabs.\n\n"+
+				"than the runtime, which does resolve such a wire across tabs. Function-node "+
+				"JavaScript syntax is still checked and cannot be bypassed by force.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
 				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
 		),
 		mcp.WithString("flows", mcp.Required(),
 			mcp.Description("A JSON array of flow objects (the same shape returned by list_flows).")),
 		mcp.WithBoolean("force",
-			mcp.Description("Set to true to deploy the configuration without validating its references. Use it only for a configuration that the guard refuses and that you know is worth deploying.")),
+			mcp.Description("Set to true to deploy without validating structural references. Function-node JavaScript syntax is still validated. Use it only for a configuration that the guard refuses and that you know is worth deploying.")),
 	)
 	s.addWriteTool(setFlows, s.handleSetFlows)
 
