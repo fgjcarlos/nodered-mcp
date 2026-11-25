@@ -143,6 +143,27 @@ func TestReadOnlyExposesOnlyReadTools(t *testing.T) {
 	}
 }
 
+// MCP clients read the annotations to decide what needs approval. Unset, mcp-go
+// defaults every tool to readOnlyHint:false and destructiveHint:true, so the
+// read tools must say what they are and the write tools keep the default.
+func TestToolAnnotationsMatchReadOrWrite(t *testing.T) {
+	read := map[string]bool{}
+	for _, n := range readOnlyTools {
+		read[n] = true
+	}
+	for _, tool := range newTestServer(t, false).tools {
+		a := tool.Annotations
+		ro := a.ReadOnlyHint != nil && *a.ReadOnlyHint
+		destructive := a.DestructiveHint == nil || *a.DestructiveHint
+		if read[tool.Name] && (!ro || destructive) {
+			t.Errorf("read tool %q: readOnlyHint=%v destructive=%v, want true/false", tool.Name, ro, destructive)
+		}
+		if !read[tool.Name] && (ro || !destructive) {
+			t.Errorf("write tool %q: readOnlyHint=%v destructive=%v, want false/true", tool.Name, ro, destructive)
+		}
+	}
+}
+
 func TestReadOnlyWithholdsEveryMutatingTool(t *testing.T) {
 	got := toolNames(newTestServer(t, true))
 
