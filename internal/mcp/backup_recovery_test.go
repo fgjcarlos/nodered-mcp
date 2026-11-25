@@ -1,12 +1,14 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -19,18 +21,63 @@ func assertStructuralRecoveryNotice(t *testing.T, text string) {
 	}
 }
 
-// Tool descriptions are advertised before a caller can choose to delete.
 func TestBackupRecoveryLimitsAdvertisedBeforeDeletion(t *testing.T) {
-	s := newTestServer(t, false)
-	for _, tool := range s.tools {
-		if strings.Contains(tool.Description, "restore_backup") || tool.Name == "restore_backup" {
-			t.Run(tool.Name, func(t *testing.T) {
-				assertStructuralRecoveryNotice(t, tool.Description)
-				if strings.Contains(tool.Description, "restore can itself be undone") {
-					t.Fatal("description still promises complete reversibility")
+	for _, mode := range []struct {
+		name     string
+		readOnly bool
+	}{{"read_write", false}, {"read_only", true}} {
+		t.Run(mode.name, func(t *testing.T) {
+			ctx := context.Background()
+			s := newTestServer(t, mode.readOnly)
+			c, err := client.NewInProcessClient(s.mcpServer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = c.Close() })
+			init, err := c.Initialize(ctx, mcp.InitializeRequest{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode.readOnly {
+				if init.Instructions != "" {
+					t.Errorf("read-only server unexpectedly advertises instructions: %q", init.Instructions)
 				}
-			})
-		}
+				return
+			}
+			if got := strings.Count(init.Instructions, backupRecoveryNotice); got != 1 {
+				t.Errorf("initialize advertises the full backup recovery notice %d times, want 1", got)
+			}
+			listing, err := c.ListTools(ctx, mcp.ListToolsRequest{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			descriptions := make(map[string]string, len(listing.Tools))
+			for _, tool := range listing.Tools {
+				if strings.Contains(tool.Description, backupRecoveryNotice) {
+					t.Errorf("%s repeats the full recovery notice in tools/list", tool.Name)
+				}
+				descriptions[tool.Name] = tool.Description
+			}
+			total := 0
+			for _, name := range []string{
+				"create_flow", "import_flow", "update_flow", "add_node", "update_node", "delete_node",
+				"connect_nodes", "delete_flow", "disable_flow", "enable_flow", "create_subflow", "update_subflow",
+				"delete_subflow", "instantiate_subflow", "restore_backup", "set_flows_state", "set_flows",
+			} {
+				desc := descriptions[name]
+				total += len(desc)
+				if !strings.Contains(desc, "do not include credentials") || !strings.Contains(desc, "can permanently remove") {
+					t.Errorf("%s description is missing the short credential warning", name)
+				}
+				if strings.Contains(desc, "restore can itself be undone") {
+					t.Errorf("%s description still promises complete reversibility", name)
+				}
+			}
+			t.Logf("backup-related tools/list descriptions: %d bytes", total)
+			if total > 14_000 {
+				t.Errorf("backup-related descriptions total %d bytes, want at most 14000", total)
+			}
+		})
 	}
 }
 

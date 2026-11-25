@@ -12,7 +12,9 @@ import (
 	"github.com/fgjcarlos/nodered-mcp/internal/nodered"
 )
 
-// backupRecoveryNotice is advertised before writes and repeated after restoration.
+const backupRecoveryWarning = "Backups do not include credentials; deleting nodes or tabs can permanently remove them."
+
+// backupRecoveryNotice is sent at initialization and repeated after deletion or restoration.
 // The Admin API snapshot cannot recover the runtime's separate secret store.
 const backupRecoveryNotice = "WARNING: backups are structural snapshots of /flows only; " +
 	"they do not include Node-RED's separate encrypted credential store or its encryption keys/configuration. " +

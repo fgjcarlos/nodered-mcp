@@ -219,9 +219,14 @@ func New(nrClient *nodered.Client, opts Options) *Server {
 	if version == "" {
 		version = "dev"
 	}
+	instructions := ""
+	if !opts.ReadOnly {
+		instructions = backupRecoveryNotice
+	}
 	s := server.NewMCPServer(
 		"nodered-mcp",
 		version,
+		server.WithInstructions(instructions),
 		server.WithToolCapabilities(false),
 		server.WithResourceCapabilities(false, false),
 		server.WithPromptCapabilities(false),
