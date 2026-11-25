@@ -149,15 +149,19 @@ nodes and credentials; the automatic pre-restore snapshot is structural too.
    re-enter the credentials in the Node-RED editor, and deploy. Check the
    affected nodes' authentication and operation before declaring recovery done.
 
-The write tools that change the flow configuration advertise these limits
-before execution. The palette tools and `inject_node` do not advertise them:
-the palette changes the installed modules and `inject_node` fires a message,
-and neither changes the flow configuration. `set_context` does not advertise
-them either, even though provisioning its helper tab is a flow-configuration
-write: the tool writes into the helper's context, and only the provisioning of
-the helper tab touches the flows. `restore_backup` repeats the limits in its
-successful response. No additional filesystem or secret access is granted to
-the MCP server.
+The read-write server sends the full notice in its MCP initialization
+instructions. Flow-configuration write tools still warn in their descriptions
+that backups omit credentials, even if the client does not show the server
+instructions. `delete_flow` and `restore_backup` repeat the full notice in
+their successful responses.
+
+The palette tools and `inject_node` do not advertise these limits: the palette
+changes the installed modules and `inject_node` fires a message, and neither
+changes the flow configuration. `set_context` does not advertise them either,
+even though provisioning its helper tab is a flow-configuration write: the
+tool writes into the helper's context, and only provisioning the helper tab
+touches the flows. No additional filesystem or secret access is granted to the
+MCP server.
 
 ### Which writes snapshot the flow configuration
 
