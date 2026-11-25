@@ -10,7 +10,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
-- Refuse flow and inject ids that escape their admin API path segment.
+- Refuse flow and inject ids that escape their admin API path segment
+  (GHSA-ppfh-jvrf-3qg7, PR #437).
   `url.JoinPath` cleans `..`, so `delete_flow` with id
   `../nodes/<module>` reached `DELETE /nodes/<module>` and uninstalled a
   palette package while reporting a deleted flow. `get_flow` built its path
