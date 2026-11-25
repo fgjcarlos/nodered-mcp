@@ -232,7 +232,9 @@ func (s *Server) registerTools() {
 				"port, which is easy to get wrong by hand — replacing a port instead of "+
 				"adding to it silently drops existing connections. This appends to the "+
 				"port you name, grows the array if that port does not exist yet (a switch "+
-				"node's later outputs), and does nothing if the connection already exists.\n\n"+
+				"node's later outputs), and does nothing if the connection already exists. "+
+				"A port at or past the source's declared outputs (function and switch nodes "+
+				"carry an outputs count) is refused: the runtime would never send on it.\n\n"+
 				"Both nodes must be in the same tab.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
 				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,

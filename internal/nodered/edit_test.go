@@ -465,3 +465,15 @@ func TestAddNode_AcceptsValidType(t *testing.T) {
 		t.Fatalf("expected no error for valid type, got: %v", err)
 	}
 }
+
+// A wire on a port the node does not have is dead: the runtime never sends on
+// it. n2 declares "outputs":1, so port 1 must be refused, not reported wired.
+func TestConnectNodesRefusesAPortBeyondDeclaredOutputs(t *testing.T) {
+	_, err := ConnectNodesInFlow(RawFlow(sampleTab), "n2", 1, "n3")
+	if err == nil || !strings.Contains(err.Error(), "1 output") {
+		t.Fatalf("expected a refusal naming the output count, got %v", err)
+	}
+	if _, err := ConnectNodesInFlow(RawFlow(sampleTab), "n2", 0, "n1"); err != nil {
+		t.Errorf("port 0 of a 1-output node must still connect: %v", err)
+	}
+}

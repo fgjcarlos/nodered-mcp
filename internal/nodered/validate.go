@@ -46,6 +46,10 @@ const (
 	// silently skipped such nodes, which let the corruption be written to
 	// the runtime and break every later edit through the MCP.
 	IssueInvalidWires FlowIssueKind = "invalid_wires"
+	// IssueWireBeyondOutputs is a wire on a port at or past the node's
+	// declared "outputs". The runtime never sends on it, so the target
+	// never receives anything. Advisory: the write guard does not block it.
+	IssueWireBeyondOutputs FlowIssueKind = "wire_beyond_outputs"
 	// IssueBadZ is a node whose "z" field references neither the owning
 	// tab nor any existing node in this document. Node-RED silently
 	// rewrites a bad z to the owning tab id, which loses the wire the
@@ -217,6 +221,22 @@ func wireDanglingMessage(src string, port int, tgt string) string {
 	return "node \"" + src + "\" wires port " + strconv.Itoa(port) + " to unknown node \"" + tgt + "\"; Node-RED accepts dangling wires silently and the flow never delivers to that endpoint"
 }
 
+// portIssues reports the problems of one output port's targets: targets
+// missing from the document, and any target at all on a port the node does
+// not have (dead).
+func portIssues(src string, port int, targets []string, ids map[string]bool, dead bool) []FlowIssue {
+	var issues []FlowIssue
+	for _, tgt := range targets {
+		if !ids[tgt] {
+			issues = append(issues, FlowIssue{Kind: IssueDanglingWire, NodeID: src, Target: tgt, Message: wireDanglingMessage(src, port, tgt)})
+		} else if dead {
+			issues = append(issues, FlowIssue{Kind: IssueWireBeyondOutputs, NodeID: src, Target: tgt,
+				Message: fmt.Sprintf("node %q wires port %d to %q but declares fewer outputs; the runtime never sends on that port", src, port, tgt)})
+		}
+	}
+	return issues
+}
+
 // validateWires walks every node in nodes+configs, reports wires whose
 // shape decodeWires rejects (IssueInvalidWires) and wires that point at
 // ids absent from the union of both collections (IssueDanglingWire).
@@ -257,17 +277,9 @@ func validateWires(nodes, configs []map[string]json.RawMessage, ids map[string]b
 				continue
 			}
 			src := nodeID(node)
+			outputs, declared := declaredOutputs(node)
 			for port, targets := range wires {
-				for _, tgt := range targets {
-					if !ids[tgt] {
-						issues = append(issues, FlowIssue{
-							Kind:    IssueDanglingWire,
-							NodeID:  src,
-							Target:  tgt,
-							Message: wireDanglingMessage(src, port, tgt),
-						})
-					}
-				}
+				issues = append(issues, portIssues(src, port, targets, ids, declared && port >= outputs)...)
 			}
 		}
 	}

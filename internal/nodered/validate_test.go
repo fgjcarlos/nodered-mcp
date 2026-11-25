@@ -374,3 +374,18 @@ func TestSetDisabledInFlow_MalformedDocument(t *testing.T) {
 		t.Fatal("expected an error on malformed input, got nil")
 	}
 }
+
+func TestValidateFlowReportsWiresBeyondDeclaredOutputs(t *testing.T) {
+	flow := `{"id":"t","label":"t","nodes":[
+	  {"id":"f","type":"function","x":1,"y":1,"outputs":1,"wires":[[],[],["d"]]},
+	  {"id":"g","type":"function","x":1,"y":2,"outputs":1,"wires":[["d"],[]]},
+	  {"id":"d","type":"debug","x":2,"y":1,"wires":[]}]}`
+	issues := ValidateFlow(RawFlow(flow))
+	if len(issues) != 1 || issues[0].Kind != IssueWireBeyondOutputs || issues[0].NodeID != "f" || issues[0].Target != "d" {
+		t.Fatalf("want one wire_beyond_outputs issue on f -> d, got %+v", issues)
+	}
+	// Advisory only: the write guard must keep accepting the document.
+	if err := validateFlowWires(RawFlow(flow)); err != nil {
+		t.Errorf("write guard must not block on wire_beyond_outputs: %v", err)
+	}
+}

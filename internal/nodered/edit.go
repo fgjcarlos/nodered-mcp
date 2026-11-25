@@ -464,6 +464,10 @@ func ConnectNodesInFlow(flow RawFlow, fromID string, port int, toID string) (Raw
 		return nil, fmt.Errorf("cannot wire to %q: no node with that id in this flow", toID)
 	}
 
+	if n, ok := declaredOutputs((*fromCollection)[from]); ok && port >= n {
+		return nil, fmt.Errorf("node %q has %d output(s); port %d does not exist and a wire there would never fire", fromID, n, port)
+	}
+
 	wires, err := decodeWires((*fromCollection)[from])
 	if err != nil {
 		return nil, err
@@ -484,6 +488,18 @@ func ConnectNodesInFlow(flow RawFlow, fromID string, port int, toID string) (Raw
 		return nil, err
 	}
 	return doc.encode()
+}
+
+// declaredOutputs returns the node's numeric "outputs" field (function and
+// switch nodes carry one). ok is false when the node does not declare it, as
+// for most core nodes and for subflow instances, whose count lives on the
+// definition.
+func declaredOutputs(node map[string]json.RawMessage) (n int, ok bool) {
+	var f float64
+	if raw, has := node["outputs"]; !has || json.Unmarshal(raw, &f) != nil || f < 0 {
+		return 0, false
+	}
+	return int(f), true
 }
 
 // decodeWires reads a node's wires array. A node without wires (a config node,

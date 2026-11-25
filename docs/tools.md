@@ -198,8 +198,8 @@ proceed.
 | `add_node` | `GET /flows` + `POST /flows` | write | |
 | `update_node` | `GET /flows` + `POST /flows` | write | Merges properties |
 | `delete_node` | `GET /flows` + `POST /flows` | write | Cleans incoming wires |
-| `connect_nodes` | `GET /flows` + `POST /flows` | write | |
-| `validate_flow` | local | read | Dry-run structural check; a flat array is judged as a whole: unique ids across tabs, subflows and config nodes, a type on every entry, and an owner (tab or subflow) for every node and group. An instance of a subflow not in the payload is not reported |
+| `connect_nodes` | `GET /flows` + `POST /flows` | write | Refuses a port at or past the source's declared `outputs` |
+| `validate_flow` | local | read | Dry-run structural check; a flat array is judged as a whole: unique ids across tabs, subflows and config nodes, a type on every entry, and an owner (tab or subflow) for every node and group. An instance of a subflow not in the payload is not reported. A wire on a port past a node's declared `outputs` is reported as `wire_beyond_outputs` (advisory; writes are not blocked) |
 | `disable_flow` | `GET /flows` + `POST /flows` | write | |
 | `enable_flow` | `GET /flows` + `POST /flows` | write | |
 | `inject_node` | `POST /inject/:id` | action | Excluded from `--read-only`; optional payload |
