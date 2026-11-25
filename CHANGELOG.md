@@ -6,6 +6,30 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Security
+
+- Refuse flow and inject ids that escape their admin API path segment.
+  `url.JoinPath` cleans `..`, so `delete_flow` with id
+  `../nodes/<module>` reached `DELETE /nodes/<module>` and uninstalled a
+  palette package while reporting a deleted flow; `get_flow` and
+  `inject_node` built their paths the same way. Ids containing `/`, `\`,
+  `%`, or equal to `.` or `..` are now refused before any request, with the
+  guard the context endpoints already used. Affected versions: 0.9.0 and
+  earlier.
+
+### Changed
+
+- `connect_nodes` refuses a port at or past the source node's output count
+  (a function or trigger node's `outputs`, a switch node's rules) instead of
+  reporting a wire the runtime never sends on.
+
+### Fixed
+
+- The 21 read tools now advertise `readOnlyHint: true`,
+  `destructiveHint: false` and `idempotentHint: true`. No tool set
+  annotations before, so every tool, reads included, inherited mcp-go's
+  destructive default and clients asked for approval on reads.
+
 ## [0.9.0] - 2026-11-21
 
 ### Security

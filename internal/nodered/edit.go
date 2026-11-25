@@ -482,6 +482,12 @@ func ConnectNodesInFlow(flow RawFlow, fromID string, port int, toID string) (Raw
 		return nil, fmt.Errorf("cannot wire to %q: no node with that id in this flow", toID)
 	}
 
+	src := (*fromCollection)[from]
+	srcType, _ := jsTypeString(src["type"])
+	if n, ok := declaredOutputs(semanticNode{fromID, srcType, src}); ok && port >= n {
+		return nil, fmt.Errorf("node %q has %d output(s); port %d does not exist and a wire there would never fire", fromID, n, port)
+	}
+
 	wires, err := decodeWires((*fromCollection)[from])
 	if err != nil {
 		return nil, err

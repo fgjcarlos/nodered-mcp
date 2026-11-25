@@ -465,3 +465,23 @@ func TestAddNode_AcceptsValidType(t *testing.T) {
 		t.Fatalf("expected no error for valid type, got: %v", err)
 	}
 }
+
+// A wire on a port the node does not have is dead: the runtime never sends on
+// it. n2 declares "outputs":1, so port 1 must be refused, not reported wired.
+func TestConnectNodesRefusesAPortBeyondDeclaredOutputs(t *testing.T) {
+	_, err := ConnectNodesInFlow(RawFlow(sampleTab), "n2", 1, "n3")
+	if err == nil || !strings.Contains(err.Error(), "1 output") {
+		t.Fatalf("expected a refusal naming the output count, got %v", err)
+	}
+	if _, err := ConnectNodesInFlow(RawFlow(sampleTab), "n2", 0, "n1"); err != nil {
+		t.Errorf("port 0 of a 1-output node must still connect: %v", err)
+	}
+	// A switch has one output per rule.
+	sw := `{"id":"t","nodes":[{"id":"s","type":"switch","x":1,"y":1,"rules":[{"t":"eq"},{"t":"else"}],"wires":[[],[]]},{"id":"d","type":"debug","x":2,"y":1,"wires":[]}]}`
+	if _, err := ConnectNodesInFlow(RawFlow(sw), "s", 1, "d"); err != nil {
+		t.Errorf("port 1 of a 2-rule switch must connect: %v", err)
+	}
+	if _, err := ConnectNodesInFlow(RawFlow(sw), "s", 2, "d"); err == nil {
+		t.Errorf("port 2 of a 2-rule switch must be refused")
+	}
+}

@@ -35,6 +35,9 @@ func (c *Client) GetFlow(ctx context.Context, id string) (RawFlow, error) {
 	if id == "" {
 		return nil, errors.New("flow id is required")
 	}
+	if err := checkPathSegment("flow id", id); err != nil {
+		return nil, err
+	}
 	var raw RawFlow
 	err := c.do(ctx, "GET", "/flow/"+id, nil, &raw)
 	if err == nil {
@@ -238,6 +241,9 @@ func (c *Client) DeleteFlow(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("flow id is required")
 	}
+	if err := checkPathSegment("flow id", id); err != nil {
+		return err
+	}
 	if _, err := c.snapshotFlows(ctx); err != nil {
 		return err
 	}
@@ -368,6 +374,9 @@ func (c *Client) InjectNode(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("inject node id is required")
 	}
+	if err := checkPathSegment("inject node id", id); err != nil {
+		return err
+	}
 	nodeType, ok, err := c.nodeType(ctx, id)
 	if err != nil {
 		// Lookup failed (network, parsing, runtime). Surface the
@@ -406,6 +415,9 @@ func (c *Client) InjectNode(ctx context.Context, id string) error {
 func (c *Client) InjectNodeWithBody(ctx context.Context, id string, body json.RawMessage) error {
 	if id == "" {
 		return errors.New("inject node id is required")
+	}
+	if err := checkPathSegment("inject node id", id); err != nil {
+		return err
 	}
 	if len(body) == 0 {
 		return errors.New("inject body is required when using InjectNodeWithBody")

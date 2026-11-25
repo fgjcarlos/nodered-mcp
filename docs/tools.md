@@ -208,7 +208,7 @@ contacted. Node tools such as `add_node` still use `flow_id` for the tab, and
 | `add_node` | `GET /flows` + `POST /flows` | write | Confirms when supplied outgoing wires were kept; suggests `connect_nodes` only when there are no outgoing wires |
 | `update_node` | `GET /flows` + `POST /flows` | write | Merges properties |
 | `delete_node` | `GET /flows` + `POST /flows` | write | Cleans incoming wires |
-| `connect_nodes` | `GET /flows` + `POST /flows` | write | |
+| `connect_nodes` | `GET /flows` + `POST /flows` | write | Refuses a port at or past the source's output count (function and trigger `outputs`, switch rules) |
 | `validate_flow` | local | read | Dry-run structural and function-node JavaScript syntax checks plus advisory warnings for selected core nodes. `func`, `initialize` and `finalize` are parsed as async function bodies; syntax issues report the node, field and location. A flat array is judged as a whole: unique ids across tabs, subflows and config nodes, a type on every entry, and an owner (tab or subflow) for every node and group. An instance of a subflow not in the payload is not a structural issue |
 | `disable_flow` | `GET /flows` + `POST /flows` | write | |
 | `enable_flow` | `GET /flows` + `POST /flows` | write | |

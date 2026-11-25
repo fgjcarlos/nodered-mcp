@@ -351,6 +351,11 @@ func degradedTools(nrVersion nodered.Version, tools []mcp.Tool) int {
 
 // addReadTool registers a side-effect-free tool with bounded transport retries.
 func (s *Server) addReadTool(tool mcp.Tool, handler server.ToolHandlerFunc) {
+	// mcp-go defaults every tool to destructive; clients use these hints to
+	// decide what needs approval. Write tools keep the conservative default.
+	tool.Annotations.ReadOnlyHint = mcp.ToBoolPtr(true)
+	tool.Annotations.DestructiveHint = mcp.ToBoolPtr(false)
+	tool.Annotations.IdempotentHint = mcp.ToBoolPtr(true)
 	s.attachMinVersion(&tool)
 	s.mcpServer.AddTool(tool, s.withTimeoutRetry(tool.Name, handler))
 	s.tools = append(s.tools, tool)
