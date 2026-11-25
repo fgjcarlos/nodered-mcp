@@ -14,6 +14,28 @@ import (
 	"github.com/fgjcarlos/nodered-mcp/internal/nodered"
 )
 
+func flowIDArg(req mcp.CallToolRequest) (string, error) {
+	args := req.GetArguments()
+	id, idOK := args["id"].(string)
+	if _, supplied := args["id"]; supplied && !idOK {
+		return "", errors.New(`argument "id" is not a string`)
+	}
+	flowID, flowIDOK := args["flow_id"].(string)
+	if _, supplied := args["flow_id"]; supplied && !flowIDOK {
+		return "", errors.New(`argument "flow_id" is not a string`)
+	}
+	if idOK && flowIDOK && id != flowID {
+		return "", errors.New("id and flow_id must match")
+	}
+	if id == "" {
+		id = flowID
+	}
+	if id == "" {
+		return "", errors.New("id or flow_id is required")
+	}
+	return id, nil
+}
+
 // handleListFlows returns a map of the instance, compact by default.
 //
 // The full flow config of a real instance runs to tens of thousands of tokens,
@@ -115,7 +137,7 @@ func (s *Server) handleSearchFlows(ctx context.Context, req mcp.CallToolRequest)
 
 // handleGetFlow returns a single flow tab as JSON.
 func (s *Server) handleGetFlow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	id, err := req.RequireString("id")
+	id, err := flowIDArg(req)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -163,7 +185,7 @@ func (s *Server) handleCreateFlow(ctx context.Context, req mcp.CallToolRequest) 
 // handleUpdateFlow replaces an existing flow tab with a new JSON document.
 // The flow argument accepts either a JSON-encoded string or a flow object.
 func (s *Server) handleUpdateFlow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	id, err := req.RequireString("id")
+	id, err := flowIDArg(req)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -328,7 +350,7 @@ func (s *Server) handleConnectNodes(ctx context.Context, req mcp.CallToolRequest
 
 // handleDeleteFlow deletes a flow tab and all its nodes.
 func (s *Server) handleDeleteFlow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	id, err := req.RequireString("id")
+	id, err := flowIDArg(req)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -384,7 +406,7 @@ func (s *Server) handleValidateFlow(_ context.Context, req mcp.CallToolRequest) 
 
 // handleDisableFlow stops a flow tab from running without deleting it.
 func (s *Server) handleDisableFlow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	id, err := req.RequireString("id")
+	id, err := flowIDArg(req)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -401,7 +423,7 @@ func (s *Server) handleDisableFlow(ctx context.Context, req mcp.CallToolRequest)
 
 // handleEnableFlow re-enables a previously disabled flow tab.
 func (s *Server) handleEnableFlow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	id, err := req.RequireString("id")
+	id, err := flowIDArg(req)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

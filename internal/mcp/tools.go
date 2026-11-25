@@ -6,6 +6,13 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+func flowTabIDArgs(description string) mcp.ToolOption {
+	return func(tool *mcp.Tool) {
+		mcp.WithString("id", mcp.Description(description+" Supply id or flow_id."))(tool)
+		mcp.WithString("flow_id", mcp.Description("Alias for id. Supply one or the other; if both are set, they must match."))(tool)
+	}
+}
+
 // registerTools wires every MCP tool to its handler.
 //
 // Each tool is registered through addReadTool or addWriteTool. That choice is
@@ -69,8 +76,7 @@ func (s *Server) registerTools() {
 				"Note: Node-RED redacts credential values in API responses; credential "+
 				"fields are present but their values are always empty strings.",
 		),
-		mcp.WithString("id", mcp.Required(),
-			mcp.Description("The flow tab ID (as shown by list_flows).")),
+		flowTabIDArgs("The flow tab ID (as shown by list_flows)."),
 	)
 	s.addReadTool(getFlow, s.handleGetFlow)
 
@@ -105,8 +111,7 @@ func (s *Server) registerTools() {
 				"another instance (or paste it into the editor). Wires round-trip intact. "+
 				"Read-only.",
 		),
-		mcp.WithString("id", mcp.Required(),
-			mcp.Description("The flow tab ID to export.")),
+		flowTabIDArgs("The flow tab ID to export."),
 	)
 	s.addReadTool(exportFlow, s.handleExportFlow)
 
@@ -146,8 +151,7 @@ func (s *Server) registerTools() {
 				"A backup of the current configuration is taken automatically before the "+
 				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
 		),
-		mcp.WithString("id", mcp.Required(),
-			mcp.Description("The flow tab ID to replace.")),
+		flowTabIDArgs("The flow tab ID to replace."),
 		mcp.WithString("flow", mcp.Required(),
 			mcp.Description("The complete new flow document as a JSON string.")),
 	)
@@ -255,8 +259,7 @@ func (s *Server) registerTools() {
 				"A backup of the current configuration is taken automatically before the "+
 				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
 		),
-		mcp.WithString("id", mcp.Required(),
-			mcp.Description("The flow tab ID to delete.")),
+		flowTabIDArgs("The flow tab ID to delete."),
 	)
 	s.addWriteTool(deleteFlow, s.handleDeleteFlow)
 
@@ -300,8 +303,7 @@ func (s *Server) registerTools() {
 				"A backup of the current configuration is taken automatically before the "+
 				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
 		),
-		mcp.WithString("id", mcp.Required(),
-			mcp.Description("The flow tab ID to disable (as shown by list_flows).")),
+		flowTabIDArgs("The flow tab ID to disable (as shown by list_flows)."),
 	)
 	s.addWriteTool(disableFlow, s.handleDisableFlow)
 
@@ -313,8 +315,7 @@ func (s *Server) registerTools() {
 				"A backup of the current configuration is taken automatically before the "+
 				"write; restore_backup recovers the flow structure only. "+backupRecoveryNotice,
 		),
-		mcp.WithString("id", mcp.Required(),
-			mcp.Description("The flow tab ID to enable (as shown by list_flows).")),
+		flowTabIDArgs("The flow tab ID to enable (as shown by list_flows)."),
 	)
 	s.addWriteTool(enableFlow, s.handleEnableFlow)
 
