@@ -13,8 +13,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Refuse flow and inject ids that escape their admin API path segment.
   `url.JoinPath` cleans `..`, so `delete_flow` with id
   `../nodes/<module>` reached `DELETE /nodes/<module>` and uninstalled a
-  palette package while reporting a deleted flow; `get_flow` and
-  `inject_node` built their paths the same way. Ids containing `/`, `\`,
+  palette package while reporting a deleted flow. `get_flow` built its path
+  the same way and stays available in read-only mode, so it could read Admin
+  API endpoints no read tool exposes, such as `/credentials/:type/:id`
+  (non-password credential fields like a broker username); `inject_node` was
+  not practically reachable. Ids containing `/`, `\`,
   `%`, or equal to `.` or `..` are now refused before any request, with the
   guard the context endpoints already used. Affected versions: 0.9.0 and
   earlier.
