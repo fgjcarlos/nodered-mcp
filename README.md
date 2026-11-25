@@ -165,6 +165,10 @@ Configure the limiter with these environment variables:
 
 ## Documentation
 
+When using [flow-tab tools](./docs/tools.md#flows) such as `get_flow`, pass
+`flow_id` or the original `id`. If you pass both, they must match. Node tools
+such as `add_node` still use `flow_id` for the tab.
+
 The full reference lives in [`docs/`](./docs/):
 
 | Doc | Covers |

@@ -168,6 +168,11 @@ Configura el límite con estas variables de entorno:
 
 ## Documentación
 
+En las [herramientas de pestañas de flujo](./docs/tools.md#flows), como
+`get_flow`, pasa `flow_id` o el parámetro original `id`. Si pasas ambos,
+deben coincidir. Las herramientas de nodo, como `add_node`, siguen usando
+`flow_id` para identificar la pestaña.
+
 La referencia completa está en [`docs/`](./docs/):
 
 | Doc | Cubre |
