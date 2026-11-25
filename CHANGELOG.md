@@ -6,6 +6,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-25
+
 ### Security
 
 - Refuse flow and inject ids that escape their admin API path segment.
@@ -17,11 +19,35 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   guard the context endpoints already used. Affected versions: 0.9.0 and
   earlier.
 
+### Added
+
+- `validate_flow` reports advisory semantic warnings for selected core
+  nodes: `output_count_mismatch` (function, trigger and switch nodes),
+  `invalid_property_type` (change and switch nodes) and
+  `http_response_unreachable` (an `http in` with no reachable
+  `http response`). Warnings never block a write (#426).
+- Function node JavaScript (`func`, `initialize`, `finalize`) is parsed
+  before deployment; `validate_flow` reports `function_syntax` issues with
+  the node, field, line and column (#434).
+- `init --name` registers the server under a chosen name, so several
+  Node-RED instances can live side by side in one client config (#429).
+  Running several instances is documented (#430).
+- The flow tab tools (`get_flow`, `export_flow`, `update_flow`,
+  `delete_flow`, `disable_flow`, `enable_flow`) accept `flow_id` as an
+  alias of `id`; conflicting values are refused (#435).
+
 ### Changed
 
+- `create_flow`, `add_node`, `update_flow`, `update_node`, `set_flows` and
+  `restore_backup` refuse a function node whose JavaScript does not parse,
+  before the runtime is contacted. `force: true` skips reference
+  validation only, never the syntax check (#434).
 - `connect_nodes` refuses a port at or past the source node's output count
   (a function or trigger node's `outputs`, a switch node's rules) instead of
   reporting a wire the runtime never sends on.
+- The full backup credential notice is sent once, in the server
+  instructions, and repeated in the `delete_flow` response; write tool
+  descriptions carry a one-line reminder instead (#436).
 
 ### Fixed
 
@@ -29,6 +55,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `destructiveHint: false` and `idempotentHint: true`. No tool set
   annotations before, so every tool, reads included, inherited mcp-go's
   destructive default and clients asked for approval on reads.
+- `get_runtime_info` reports the Node-RED version `get_flows_state`
+  requires (#428).
+- `add_node` says when the outgoing wires it was given were kept, and
+  suggests `connect_nodes` only when there are none (#431).
+- HTTP 429 responses name the limit and the settings that tune it, with
+  `Retry-After` (#432).
+- A generic palette install failure explains what to check next (#433).
 
 ## [0.9.0] - 2026-11-21
 
@@ -919,7 +952,8 @@ Dependabot, pinned action SHAs, CODEOWNERS, and issue templates.
   now validates bearer tokens issued by an external Identity
   Provider when `MCP_OAUTH_ISSUER` is set.
 
-[Unreleased]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.7.2...v0.8.0
 [0.7.2]: https://github.com/fgjcarlos/nodered-mcp/compare/v0.7.1...v0.7.2
