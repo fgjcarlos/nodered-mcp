@@ -338,6 +338,9 @@ func setcontextSupportedHandler() http.Handler {
 		liveFlow["nodes"] = doc.Nodes
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		mu.Lock()
 		defer mu.Unlock()
 		switch {

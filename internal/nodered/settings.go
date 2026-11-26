@@ -146,20 +146,11 @@ func (c *Client) setFlows(ctx context.Context, flows []json.RawMessage, validate
 	// all, and an instance of a subflow whose definition is missing are
 	// all refused here instead of being installed. Unchecked recovery
 	// skips those references, but never JavaScript syntax.
-	if validate {
-		err = validateEffectiveConfig(flows)
-	} else {
-		err = validateFunctionSyntaxInFlows(flows)
-	}
-	if err != nil {
-		return err
-	}
 	ctx, cancel := context.WithTimeout(ctx, SettingsStateTimeout)
 	defer cancel()
-
-	body, err := json.Marshal(flows)
+	body, err := c.prepareFullDeploy(ctx, flows, validate)
 	if err != nil {
-		return fmt.Errorf("encoding flows: %w", err)
+		return err
 	}
 	if _, err := c.snapshotFlows(ctx); err != nil {
 		return err
@@ -167,6 +158,26 @@ func (c *Client) setFlows(ctx context.Context, flows []json.RawMessage, validate
 	return c.do(ctx, "POST", "/flows", json.RawMessage(body), nil, func(r *http.Request) {
 		r.Header.Set("Node-RED-Deployment-Type", "full")
 	})
+}
+
+func (c *Client) prepareFullDeploy(ctx context.Context, flows []json.RawMessage, validate bool) (json.RawMessage, error) {
+	var err error
+	if validate {
+		err = validateEffectiveConfig(flows)
+	} else {
+		err = validateFunctionSyntaxInFlows(flows)
+	}
+	if err != nil {
+		return nil, err
+	}
+	body, err := json.Marshal(flows)
+	if err != nil {
+		return nil, fmt.Errorf("encoding flows: %w", err)
+	}
+	if validate {
+		return body, c.validateRegisteredNodeTypes(ctx, body, flows)
+	}
+	return body, nil
 }
 
 // hasTabEntry reports whether the array carries an entry of type "tab".

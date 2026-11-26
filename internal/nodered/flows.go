@@ -171,7 +171,11 @@ func (c *Client) CreateFlow(ctx context.Context, flow RawFlow) (RawFlow, error) 
 	if err != nil {
 		return nil, fmt.Errorf("backup: fetching current flows: %w", err)
 	}
-	if err := c.deniedSubflowInstance(flow, FlowArray(current)); err != nil {
+	effective := FlowArray(current)
+	if err := c.deniedSubflowInstance(flow, effective); err != nil {
+		return nil, err
+	}
+	if err := c.validateRegisteredNodeTypes(ctx, flow, effective); err != nil {
 		return nil, err
 	}
 	if _, err := c.saveFlowSnapshot(current); err != nil {

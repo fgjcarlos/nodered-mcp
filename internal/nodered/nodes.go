@@ -75,6 +75,7 @@ func (c *Client) InstallNode(ctx context.Context, module, version string) (*Inst
 	if err := c.do(ctx, "POST", "/nodes", body, &info); err != nil {
 		return nil, err
 	}
+	c.invalidateRegisteredTypes()
 	return &info, nil
 }
 
@@ -93,7 +94,11 @@ func (c *Client) UninstallNode(ctx context.Context, module string) error {
 	ctx, cancel := context.WithTimeout(ctx, InstallTimeout)
 	defer cancel()
 
-	return c.do(ctx, "DELETE", nodeInfoPath(module, ""), nil, nil)
+	if err := c.do(ctx, "DELETE", nodeInfoPath(module, ""), nil, nil); err != nil {
+		return err
+	}
+	c.invalidateRegisteredTypes()
+	return nil
 }
 
 // SetNodeEnabled enables or disables an installed module, or a single node
@@ -112,5 +117,6 @@ func (c *Client) SetNodeEnabled(ctx context.Context, module, set string, enabled
 	if err := c.do(ctx, "PUT", nodeInfoPath(module, set), map[string]bool{"enabled": enabled}, &info); err != nil {
 		return nil, err
 	}
+	c.invalidateRegisteredTypes()
 	return &info, nil
 }

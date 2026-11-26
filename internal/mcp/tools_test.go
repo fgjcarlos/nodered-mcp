@@ -597,6 +597,9 @@ func TestNodeParam(t *testing.T) {
 func TestNormalizeFlowDoc_FlatArray(t *testing.T) {
 	var putBody []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flows":
 			// Revisioned deployment base and backup.
@@ -710,6 +713,9 @@ func TestSetContext_HappyPathAndHelperReuse(t *testing.T) {
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		mu.Lock()
 		defer mu.Unlock()
 		switch {
@@ -844,6 +850,9 @@ func TestSetContext_RetriesOnFirstCall404(t *testing.T) {
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		mu.Lock()
 		defer mu.Unlock()
 		switch {
@@ -947,6 +956,9 @@ func TestSetContext_NoRetryWhenHelperAlreadyProvisioned(t *testing.T) {
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		mu.Lock()
 		defer mu.Unlock()
 		switch {
@@ -1023,6 +1035,9 @@ func TestRestoreBackup_ClearsSetContextHelper(t *testing.T) {
 	var restoredBody []byte
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flows":
 			_, _ = w.Write(mockFlowSnapshot(r, []byte(`{"id":"other","label":"Other"}`), liveFlow))
@@ -1745,6 +1760,9 @@ func TestCreateFlow_RejectsDeniedNodeType(t *testing.T) {
 func TestCreateFlow_AllowsNonDeniedNodeType(t *testing.T) {
 	var posted bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flows":
 			_, _ = w.Write([]byte(`[]`))
@@ -1787,6 +1805,9 @@ func TestCreateFlow_AllowsNonDeniedNodeType(t *testing.T) {
 func TestCreateFlow_EmptyDenylistAllowsExec(t *testing.T) {
 	var posted bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flows":
 			_, _ = w.Write([]byte(`[]`))

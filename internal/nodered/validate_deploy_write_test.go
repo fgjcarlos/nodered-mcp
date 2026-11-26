@@ -65,6 +65,9 @@ func TestSetFlows_RefusesSubflowInstanceWithoutDefinition(t *testing.T) {
 func TestSetFlows_DeploysAValidConfiguration(t *testing.T) {
 	var posted bool
 	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flows":
 			_, _ = w.Write([]byte(`[{"id":"cur","type":"tab","label":"Current"}]`))

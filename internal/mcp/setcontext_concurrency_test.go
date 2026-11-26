@@ -88,6 +88,9 @@ func TestSetContextHelper_ConcurrentFirstCallersProvisionOnce(t *testing.T) {
 	var liveMu sync.Mutex
 	liveFlow := []byte(`{"id":"runtime_helper_tab","label":"__mcp_context_helper__","nodes":[]}`)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flows":
 			// Serve the same live state for backups and revisioned edits.
@@ -193,6 +196,9 @@ func TestSetContextHelper_ProvisioningFailureIsRetryable(t *testing.T) {
 	var liveMu sync.Mutex
 	liveFlow := []byte(`{"id":"runtime_helper_tab","label":"__mcp_context_helper__","nodes":[]}`)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flows":
 			liveMu.Lock()
@@ -348,6 +354,9 @@ func TestSetContext_RestoreCannotDeployWhileInFlightInjectHoldsLock(t *testing.T
 	// per created flow.
 	var nextFlowID int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		switch {
 		case r.Method == "POST" && r.URL.Path == "/flow":
 			nextFlowID++

@@ -163,6 +163,9 @@ func TestSetFlows_RejectsNonTabOnlyArray(t *testing.T) {
 func TestSetFlows_AcceptsArrayWithAtLeastOneTab(t *testing.T) {
 	dir := t.TempDir()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flows":
 			_, _ = w.Write([]byte(`[{"id":"old","type":"tab","label":"Old"}]`))

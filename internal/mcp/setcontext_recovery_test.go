@@ -27,6 +27,9 @@ type helperRuntime struct {
 }
 
 func (rt *helperRuntime) serve(w http.ResponseWriter, r *http.Request) {
+	if serveTestPalette(w, r) {
+		return
+	}
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 	switch {
@@ -269,6 +272,9 @@ func TestSetContextRecoveryConcurrentWrites(t *testing.T) {
 			armed, release, mutated := make(chan struct{}), make(chan struct{}), make(chan struct{})
 			var once sync.Once
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if serveTestPalette(w, r) {
+					return
+				}
 				if strings.HasPrefix(r.URL.Path, "/inject/") {
 					close(armed)
 					<-release

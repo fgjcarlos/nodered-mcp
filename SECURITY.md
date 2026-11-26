@@ -71,8 +71,8 @@ It covers every write surface that can carry a node type:
 `set_context` helper is subject to the same policy: a denylist naming
 `function` or `inject` stops the helper from being provisioned.
 
-The check is **case-sensitive** because Node-RED node types are. It
-is per-node — a single bad node rejects the entire write (so a model
+The check ignores case and surrounding whitespace. Node-RED registration
+still uses exact type names. The denylist check is per-node — a single bad node rejects the entire write (so a model
 that builds a flow mixing safe and dangerous types gets the same
 defence as one that ships a payload of pure `exec`).
 
