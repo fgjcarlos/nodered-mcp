@@ -154,6 +154,9 @@ func NewClient(opts Options) (*Client, error) {
 	}, nil
 }
 
+// AuthRequiredMessage tells operators how to configure Node-RED admin credentials.
+const AuthRequiredMessage = "Node-RED requires authentication: configure NODERED_USERNAME/NODERED_PASSWORD or NODERED_TOKEN"
+
 // APIError is returned when Node-RED responds with a non-2xx status code.
 type APIError struct {
 	StatusCode int
@@ -163,7 +166,11 @@ type APIError struct {
 }
 
 func (e *APIError) Error() string {
-	msg := fmt.Sprintf("nodered %s %s: HTTP %d: %s", e.Method, e.Path, e.StatusCode, e.Body)
+	body := e.Body
+	if e.StatusCode == http.StatusUnauthorized {
+		body = AuthRequiredMessage
+	}
+	msg := fmt.Sprintf("nodered %s %s: HTTP %d: %s", e.Method, e.Path, e.StatusCode, body)
 	// A 404 with an Express-style "Cannot METHOD /path" body usually means
 	// the admin API does not expose that endpoint on this Node-RED version,
 	// not that the URL is wrong. Surface the most common guard so the

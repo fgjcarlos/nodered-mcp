@@ -607,7 +607,10 @@ Conviene conocer dos propiedades:
   una operación posterior sujeta a versión vuelve a sondear.
 
 Cuando no se puede detectar la versión, `get_runtime_info` informa de la
-capacidad como `unknown`. Las llamadas que comprueban la versión **no** se
+capacidad como `unknown`. Si Node-RED deniega el acceso a `/settings` con `401`
+o `403`, la herramienta devuelve en su lugar un error que indica qué
+credenciales configurar (consulta [Solución de problemas](troubleshooting.md)).
+Las llamadas que comprueban la versión **no** se
 rechazan solo por ese motivo. Su mensaje de éxito lleva el sufijo "Node-RED
 version was not detected; this call was not verified against the minimum
 version".

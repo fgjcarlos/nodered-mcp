@@ -210,7 +210,7 @@ func TestRuntimeProbe_ReportsObservedStreamState(t *testing.T) {
 	}
 	s := &Server{nrClient: c, debugStream: true}
 
-	p := s.runtimeProbe(context.Background())
+	p := s.runtimeProbe(context.Background(), nil)
 	if p.DebugStream.State != StreamStateUnavailable {
 		t.Errorf("debug stream state = %q, want unavailable (no tail was built)", p.DebugStream.State)
 	}
@@ -267,7 +267,7 @@ func TestRuntimeProbe_ConnectedStreamIsAvailable(t *testing.T) {
 	}
 
 	s := &Server{nrClient: c, debugStream: true, statusTail: tail}
-	p := s.runtimeProbe(context.Background())
+	p := s.runtimeProbe(context.Background(), nil)
 	if p.StatusStream.State != StreamStateConnected {
 		t.Errorf("status stream state = %q, want connected", p.StatusStream.State)
 	}
@@ -349,7 +349,7 @@ func TestRuntimeProbe_BuiltButNeverRunTailIsUnknown(t *testing.T) {
 	}
 	s := &Server{nrClient: c, debugStream: true, statusTail: tail}
 
-	p := s.runtimeProbe(context.Background())
+	p := s.runtimeProbe(context.Background(), nil)
 	if p.StatusStream.State != StreamStateUnknown {
 		t.Errorf("status stream state = %q, want unknown (the tail never dialled)", p.StatusStream.State)
 	}
