@@ -64,7 +64,7 @@ func (c *Client) editFlow(ctx context.Context, flowID string, edit func(tab RawF
 	// deployFlowUpdateOn is the snapshot twin of deployFlowUpdate; the
 	// snapshot was already read, and reading it again would be a second
 	// snapshot — the very thing this path exists to avoid.
-	return c.deployFlowUpdateOn(ctx, flowID, next, snap)
+	return c.deployFlowUpdateOn(ctx, flowID, next, snap, false)
 }
 
 // AddNode appends a node to a flow tab.
@@ -85,7 +85,11 @@ func (c *Client) AddNode(ctx context.Context, flowID string, node json.RawMessag
 		if err := c.deniedSubflowInstance(node, flows); err != nil {
 			return nil, err
 		}
-		return AddNodeToFlow(f, node)
+		next, err := AddNodeToFlow(f, node)
+		if err != nil {
+			return nil, err
+		}
+		return next, c.validateRegisteredNodeTypes(ctx, node, flows)
 	})
 }
 
@@ -117,6 +121,9 @@ func (c *Client) UpdateNode(ctx context.Context, flowID, nodeID string, patch ma
 			if issues := validateFunctionNode((*collection)[index]); len(issues) > 0 {
 				return nil, &FlowGuardError{Message: issues[0].Message}
 			}
+		}
+		if raw, found := nodeRawByID(next, nodeID); found {
+			return next, c.validateRegisteredNodeTypes(ctx, raw, flows)
 		}
 		return next, nil
 	})

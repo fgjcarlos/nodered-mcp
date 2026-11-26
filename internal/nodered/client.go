@@ -64,7 +64,8 @@ type Client struct {
 	// deployed (see policy.go). A nil policy allows every node type.
 	// Set once at construction time by the MCP layer, which owns the
 	// operator-facing policy.
-	policy NodePolicy
+	policy               NodePolicy
+	registeredTypesCache registeredTypeCache
 }
 
 // authStrategy encapsulates how Authorization headers are produced.

@@ -31,6 +31,9 @@ func orderedRuntime(t *testing.T, conflict bool) (*Client, *RawFlow, *int, *int)
 	state := RawFlow(orderedConfig)
 	reads, writes := 0, 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flow/a":
 			_, _ = io.WriteString(w, `{"id":"a","label":"A","nodes":[{"id":"n","type":"comment","z":"a","x":1,"y":2,"name":"before","unknown":42}],"configs":[{"id":"cfg","type":"broker","z":"a"}]}`)

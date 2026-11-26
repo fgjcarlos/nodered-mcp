@@ -46,6 +46,9 @@ func clientWithBackup(t *testing.T, url string) *Client {
 func TestUpdateFlow_RoundTripPreservesFields(t *testing.T) {
 	var putBody []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flow/tab1":
 			_, _ = w.Write([]byte(richFlow))
@@ -85,6 +88,9 @@ func TestUpdateFlow_RoundTripPreservesFields(t *testing.T) {
 func TestUpdateFlow_WritesBackupFirst(t *testing.T) {
 	dir := t.TempDir()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flows":
 			_, _ = w.Write(testRevisionedTab(t, richFlow))
@@ -228,6 +234,9 @@ func TestUpdateFlow_RejectsBadZ(t *testing.T) {
 func TestUpdateFlow_AcceptsValidZ(t *testing.T) {
 	var putPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flows":
 			_, _ = w.Write([]byte(`{"rev":"r","flows":[{"id":"tabA","type":"tab"}]}`))

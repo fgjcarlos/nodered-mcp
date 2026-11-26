@@ -75,7 +75,9 @@ equipo anfitrión). La lista es la
 [lista de bloqueo](glossary.md#lista-de-bloqueo-denylist) (denylist).
 
 Toda herramienta de escritura que pueda llevar un tipo de nodo está sujeta a la
-política `MCP_NODE_DENYLIST` (por defecto `exec,system`). La política se juzga
+política `MCP_NODE_DENYLIST` (por defecto `exec,system`), que no distingue
+mayúsculas de minúsculas e ignora los espacios al principio y al final.
+La política se juzga
 sobre la configuración efectiva que desplegaría la escritura, y el documento se
 recorre de forma recursiva, de modo que un tipo prohibido anidado dentro de la
 definición de un subflujo también se rechaza. `update_node` se juzga sobre el
@@ -87,7 +89,15 @@ pueden conocerlo de antemano: `update_node` y `connect_nodes` se juzgan sobre lo
 que producirían, así que su rechazo sigue a una lectura de la pestaña y nunca a
 un despliegue ni a una copia de seguridad.
 
-Superficies cubiertas: `create_flow`, `update_flow`, `add_node`,
+`add_node`, `update_node`, `create_flow`, `update_flow`, `import_flow` y
+`set_flows` también comprueban los tipos enviados contra la paleta del runtime
+antes de desplegar. El registro exige el nombre exacto. Se aceptan los tipos
+estructurales (`tab`, `group`, `junction`, `subflow`) y las instancias de
+subflujos existentes. Si no se puede leer la paleta, se rechaza la escritura.
+El cliente guarda la paleta en caché y la invalida tras cambios exitosos desde
+MCP; reinicia el servidor si cambias la paleta fuera de MCP.
+
+Superficies cubiertas por la lista de bloqueo: `create_flow`, `update_flow`, `add_node`,
 `update_node`, `connect_nodes`, `import_flow`, `set_flows`,
 `restore_backup`, `create_subflow`, `update_subflow`,
 `instantiate_subflow`. El propio ayudante `set_context` del servidor obedece la

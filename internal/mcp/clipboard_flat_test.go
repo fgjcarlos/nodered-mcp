@@ -47,6 +47,9 @@ func newFakeRuntime(t *testing.T, flat string) (*fakeRuntime, *Server) {
 }
 
 func (rt *fakeRuntime) serve(w http.ResponseWriter, r *http.Request) {
+	if serveTestPalette(w, r) {
+		return
+	}
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 	switch {

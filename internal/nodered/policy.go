@@ -9,8 +9,8 @@ import (
 // NodePolicy reports whether a node type may be deployed. It returns true
 // for an allowed type. A nil policy allows every node type.
 //
-// The comparison is exact and case-sensitive, because Node-RED node types
-// are case-sensitive. The policy answers one question — "may this node type
+// The predicate receives the original type name and decides how to compare
+// it. The policy answers one question — "may this node type
 // be deployed?" — and knows nothing about flows, subflows or the admin API;
 // the traversal below decides which node types a payload carries.
 type NodePolicy func(nodeType string) bool

@@ -51,6 +51,9 @@ func newExternalChangeRuntime(t *testing.T) *externalChangeRuntime {
 		rev:    "rev-2",
 	}
 	rt.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		rt.requests = append(rt.requests, r.Method+" "+r.URL.Path)
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flow/a":
@@ -181,6 +184,9 @@ func TestGranularEditConflictAfterTheSnapshotIsNotReplayed(t *testing.T) {
 func TestGranularEditAcceptsALinkOutWhoseWiresTheRuntimeOwns(t *testing.T) {
 	var posted []json.RawMessage
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flows":
 			_, _ = w.Write([]byte(`{"rev":"rev-1","flows":[

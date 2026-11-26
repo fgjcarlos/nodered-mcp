@@ -24,6 +24,9 @@ func TestConcurrentMutationsAreSerialized(t *testing.T) {
 	var runtimeMu sync.Mutex
 	tab := []byte(`{"id":"tabA","label":"A","nodes":[{"id":"n1","type":"inject","z":"tabA","x":1,"y":1,"wires":[]}]}`)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		runtimeMu.Lock()
 		defer runtimeMu.Unlock()
 		switch {

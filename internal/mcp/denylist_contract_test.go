@@ -219,6 +219,9 @@ func TestIssue329_InstanceParamsErrorPrecedence(t *testing.T) {
 func TestIssue329_AllowedTypesStillDeploy(t *testing.T) {
 	var deployed []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/flows":
 			_, _ = w.Write([]byte(`[]`))

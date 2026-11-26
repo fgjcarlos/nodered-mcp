@@ -30,6 +30,9 @@ const sampleTab = `{
 func TestImportFlow_HappyPath(t *testing.T) {
 	var postedBody []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/flows":
 			// backup endpoint
@@ -185,6 +188,9 @@ func TestImportFlow_AcceptsRawArray(t *testing.T) {
 func TestImportFlow_PreservesWires(t *testing.T) {
 	var postedBody []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/flows":
 			_, _ = w.Write([]byte(`{"rev":"x","flows":[]}`))

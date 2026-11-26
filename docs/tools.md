@@ -66,7 +66,8 @@ types (by default `exec` and `system`, which can run commands on the host).
 The list is the [denylist](glossary.md#denylist).
 
 Every write tool that can carry a node type is subject to the
-`MCP_NODE_DENYLIST` policy (default `exec,system`). The policy is
+`MCP_NODE_DENYLIST` policy (default `exec,system`), which ignores case and
+surrounding whitespace. The policy is
 judged on the effective configuration the write would deploy, and the
 document is walked recursively, so a forbidden type nested inside a
 subflow definition is refused too. `update_node` is judged on the node
@@ -77,7 +78,15 @@ front, before the runtime is contacted. Two surfaces cannot know it up front:
 `update_node` and `connect_nodes` are judged on what they would produce, so
 their refusal follows a read of the tab and never a deployment or a backup.
 
-Covered surfaces: `create_flow`, `update_flow`, `add_node`,
+`add_node`, `update_node`, `create_flow`, `update_flow`, `import_flow`, and
+`set_flows` also check submitted node types against the runtime palette before
+deploying. Registration uses exact type names. Built-in structural types
+(`tab`, `group`, `junction`, `subflow`) and instances of existing subflows are
+accepted. If the palette cannot be read, the write is refused. The client
+caches the palette and invalidates it after successful MCP palette changes;
+restart the server after changing the palette outside MCP.
+
+Denylist-covered surfaces: `create_flow`, `update_flow`, `add_node`,
 `update_node`, `connect_nodes`, `import_flow`, `set_flows`,
 `restore_backup`, `create_subflow`, `update_subflow`,
 `instantiate_subflow`. The server's own `set_context` helper obeys the

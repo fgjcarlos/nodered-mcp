@@ -62,13 +62,13 @@ func (c *Client) deployFlowUpdate(ctx context.Context, id string, flow RawFlow) 
 	if err := c.deniedSubflowInstance(flow, snap.flows); err != nil {
 		return err
 	}
-	return c.deployFlowUpdateOn(ctx, id, flow, snap)
+	return c.deployFlowUpdateOn(ctx, id, flow, snap, true)
 }
 
 // deployFlowUpdateOn deploys the tab on the snapshot the document was built
 // on: the entries of the tab are replaced in that snapshot's array, and the
 // deployment carries that snapshot's revision.
-func (c *Client) deployFlowUpdateOn(ctx context.Context, id string, flow RawFlow, snap *flowSnapshot) error {
+func (c *Client) deployFlowUpdateOn(ctx context.Context, id string, flow RawFlow, snap *flowSnapshot, checkTabTypes bool) error {
 	next, err := replaceFlowEntries(snap.flows, id, flow)
 	if err != nil {
 		return err
@@ -84,6 +84,11 @@ func (c *Client) deployFlowUpdateOn(ctx context.Context, id string, flow RawFlow
 	// impossible to repair.
 	if err := validateTabEntries(next, id); err != nil {
 		return err
+	}
+	if checkTabTypes {
+		if err := c.validateRegisteredNodeTypes(ctx, flow, next); err != nil {
+			return err
+		}
 	}
 	if _, err := c.saveFlowSnapshot(snap.raw); err != nil {
 		return err

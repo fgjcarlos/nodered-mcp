@@ -155,6 +155,9 @@ func TestAddNodeWiringMessage(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+				if serveTestPalette(w, r) {
+					return
+				}
 				switch {
 				case r.Method == http.MethodGet && r.URL.Path == "/flows":
 					_, _ = w.Write([]byte(snapshot))
@@ -211,6 +214,9 @@ func TestHandleUpdateNode_PartialPatch(t *testing.T) {
 	// that belong to it. The granular edits are built on it (issue #345).
 	const flowsList = `{"rev":"r","flows":[{"id":"tab1","type":"tab","disabled":false},{"id":"n1","type":"inject","z":"tab1","name":"tick","wires":[]}]}`
 	s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/flows":
 			_, _ = w.Write([]byte(flowsList))

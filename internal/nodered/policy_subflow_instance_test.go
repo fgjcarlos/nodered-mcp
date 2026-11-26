@@ -93,6 +93,9 @@ func subflowInstanceRuntime(t *testing.T) (*Client, *int) {
 	var mu sync.Mutex
 	deploys := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/flows":
 			_, _ = w.Write([]byte(flows))

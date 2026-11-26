@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -185,10 +186,10 @@ func buildDenylist(types []string) func(string) bool {
 	}
 	set := make(map[string]struct{}, len(types))
 	for _, t := range types {
-		set[t] = struct{}{}
+		set[strings.ToLower(strings.TrimSpace(t))] = struct{}{}
 	}
 	return func(t string) bool {
-		_, ok := set[t]
+		_, ok := set[strings.ToLower(strings.TrimSpace(t))]
 		return ok
 	}
 }
