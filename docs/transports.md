@@ -1,15 +1,47 @@
 # Transports
 
+**English** | [Español](es/transports.md)
+
+A [transport](glossary.md#transport) is the channel the AI app and
+`nodered-mcp` use to talk to each other. This page explains the two channels
+available, which one you should pick, and how to protect the network one. You
+only need it if you want to share one server between several apps or
+computers, or if you are curious how the connection works; otherwise the
+default is fine.
+
+## Contents
+
+- [Which transport do I need?](#which-transport-do-i-need)
+- [stdio (default)](#stdio-default)
+- [http (streamable HTTP)](#http-streamable-http)
+  - [Authenticating the HTTP transport](#authenticating-the-http-transport)
+- [OAuth 2.1 (alternative to the bearer token)](#oauth-21-alternative-to-the-bearer-token)
+
+## Which transport do I need?
+
+| If you... | Use |
+|---|---|
+| run one AI app on the same computer as `nodered-mcp` | stdio (default, nothing to set up) |
+| want one long-running server shared by several apps or machines | http |
+
+In practice: with stdio your client config says `"command": "nodered-mcp"`
+and the app starts the server for you; with http you start the server
+yourself and the client config says `"url": "http://localhost:8090/mcp"`.
+See [Client integration](clients.md) for both shapes. The setting is
+`MCP_TRANSPORT` / `--transport` (see [Configuration](configuration.md)).
+
 ## stdio (default)
 
-The MCP client launches the binary and communicates over stdin /
-stdout. This is what Claude Desktop, Claude Code, Cursor, VS Code,
-and Gemini CLI use.
+The MCP [client](glossary.md#client) launches the binary and communicates over
+stdin / stdout (the program's plain text input and output, with no network
+involved; see [stdio](glossary.md#stdio)). This is what Claude Desktop,
+Claude Code, Cursor, VS Code, and Gemini CLI use.
 
 ## http (streamable HTTP)
 
-A single long-running process serves several clients. The MCP
-endpoint is at `<addr>/mcp`.
+A single long-running process serves several clients
+([streamable HTTP](glossary.md#streamable-http) is the MCP name for this
+network mode). The MCP endpoint is at `<addr>/mcp`.
 
 The endpoint supports the streaming half of Streamable HTTP: a `GET`
 with `Accept: text/event-stream` opens a listening stream for server
@@ -26,7 +58,8 @@ nodered-mcp serve --transport http --http-addr :8090
 
 The HTTP transport exposes every tool — deploying flows, installing
 modules, stopping the runtime — to anything that can reach the port.
-It is therefore gated by a shared bearer token.
+It is therefore gated by a shared bearer [token](glossary.md#token): a secret
+string that the client sends with each request and the server checks.
 
 ```bash
 nodered-mcp serve --transport http --http-addr :8090 --http-token "$(openssl rand -hex 32)"
@@ -56,16 +89,16 @@ about how much of it was right, and the token never appears in a
 response. Rejected requests are logged with the caller's address.
 
 There is still no transport encryption here: over an untrusted
-network, put it behind a TLS-terminating reverse proxy. OAuth, which
-is what hosted web clients need, is not implemented — the MCP
-profile requires a full authorization server, not an extension of
-this.
+network, put it behind a TLS-terminating reverse proxy. Hosted web
+clients that need OAuth instead of a fixed token are covered in the
+next section.
 
 ## OAuth 2.1 (alternative to the bearer token)
 
-Web connectors that already speak OAuth 2.1 / OpenID Connect
-(claude.ai, custom front-ends) can identify themselves with a JWT
-instead of a shared secret. Configure the issuer and audience, drop
+Use this instead of the bearer token only if your organisation already runs
+an identity provider. Web connectors that already speak OAuth 2.1 / OpenID
+Connect (claude.ai, custom front-ends) can identify themselves with a JWT
+(a signed token issued by that provider) instead of a shared secret. Configure the issuer and audience, drop
 the bearer token:
 
 ```bash

@@ -82,23 +82,28 @@ The CI gate enforces this parity via `TestReadmeSyncWithRegistry`.
 
 ## Translation policy
 
-The repository ships two README files:
+English is the source of truth; every user-facing document also has a
+Spanish twin:
 
-- `README.md` — the source of truth, English, short (~80 lines).
-- `README.es.md` — a Spanish translation of the same short content.
+- `README.md` and `README.es.md` at the repository root.
+- Every page in `docs/` and its twin with the same file name in
+  `docs/es/` (for example `docs/configuration.md` and
+  `docs/es/configuration.md`).
 
-The two are kept in lock-step. When you edit `README.md`, update
-`README.es.md` in the same commit. The PR body should mention both.
+Each pair is kept in lock-step: when you change an English page, update
+its Spanish twin in the same commit, and say so in the PR body. A new
+page needs both versions. Every page starts with the language switcher
+under its title (`**English** | [Español](es/<page>.md)` in English,
+`[English](../<page>.md) | **Español**` in Spanish).
+`TestDocsHaveSpanishTwins` (`internal/mcp/docs_i18n_test.go`) fails
+when a twin or a switcher is missing; it cannot tell whether the content
+matches, so reviewers check that.
 
 What does **not** get translated:
 
-- Files under `docs/` — these are reference material, not the entry
-  point. Translating them creates a 2× maintenance burden and the
-  translations drift as the source evolves. A visitor who needs
-  Spanish reference material can use a translation tool against the
-  English source; we do not maintain the translations.
-- Code, comments, CLI flags, env-var names — already English by
-  convention.
+- `docs/audits/` — dated historical reports, kept as written.
+- Code, comments, CLI flags, env-var names, tool names and command
+  output quoted in the docs — they stay English in both versions.
 - GitHub issue and PR bodies — also English, unless the reporter
   writes in Spanish first.
 

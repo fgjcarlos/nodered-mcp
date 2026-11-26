@@ -1,11 +1,40 @@
 # Architecture
 
+**English** | [Español](es/architecture.md)
+
+This page explains how `nodered-mcp` is built inside: what it talks to, how it
+protects your flows before changing them, and why it was designed this way. It
+is written for contributors and for operators who want to understand what the
+server does behind the scenes; you do not need it to use the server. If you only
+want to know what you can ask for, read [Tools](tools.md) instead.
+
 `nodered-mcp` is a single binary that translates MCP requests into
-Node-RED admin API calls. The MCP layer is deliberately thin: each
+Node-RED [admin API](glossary.md#admin-api) calls. The MCP layer is deliberately thin: each
 client method maps to exactly one admin endpoint; the MCP layer
-decides how to expose those operations as tools.
+decides how to expose those operations as [tools](glossary.md#tool).
+
+## Contents
+
+- [Data flow](#data-flow)
+- [Edit pipeline](#edit-pipeline)
+- [Tool timeouts and retries](#tool-timeouts-and-retries)
+- [Source tree](#source-tree)
+- [Dependencies](#dependencies)
+- [Design decision: flows are JSON-opaque](#design-decision-flows-are-json-opaque)
+- [Safety: node-type policy on every write (issue #329)](#safety-node-type-policy-on-every-write-issue-329)
+- [Context helper lifecycle](#context-helper-lifecycle)
+- [Safety: backup before the flow-config writes (v0.1 guardrail)](#safety-backup-before-the-flow-config-writes-v01-guardrail)
+- [Verifying the claims](#verifying-the-claims)
+- [Findings that cost time](#findings-that-cost-time)
+
+Terms such as [flow](glossary.md#flow), [node](glossary.md#node),
+[context](glossary.md#context) and [backup](glossary.md#backup) are explained in
+the [glossary](glossary.md).
 
 ## Data flow
+
+In plain words: your AI client talks to `nodered-mcp` (over stdio or HTTP), and
+`nodered-mcp` talks to Node-RED on your behalf.
 
 The end-to-end shape, including the OAuth discovery path that the
 ASCII version lost in indentation:
@@ -41,6 +70,10 @@ flowchart LR
 ```
 
 ## Edit pipeline
+
+In plain words: before a change is sent to Node-RED, the server reads the
+current configuration, applies the change, checks the result, and saves a
+[backup](glossary.md#backup). If the check fails, nothing is sent.
 
 Mutating tools follow a read-modify-write path with three guards
 before any byte reaches the runtime. Optional diagram for
@@ -222,7 +255,7 @@ fields it needs, where it needs them. No field is ever lost.
 ## Safety: node-type policy on every write (issue #329)
 
 `MCP_NODE_DENYLIST` (default `exec,system`) is a policy over node
-types. It is owned by the MCP layer, which owns the operator-facing
+types (the [denylist](glossary.md#denylist)). It is owned by the MCP layer, which owns the operator-facing
 wording, and enforced by the `nodered` client, which is the only layer
 that knows the **effective configuration** a write would deploy.
 
@@ -248,6 +281,10 @@ that knows the **effective configuration** a write would deploy.
   provisioned.
 
 ## Context helper lifecycle
+
+`set_context` writes [context](glossary.md#context) values through a small
+helper [tab](glossary.md#tab) that the server finds, or creates, in your
+Node-RED; this section describes how it does that.
 
 The `set_context` cache is a runtime-ID hint, not authority. Each call reads the
 active flow configuration and verifies an isolated helper's executable code,

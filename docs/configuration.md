@@ -1,14 +1,56 @@
 # Configuration
 
+**English** | [Español](es/configuration.md)
+
+This page lists every setting `nodered-mcp` understands: where your Node-RED
+is, where backups go, whether the assistant may change anything, and how the
+network mode is secured. You need it when the defaults do not fit (Node-RED is
+not on `localhost:1880`, it asks for a password, you want a safer read-only
+setup) or when you want to look up what one variable does. Most people only
+touch `NODERED_URL` and `NODERED_TOKEN`.
+
+## Contents
+
+- [How settings work](#how-settings-work)
+- [Connecting to Node-RED](#connecting-to-node-red)
+- [Backups](#backups)
+- [Server behaviour](#server-behaviour)
+- [HTTP transport](#http-transport)
+- [Safety](#safety)
+
+## How settings work
+
 22 environment variables. Eleven of them also accept a command-line
 flag; the rest are env-only. Precedence: **flag > env > default.**
 
+An *environment variable* is a named setting passed to a program from outside,
+for example in the `env` block of your MCP [client](glossary.md#client)
+configuration (see [Client integration](clients.md)). A *flag* is the same
+setting typed after the command, like `--url`. If you set both, the flag wins;
+if you set neither, the default in the tables below applies.
+
+In practice, these two are equivalent:
+
+```bash
+NODERED_URL=http://192.168.1.20:1880 nodered-mcp
+nodered-mcp --url http://192.168.1.20:1880
+```
+
+To let the assistant only read and never change anything, set
+`MCP_READ_ONLY=true` (or pass `--read-only`); see
+[read-only mode](glossary.md#read-only-mode).
+
 ## Connecting to Node-RED
+
+Tell the server where Node-RED lives and how to log in. If Node-RED has no
+login enabled, the defaults work as they are. If it uses the
+[admin API](glossary.md#admin-api) with authentication, give a token
+(or, as an alternative, a username and password).
 
 | Variable | Default | Flag | Description |
 |---|---|---|---|
 | `NODERED_URL` | `http://localhost:1880` | `--url` | Base URL of Node-RED |
-| `NODERED_TOKEN` | *(empty)* | `--token` | Bearer token |
+| `NODERED_TOKEN` | *(empty)* | `--token` | Bearer [token](glossary.md#token) |
 | `NODERED_USERNAME` | *(empty)* | — | Basic auth (alternative) |
 | `NODERED_PASSWORD` | *(empty)* | — | Basic auth (alternative) |
 | `NODERED_INSECURE` | `false` | — | Skip TLS verify |
@@ -58,6 +100,9 @@ docker run --rm --name nodered-mcp \
 
 ## Server behaviour
 
+Log detail, which [transport](glossary.md#transport) to use, and
+[read-only mode](glossary.md#read-only-mode).
+
 | Variable | Default | Flag | Description |
 |---|---|---|---|
 | `MCP_LOG_LEVEL` | `info` | `--log-level` | debug / info / warn / error |
@@ -68,7 +113,10 @@ docker run --rm --name nodered-mcp \
 
 ## HTTP transport
 
-Only consulted when `MCP_TRANSPORT=http`.
+Only consulted when `MCP_TRANSPORT=http` (see
+[Transports](transports.md) and [streamable HTTP](glossary.md#streamable-http)).
+Skip this section if your client starts `nodered-mcp` itself over
+[stdio](glossary.md#stdio).
 
 | Variable | Default | Flag | Description |
 |---|---|---|---|
@@ -92,6 +140,9 @@ Only consulted when `MCP_TRANSPORT=http`.
 > [Rate limiting behind a reverse proxy](../SECURITY.md#rate-limiting-behind-a-reverse-proxy).
 
 ## Safety
+
+The [denylist](glossary.md#denylist) names node types the assistant is never
+allowed to add to your flows.
 
 | Variable | Default | Flag | Description |
 |---|---|---|---|

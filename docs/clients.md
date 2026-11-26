@@ -1,14 +1,48 @@
 # MCP client integration
 
-All examples below use the stdio transport. For HTTP, see the
+**English** | [Español](es/clients.md)
+
+This page is for connecting an AI app (an MCP [client](glossary.md#client),
+such as Claude Desktop, Claude Code or Cursor) to Node-RED through
+`nodered-mcp`. Every client keeps a small configuration file that lists the
+MCP servers it may start; you add one entry that says "run `nodered-mcp` and
+talk to this Node-RED". You need it right after installing, or whenever you
+add another app or another Node-RED instance. New to all this? Read
+[Getting started](getting-started.md) first.
+
+**Contents**
+
+- [Several Node-RED instances](#several-node-red-instances)
+- [Previewing a merge](#previewing-a-merge)
+- [Claude Desktop](#claude-desktop)
+- [Claude Code](#claude-code)
+- [Cursor](#cursor)
+- [VS Code](#vs-code)
+- [Gemini CLI](#gemini-cli)
+- [OpenCode](#opencode)
+- [Pi](#pi)
+- [HTTP variant](#http-variant)
+
+**How to use this page**
+
+1. Easiest path: run `nodered-mcp init`. It asks a few questions (which
+   client, the Node-RED URL) and prints the snippet for your client. With
+   `--write` it also edits the client's configuration file for you, when
+   that client has a supported file.
+2. Or find your client in the list below and copy its snippet by hand.
+3. Restart the client so it reads the new configuration.
+
+All examples below use the [stdio](glossary.md#stdio) transport: the client
+starts `nodered-mcp` itself. For [HTTP](glossary.md#streamable-http), see the
 "HTTP variant" section at the bottom.
 
 `nodered-mcp init` never writes `NODERED_TOKEN` into generated snippets or
-configuration files. Set the token in the client process environment, OS
-keychain, or a secret manager before starting the client. `init --write` only
-succeeds for clients with a supported config target; for other clients it
-prints manual instructions and exits with an error so automation can detect
-that nothing was applied.
+configuration files. The [token](glossary.md#token) is the password-like
+value Node-RED gives you to prove who you are. Set it in the client process
+environment, OS keychain, or a secret manager before starting the client.
+`init --write` only succeeds for clients with a supported config target; for
+other clients it prints manual instructions and exits with an error so
+automation can detect that nothing was applied.
 
 Use `nodered-mcp init --name nodered-lab` to register a second Node-RED
 instance under a different server name. Names accept ASCII letters, digits,
@@ -21,6 +55,10 @@ shows the prospective merge without asking. Omitting `--name` retains the
 previous behavior: `--write` updates the `nodered` entry without prompting.
 
 ## Several Node-RED instances
+
+In practice: if you have a test Node-RED on port `1880` and a production one
+on port `1881`, you register two servers (for example `nodered-1880` and
+`nodered-1881`) so you can tell the assistant which one to work on.
 
 Run one `nodered-mcp` server per Node-RED instance. Give each server a
 unique name, its own `NODERED_URL` and credentials, and a separate,
@@ -88,6 +126,9 @@ Run `claude mcp list` to check that both names are registered. Before
 restoring a snapshot, make sure you've selected the intended MCP server.
 
 ## Previewing a merge
+
+In practice: run `nodered-mcp init --dry-run` to see what would be written
+before you let `--write` touch your configuration file.
 
 `nodered-mcp init --dry-run` prints the configuration that `--write`
 would merge, without touching the filesystem. It creates no file, no
@@ -283,8 +324,11 @@ For the HTTP transport variant:
 
 ## HTTP variant
 
-Start the server once, then point the client at the endpoint rather
-than at a command. In clients that support `url` or `type: http`:
+Use this when one `nodered-mcp` process runs on its own (see
+[Transports](transports.md)) and the client connects to it over the network
+instead of starting it. Start the server once, then point the client at the
+endpoint rather than at a command. In clients that support `url` or
+`type: http`:
 
 ```json
 {
@@ -297,7 +341,8 @@ than at a command. In clients that support `url` or `type: http`:
 }
 ```
 
-Drop the `headers` block only if the server is bound to loopback
-and running without a token.
+Replace `your-token` with the value of `MCP_HTTP_TOKEN` set on the server.
+Drop the `headers` block only if the server is bound to loopback (reachable
+only from this computer) and running without a token.
 
 Restart the client after connecting. All 44 tools should appear.

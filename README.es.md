@@ -1,5 +1,7 @@
 # nodered-mcp
 
+[English](README.md) | **Español**
+
 Un servidor [MCP (Model Context Protocol)](https://modelcontextprotocol.io)
 escrito en Go que expone la admin API de Node-RED a clientes de IA
 como tools, resources y prompts.
@@ -18,14 +20,24 @@ funciona con cualquier cliente compatible con MCP — Claude Desktop,
 Claude Code, Cursor, VS Code, Gemini CLI, OpenCode, Pi, Cline — sea
 cual sea el modelo subyacente.
 
-La versión en inglés de este documento está en
-[`README.md`](./README.md).
+## Contenido
+
+- [Instalación](#instalación)
+- [Docker](#docker)
+- [Límite de solicitudes HTTP](#límite-de-solicitudes-http)
+- [Documentación](#documentación)
+- [Seguridad](#seguridad)
+- [Desarrollo](#desarrollo)
+- [Licencia](#licencia)
+
+¿Nuevo en MCP o Node-RED? Empieza por la
+[guía de inicio](./docs/es/getting-started.md).
 
 ## Instalación
 
-Tres canales soportados. Elige el que mejor te encaje:
+Tres canales admitidos. Elige el que mejor te encaje:
 
-### Plataformas soportadas (canal npm)
+### Plataformas compatibles (canal npm)
 
 El paquete npm publica binarios nativos precompilados para todas
 las plataformas de escritorio comunes vía `optionalDependencies`.
@@ -41,9 +53,9 @@ instalación — no tienes que elegir nada:
 Los seis paquetes `@fgjcarlos/nodered-mcp-<plat>-<arch>` son
 paquetes internos de plataforma — instalas el principal
 `@fgjcarlos/nodered-mcp` y npm descarga el que corresponda. Cada
-uno declara un filtro `os`/`cpu` para que npm solo baje el binario
-que coincide con tu máquina. Para arquitecturas no soportadas
-(p.ej. Linux PowerPC, FreeBSD), usa `go install` o Docker.
+uno declara un filtro `os`/`cpu` para que npm solo descargue el binario
+que coincide con tu máquina. Para arquitecturas no admitidas
+(p. ej. Linux PowerPC, FreeBSD), usa `go install` o Docker.
 
 ```bash
 # npm — Linux, macOS y Windows en amd64/arm64. Recomendado.
@@ -65,7 +77,7 @@ mecanismo `optionalDependencies` del registro. Al ejecutar `npm install
 -g @fgjcarlos/nodered-mcp`, npm resuelve uno de los seis paquetes
 de plataforma con scope (`@fgjcarlos/nodered-mcp-<plat>-<arch>`)
 filtrando por `os`/`cpu`, y el wrapper en `bin/nodered-mcp.js`
-re-executa el ejecutable correspondiente. No se ejecutan scripts
+vuelve a ejecutar el ejecutable correspondiente. No se ejecutan scripts
 de lifecycle durante la instalación — `npm install -g --ignore-scripts
 @fgjcarlos/nodered-mcp` funciona en entornos que desactivan
 postinstall. La integridad del registro reemplaza al verificador de
@@ -85,7 +97,7 @@ nodered-mcp init --write
 # 3. Reinicia tu cliente MCP; aparecen 44 tools bajo el servidor "nodered"
 ```
 
-¿Problemas? Consulta [`docs/troubleshooting.md`](./docs/troubleshooting.md).
+¿Problemas? Consulta [`docs/es/troubleshooting.md`](./docs/es/troubleshooting.md).
 
 ## Docker
 
@@ -143,10 +155,10 @@ docker run --rm --name nodered-mcp \
   ghcr.io/fgjcarlos/nodered-mcp:latest
 ```
 
-El volumen `nodered-backups` es donde la imagen escribe la copia que toma
+El volumen `nodered-backups` es donde la imagen escribe la copia que hace
 antes de cada llamada que muta la configuración de flows (`NODERED_BACKUP_DIR`).
-Mantenelo montado: sin
-el, las copias viven en la capa escribible del contenedor y se pierden cuando
+Mantenlo montado: sin
+él, las copias viven en la capa escribible del contenedor y se pierden cuando
 se recrea. `docker run --rm` borra el contenedor, no el volumen con nombre,
 así que recrear el contenedor conserva el historial de copias.
 
@@ -160,7 +172,7 @@ El transporte HTTP limita las solicitudes a **1 solicitud por segundo por IP de 
 
 Configura el límite con estas variables de entorno:
 
-| Variable | Predeterminado | Descripción |
+| Variable | Por defecto | Descripción |
 |---|---:|---|
 | `MCP_HTTP_RATE_PER_SEC` | `1` | Solicitudes sostenidas por segundo por IP de origen. |
 | `MCP_HTTP_RATE_BURST` | `10` | Máxima ráfaga de solicitudes por IP de origen. |
@@ -168,22 +180,26 @@ Configura el límite con estas variables de entorno:
 
 ## Documentación
 
-En las [herramientas de pestañas de flujo](./docs/tools.md#flows), como
+En las [herramientas de pestañas de flujo](./docs/es/tools.md#flujos), como
 `get_flow`, pasa `flow_id` o el parámetro original `id`. Si pasas ambos,
 deben coincidir. Las herramientas de nodo, como `add_node`, siguen usando
 `flow_id` para identificar la pestaña.
 
-La referencia completa está en [`docs/`](./docs/):
+La documentación completa está en [`docs/es/`](./docs/es/); el
+[índice](./docs/es/README.md) lista todas las páginas. ¿Nuevo en MCP o
+Node-RED? Empieza por la [guía de inicio](./docs/es/getting-started.md).
 
 | Doc | Cubre |
 |---|---|
-| [`docs/architecture.md`](./docs/architecture.md) | Árbol de fuentes, dependencias, modelo JSON-opaco, backup antes de escribir |
-| [`docs/tools.md`](./docs/tools.md) | Catálogo de las 44 tools MCP (read / write / action) |
-| [`docs/configuration.md`](./docs/configuration.md) | Variables de entorno y flags de línea de comandos |
-| [`docs/transports.md`](./docs/transports.md) | Transportes stdio y streamable HTTP, bearer auth, OAuth 2.1 |
-| [`docs/clients.md`](./docs/clients.md) | Snippets de configuración por cliente MCP, incluido el uso con [varias instancias de Node-RED](./docs/clients.md#several-node-red-instances) |
-| [`docs/troubleshooting.md`](./docs/troubleshooting.md) | Modos de fallo habituales y cómo recuperarse |
-| [`docs/roadmap.md`](./docs/roadmap.md) | Trabajo abierto, riesgos aceptados, versiones planeadas |
+| [`docs/es/getting-started.md`](./docs/es/getting-started.md) | ¿Nuevo en MCP o Node-RED? Empieza aquí: qué es esto, instalación, primera conversación |
+| [`docs/es/glossary.md`](./docs/es/glossary.md) | Definiciones en lenguaje sencillo de los términos usados en estas docs |
+| [`docs/es/architecture.md`](./docs/es/architecture.md) | Árbol de fuentes, dependencias, modelo JSON-opaco, backup antes de escribir |
+| [`docs/es/tools.md`](./docs/es/tools.md) | Catálogo de las 44 tools MCP (read / write / action) |
+| [`docs/es/configuration.md`](./docs/es/configuration.md) | Variables de entorno y flags de línea de comandos |
+| [`docs/es/transports.md`](./docs/es/transports.md) | Transportes stdio y streamable HTTP, bearer auth, OAuth 2.1 |
+| [`docs/es/clients.md`](./docs/es/clients.md) | Snippets de configuración por cliente MCP, incluido el uso con [varias instancias de Node-RED](./docs/es/clients.md#varias-instancias-de-node-red) |
+| [`docs/es/troubleshooting.md`](./docs/es/troubleshooting.md) | Modos de fallo habituales y cómo recuperarse |
+| [`docs/es/roadmap.md`](./docs/es/roadmap.md) | Trabajo abierto, riesgos aceptados, versiones planeadas |
 
 ## Seguridad
 
@@ -196,12 +212,12 @@ en marcha exige guardarraíles. Hay tres integrados:
   configuración antes y falla en cerrado si no puede escribirlo.
   Las operaciones de paleta (`install_node`, `uninstall_node`, `enable_node`,
   `disable_node`) y `inject_node` cambian los módulos instalados o disparan un
-  mensaje, no la configuración de flows, y no toman snapshot.
+  mensaje, no la configuración de flows, y no hacen snapshot.
   Solo permite recuperar la estructura: estos snapshots no recuperan las
-  credenciales borradas. Antes de borrar o reemplazar flows, prepará un backup
+  credenciales borradas. Antes de borrar o reemplazar flows, prepara un backup
   externo autorizado que incluya el almacén cifrado de credenciales y sus
-  claves/configuración originales; consultá los
-  [límites y el procedimiento de recuperación](./docs/tools.md#backup-recovery-limits).
+  claves/configuración originales; consulta los
+  [límites y el procedimiento de recuperación](./docs/es/tools.md#límites-de-la-recuperación-de-copias-de-seguridad).
 - Los wires se validan antes de que la escritura llegue al runtime;
   los destinos colgantes se rechazan en la capa MCP.
 
@@ -221,14 +237,14 @@ nuevo el flow actual antes de reintentar una edición tras un conflicto.
 
 Las tools de lectura reintentan los fallos de transporte hasta dos veces. Las
 tools mutantes se ejecutan una sola vez: si la conexión se cierra sin una
-respuesta completa, la tool informa un resultado indeterminado y pide
+respuesta completa, la tool informa de un resultado indeterminado y pide
 revisar el runtime antes de repetir la operación, porque la acción puede
 haberse ejecutado ya.
 
 Arranca con `--read-only` (o `MCP_READ_ONLY=true`) para anunciar
-solo las 21 tools de lectura y esconder todas las mutantes en el
-registro. `inject_node` también se esconde: disparar un inject puede
-mandar una orden real a un dispositivo real.
+solo las 21 tools de lectura y ocultar todas las mutantes en el
+registro. `inject_node` también se oculta: disparar un inject puede
+enviar una orden real a un dispositivo real.
 
 Modelo de amenaza completo y checklist de hardening:
 [`SECURITY.md`](./SECURITY.md).
@@ -246,4 +262,4 @@ auditorías históricas están bajo [`docs/`](./docs/). Consulta
 
 ## Licencia
 
-MIT. Ver [`LICENSE`](./LICENSE).
+MIT. Consulta [`LICENSE`](./LICENSE).
