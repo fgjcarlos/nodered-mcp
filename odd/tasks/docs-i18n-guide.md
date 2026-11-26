@@ -17,15 +17,17 @@ every page in `docs/` gets a Spanish twin in `docs/es/`, a language switcher, an
 
 | ID | Specs | Route | Commit |
 |---|---|---|---|
-| T1 | S1-S3, S5 | writer A: README.md, README.es.md, docs/README.md, docs/getting-started.md (new), docs/glossary.md (new) | |
-| T2 | S1-S3, S5, S7 | writer B: docs/clients.md, docs/configuration.md, docs/troubleshooting.md, docs/transports.md | |
-| T3 | S1-S3, S5, S7 | writer C: docs/tools.md, docs/architecture.md, docs/roadmap.md | |
-| T4 | S1, S2, S4, S7 | writer D (after T1-T2): docs/es/ README, getting-started, glossary, clients, configuration, troubleshooting, transports | |
-| T5 | S1, S2, S4, S7 | writer E (after T3): docs/es/ tools, architecture, roadmap | |
-| T6 | S6, S7 | inline: CONTRIBUTING.md policy, parity test, link check, full go test | |
+| T1 | S1-S3, S5 | writer A: README.md, README.es.md, docs/README.md, docs/getting-started.md (new), docs/glossary.md (new) || 636b353 |
+| T2 | S1-S3, S5, S7 | writer B: docs/clients.md, docs/configuration.md, docs/troubleshooting.md, docs/transports.md || 3cf0252 |
+| T3 | S1-S3, S5, S7 | writer C: docs/tools.md, docs/architecture.md, docs/roadmap.md || c81d15c |
+| T4 | S1, S2, S4, S7 | writer D (after T1-T2): docs/es/ README, getting-started, glossary, clients, configuration, troubleshooting, transports || 2b7963c |
+| T5 | S1, S2, S4, S7 | writer E (after T3): docs/es/ tools, architecture, roadmap || b1c747f |
+| T6 | S6, S7 | inline: CONTRIBUTING.md policy, parity test, link check, full go test || this commit |
 
 ## Log
 
 - L1 (user, verbatim): "Si dale, y ademas mejora la documentacion, seccion al principio con enlace a documentacione en otros idiomas, en principio solo en español. La documentacion con indice y expliacada para que lo entienda cualquier persona"
 - L2 (decision): asked scope; user chose "Todo docs/ (recomendado si lo vas a mantener)" and "Guía nueva + índice (recomendado)".
 - L3 (evidence): CONTRIBUTING.md "Translation policy" currently says files under docs/ are not translated; this feature reverses it (S6).
+- L4 (evidence): T1-T3 committed (English pages, 818 authored lines in 3 commits, one commit per writer unit). T2 also fixed a stale transports.md claim that OAuth was not implemented. Slice boundary: English rewrite ends at 636b353; Spanish translation (T4, T5) and the maintenance guard (T6) follow; the PR is docs-only.
+- L5 (evidence): T4/T5 Spanish pages committed; 10/10 docs pages have docs/es twins. TestDocsHaveSpanishTwins RED before docs/es existed, GREEN after. Link check over README.md, README.es.md, docs/*.md and docs/es/*.md: 598 relative links (file + anchor), 0 broken (2 checker false positives on `_` in GitHub slugs). go test ./... green.
