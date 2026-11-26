@@ -97,7 +97,7 @@ nodered-mcp init --write
 # 3. Reinicia tu cliente MCP; aparecen 44 tools bajo el servidor "nodered"
 ```
 
-¿Problemas? Consulta [`docs/troubleshooting.md`](./docs/troubleshooting.md).
+¿Problemas? Consulta [`docs/es/troubleshooting.md`](./docs/es/troubleshooting.md).
 
 ## Docker
 
@@ -180,12 +180,12 @@ Configura el límite con estas variables de entorno:
 
 ## Documentación
 
-En las [herramientas de pestañas de flujo](./docs/tools.md#flows), como
+En las [herramientas de pestañas de flujo](./docs/es/tools.md#flujos), como
 `get_flow`, pasa `flow_id` o el parámetro original `id`. Si pasas ambos,
 deben coincidir. Las herramientas de nodo, como `add_node`, siguen usando
 `flow_id` para identificar la pestaña.
 
-La documentación completa está en [`docs/`](./docs/); el
+La documentación completa está en [`docs/es/`](./docs/es/); el
 [índice](./docs/es/README.md) lista todas las páginas. ¿Nuevo en MCP o
 Node-RED? Empieza por la [guía de inicio](./docs/es/getting-started.md).
 
@@ -193,13 +193,13 @@ Node-RED? Empieza por la [guía de inicio](./docs/es/getting-started.md).
 |---|---|
 | [`docs/es/getting-started.md`](./docs/es/getting-started.md) | ¿Nuevo en MCP o Node-RED? Empieza aquí: qué es esto, instalación, primera conversación |
 | [`docs/es/glossary.md`](./docs/es/glossary.md) | Definiciones en lenguaje sencillo de los términos usados en estas docs |
-| [`docs/architecture.md`](./docs/architecture.md) | Árbol de fuentes, dependencias, modelo JSON-opaco, backup antes de escribir |
-| [`docs/tools.md`](./docs/tools.md) | Catálogo de las 44 tools MCP (read / write / action) |
-| [`docs/configuration.md`](./docs/configuration.md) | Variables de entorno y flags de línea de comandos |
-| [`docs/transports.md`](./docs/transports.md) | Transportes stdio y streamable HTTP, bearer auth, OAuth 2.1 |
-| [`docs/clients.md`](./docs/clients.md) | Snippets de configuración por cliente MCP, incluido el uso con [varias instancias de Node-RED](./docs/clients.md#several-node-red-instances) |
-| [`docs/troubleshooting.md`](./docs/troubleshooting.md) | Modos de fallo habituales y cómo recuperarse |
-| [`docs/roadmap.md`](./docs/roadmap.md) | Trabajo abierto, riesgos aceptados, versiones planeadas |
+| [`docs/es/architecture.md`](./docs/es/architecture.md) | Árbol de fuentes, dependencias, modelo JSON-opaco, backup antes de escribir |
+| [`docs/es/tools.md`](./docs/es/tools.md) | Catálogo de las 44 tools MCP (read / write / action) |
+| [`docs/es/configuration.md`](./docs/es/configuration.md) | Variables de entorno y flags de línea de comandos |
+| [`docs/es/transports.md`](./docs/es/transports.md) | Transportes stdio y streamable HTTP, bearer auth, OAuth 2.1 |
+| [`docs/es/clients.md`](./docs/es/clients.md) | Snippets de configuración por cliente MCP, incluido el uso con [varias instancias de Node-RED](./docs/es/clients.md#varias-instancias-de-node-red) |
+| [`docs/es/troubleshooting.md`](./docs/es/troubleshooting.md) | Modos de fallo habituales y cómo recuperarse |
+| [`docs/es/roadmap.md`](./docs/es/roadmap.md) | Trabajo abierto, riesgos aceptados, versiones planeadas |
 
 ## Seguridad
 
@@ -217,7 +217,7 @@ en marcha exige guardarraíles. Hay tres integrados:
   credenciales borradas. Antes de borrar o reemplazar flows, prepará un backup
   externo autorizado que incluya el almacén cifrado de credenciales y sus
   claves/configuración originales; consultá los
-  [límites y el procedimiento de recuperación](./docs/tools.md#backup-recovery-limits).
+  [límites y el procedimiento de recuperación](./docs/es/tools.md#límites-de-la-recuperación-de-copias-de-seguridad).
 - Los wires se validan antes de que la escritura llegue al runtime;
   los destinos colgantes se rechazan en la capa MCP.
 
