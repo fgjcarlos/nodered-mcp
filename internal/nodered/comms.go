@@ -68,6 +68,7 @@ type DebugSnapshot struct {
 type DebugTail struct {
 	wsURL    string
 	token    string
+	client   *Client
 	insecure bool
 
 	mu        sync.Mutex
@@ -91,11 +92,9 @@ func NewDebugTail(c *Client, capacity int) (*DebugTail, error) {
 	if err != nil {
 		return nil, err
 	}
-	token := ""
-	if ta, ok := c.auth.(*tokenAuth); ok {
-		token = ta.token
-	}
-	return newDebugTail(wsURL, token, c.insecure, capacity), nil
+	tail := newDebugTail(wsURL, c.staticToken, c.insecure, capacity)
+	tail.client = c
+	return tail, nil
 }
 
 func newDebugTail(wsURL, token string, insecure bool, capacity int) *DebugTail {
@@ -144,6 +143,9 @@ func (t *DebugTail) Run(ctx context.Context) {
 				return
 			}
 			t.setState(false, err)
+			if errors.Is(err, errAdminCredentials) {
+				return
+			}
 			slog.Debug("debug tail disconnected, will retry", "error", err, "retry_in", delay)
 		}
 		if ctx.Err() != nil {
@@ -164,12 +166,21 @@ func (t *DebugTail) Run(ctx context.Context) {
 }
 
 // session runs one connection from dial to disconnect.
-func (t *DebugTail) session(ctx context.Context) error {
+func (t *DebugTail) session(ctx context.Context) (sessionErr error) {
 	opts := &websocket.DialOptions{}
 	if t.insecure {
 		opts.HTTPClient = &http.Client{Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // opt-in
 		}}
+	}
+
+	token, lease, err := tailAdminToken(ctx, t.client, t.token)
+	if err != nil {
+		return err
+	}
+	if t.client != nil && t.client.passwordAuth != nil {
+		opts.HTTPClient = t.client.httpClient
+		defer sanitizeTailAuthError(&sessionErr, token, t.client.passwordAuth.password)
 	}
 
 	conn, _, err := websocket.Dial(ctx, t.wsURL, opts)
@@ -182,8 +193,11 @@ func (t *DebugTail) session(ctx context.Context) error {
 	// Debug payloads can be large; the default read limit is 32 KiB.
 	conn.SetReadLimit(4 << 20)
 
-	if t.token != "" {
-		if err := t.authenticate(ctx, conn); err != nil {
+	if token != "" {
+		if err := t.authenticate(ctx, conn, token); err != nil {
+			if lease != nil && errors.Is(err, errCommsAuthRejected) {
+				t.client.passwordAuth.invalidate(ctx, lease)
+			}
 			return err
 		}
 	}
@@ -223,8 +237,8 @@ func (t *DebugTail) logConnected() {
 // the data frames, so the reply arrives as an array containing a single
 // {"auth":"ok"} object rather than as a top-level object. We try the
 // object shape first and fall back to the array shape on decode failure.
-func (t *DebugTail) authenticate(ctx context.Context, conn *websocket.Conn) error {
-	frame, err := json.Marshal(map[string]string{"auth": t.token})
+func (t *DebugTail) authenticate(ctx context.Context, conn *websocket.Conn, token string) error {
+	frame, err := json.Marshal(map[string]string{"auth": token})
 	if err != nil {
 		return fmt.Errorf("encoding auth: %w", err)
 	}
@@ -257,7 +271,7 @@ func (t *DebugTail) authenticate(ctx context.Context, conn *websocket.Conn) erro
 	if reply.Auth != "ok" {
 		// Retrying a rejected token forever would be pointless noise; the
 		// backoff still caps it, and the reason is surfaced in the snapshot.
-		return fmt.Errorf("authentication rejected by Node-RED (token invalid or lacking status.read)")
+		return errCommsAuthRejected
 	}
 	return nil
 }

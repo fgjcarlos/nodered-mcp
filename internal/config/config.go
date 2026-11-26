@@ -263,7 +263,7 @@ func Load() (*Config, error) {
 	slog.Debug("config loaded",
 		"url", nodered.RedactURL(cfg.NodeRedURL),
 		"auth_token", cfg.NodeRedToken != "",
-		"auth_basic", cfg.NodeRedUsername != "",
+		"auth_password", cfg.NodeRedToken == "" && cfg.NodeRedUsername != "",
 		"transport", cfg.MCPTransport,
 		"http_auth", cfg.MCPHTTPToken != "",
 		"oauth_issuer", cfg.OAuthIssuer != "",

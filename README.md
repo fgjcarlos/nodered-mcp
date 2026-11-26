@@ -175,6 +175,14 @@ Configure the limiter with these environment variables:
 | `MCP_HTTP_RATE_BURST` | `10` | Maximum burst of requests per source IP. |
 | `MCP_HTTP_RATE_DISABLED` | `false` | Set to `true` to disable rate limiting. |
 
+## Node-RED admin authentication
+
+When Node-RED has `adminAuth` enabled, prefer `NODERED_USERNAME` and
+`NODERED_PASSWORD`. The client exchanges them for an in-memory bearer token
+and renews it automatically. A manually supplied `NODERED_TOKEN` takes
+precedence, expires (after seven days by default for Node-RED login tokens),
+and must be replaced manually. Use HTTPS for remote instances.
+
 ## Documentation
 
 When using [flow-tab tools](./docs/tools.md#flows) such as `get_flow`, pass
