@@ -71,6 +71,38 @@ func TestFlowIDAliasDiscovery(t *testing.T) {
 	}
 }
 
+func TestDisableEnableFlowRejectInvalidPathIDsBeforeHTTP(t *testing.T) {
+	for _, tool := range []string{"disable_flow", "enable_flow"} {
+		for _, id := range []string{"..", "a/b"} {
+			t.Run(tool+"/"+id, func(t *testing.T) {
+				var calls atomic.Int32
+				s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+					calls.Add(1)
+					if r.URL.Path == "/flows" {
+						_, _ = w.Write([]byte(`{"rev":"r","flows":[{"id":"tab","type":"tab"}]}`))
+						return
+					}
+					http.NotFound(w, r)
+				})
+				c := newFlowAliasMCPClient(t, s)
+				result, err := c.CallTool(context.Background(), mcp.CallToolRequest{Params: mcp.CallToolParams{
+					Name: tool, Arguments: map[string]any{"id": id},
+				}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := "calling Node-RED: flow id must be a single path segment (must not contain /, \\, %, or be . or ..), got \"" + id + "\""
+				if result == nil || !result.IsError || len(result.Content) == 0 || result.Content[0].(mcp.TextContent).Text != want {
+					t.Errorf("result = %#v, want exact error %q", result, want)
+				}
+				if got := calls.Load(); got != 0 {
+					t.Errorf("HTTP calls = %d, want 0", got)
+				}
+			})
+		}
+	}
+}
+
 func TestFlowIDAliasesValidateBeforeHTTP(t *testing.T) {
 	const tab = `{"id":"tab","type":"tab","disabled":false,"nodes":[]}`
 	const flows = `{"rev":"r","flows":[{"id":"tab","type":"tab","disabled":false}]}`

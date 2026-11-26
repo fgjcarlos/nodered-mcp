@@ -287,9 +287,10 @@ Ejemplos de peticiones:
 `get_flow`, `export_flow`, `update_flow`, `delete_flow`, `disable_flow` y
 `enable_flow` requieren un identificador de pestaña. Pasa `flow_id` o el `id`
 original. Si pasas ambos, deben coincidir; los conflictos se rechazan antes de
-contactar con Node-RED. Las herramientas de nodo como `add_node` siguen usando
-`flow_id` para la pestaña, y `get_context` y `set_context` siguen usando `id`
-para los ámbitos de flujo y de nodo.
+contactar con Node-RED. Para `disable_flow` y `enable_flow`, el id también debe
+ser un único segmento de ruta: no puede contener `/`, `\` o `%`, ni ser `.` o `..`.
+Las herramientas de nodo como `add_node` siguen usando `flow_id` para la pestaña,
+y `get_context` y `set_context` siguen usando `id` para los ámbitos de flujo y de nodo.
 
 | Tool | HTTP | Risk | Notes |
 |---|---|---|---|
