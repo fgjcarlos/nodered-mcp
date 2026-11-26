@@ -1,5 +1,7 @@
 # nodered-mcp
 
+[English](README.md) | **Español**
+
 Un servidor [MCP (Model Context Protocol)](https://modelcontextprotocol.io)
 escrito en Go que expone la admin API de Node-RED a clientes de IA
 como tools, resources y prompts.
@@ -18,8 +20,18 @@ funciona con cualquier cliente compatible con MCP — Claude Desktop,
 Claude Code, Cursor, VS Code, Gemini CLI, OpenCode, Pi, Cline — sea
 cual sea el modelo subyacente.
 
-La versión en inglés de este documento está en
-[`README.md`](./README.md).
+## Contenido
+
+- [Instalación](#instalación)
+- [Docker](#docker)
+- [Límite de solicitudes HTTP](#límite-de-solicitudes-http)
+- [Documentación](#documentación)
+- [Seguridad](#seguridad)
+- [Desarrollo](#desarrollo)
+- [Licencia](#licencia)
+
+¿Nuevo en MCP o Node-RED? Empieza por la
+[guía de inicio](./docs/es/getting-started.md).
 
 ## Instalación
 
@@ -173,10 +185,14 @@ En las [herramientas de pestañas de flujo](./docs/tools.md#flows), como
 deben coincidir. Las herramientas de nodo, como `add_node`, siguen usando
 `flow_id` para identificar la pestaña.
 
-La referencia completa está en [`docs/`](./docs/):
+La documentación completa está en [`docs/`](./docs/); el
+[índice](./docs/es/README.md) lista todas las páginas. ¿Nuevo en MCP o
+Node-RED? Empieza por la [guía de inicio](./docs/es/getting-started.md).
 
 | Doc | Cubre |
 |---|---|
+| [`docs/es/getting-started.md`](./docs/es/getting-started.md) | ¿Nuevo en MCP o Node-RED? Empieza aquí: qué es esto, instalación, primera conversación |
+| [`docs/es/glossary.md`](./docs/es/glossary.md) | Definiciones en lenguaje sencillo de los términos usados en estas docs |
 | [`docs/architecture.md`](./docs/architecture.md) | Árbol de fuentes, dependencias, modelo JSON-opaco, backup antes de escribir |
 | [`docs/tools.md`](./docs/tools.md) | Catálogo de las 44 tools MCP (read / write / action) |
 | [`docs/configuration.md`](./docs/configuration.md) | Variables de entorno y flags de línea de comandos |
