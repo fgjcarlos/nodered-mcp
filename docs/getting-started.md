@@ -72,7 +72,7 @@ Useful options:
 | Option | What it does |
 |---|---|
 | `--write` | Saves the settings into the client's config file. The previous file is kept as `.bak`. Works for Claude Desktop, Cursor and Gemini CLI. For the other clients it prints what to paste or run and reports that nothing was written. |
-| `--dry-run` | Shows exactly what `--write` would save, without changing any file. Cannot be combined with `--write`. |
+| `--dry-run` | Previews the `--write` merge without changing any file. With `--all`, prints a manual snippet and succeeds if no preview is available for the client. Cannot be combined with `--write`. |
 | `--all` | Lists every known client, not just the ones it detected. |
 | `--name <server>` | Uses a different name for the entry (default `nodered`). Useful with several Node-RED instances. |
 
