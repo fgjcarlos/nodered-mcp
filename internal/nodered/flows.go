@@ -563,6 +563,9 @@ func FlowTabCount(raw RawFlow) int {
 // require a deploy. Node-RED's editor exposes the same toggle as the
 // checkbox next to each tab in the sidebar.
 func (c *Client) SetFlowDisabled(ctx context.Context, id string, disabled bool) error {
+	if err := checkPathSegment("flow id", id); err != nil {
+		return err
+	}
 	return c.editFlow(ctx, id, func(f RawFlow, _ []json.RawMessage) (RawFlow, error) {
 		return SetDisabledInFlow(f, disabled)
 	})

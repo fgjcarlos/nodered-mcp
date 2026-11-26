@@ -260,8 +260,10 @@ Example requests:
 `get_flow`, `export_flow`, `update_flow`, `delete_flow`, `disable_flow`, and
 `enable_flow` require a tab identifier. Pass `flow_id` or the original `id`.
 If you pass both, they must match; conflicts are rejected before Node-RED is
-contacted. Node tools such as `add_node` still use `flow_id` for the tab, and
-`get_context` and `set_context` still use `id` for flow and node scopes.
+contacted. For `disable_flow` and `enable_flow`, the ID must also be a single
+path segment: it cannot contain `/`, `\`, or `%`, or be `.` or `..`.
+Node tools such as `add_node` still use `flow_id` for the tab, and `get_context`
+and `set_context` still use `id` for flow and node scopes.
 
 | Tool | HTTP | Risk | Notes |
 |---|---|---|---|

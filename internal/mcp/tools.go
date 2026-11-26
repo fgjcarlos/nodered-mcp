@@ -305,7 +305,7 @@ func (s *Server) registerTools() {
 				"A backup of the current configuration is taken automatically before the "+
 				"write; restore_backup recovers the flow structure only. "+backupRecoveryWarning,
 		),
-		flowTabIDArgs("The flow tab ID to disable (as shown by list_flows)."),
+		flowTabIDArgs("The flow tab ID to disable (as shown by list_flows). It must be a single path segment: no /, \\, or %, and not . or .."),
 	)
 	s.addWriteTool(disableFlow, s.handleDisableFlow)
 
@@ -317,7 +317,7 @@ func (s *Server) registerTools() {
 				"A backup of the current configuration is taken automatically before the "+
 				"write; restore_backup recovers the flow structure only. "+backupRecoveryWarning,
 		),
-		flowTabIDArgs("The flow tab ID to enable (as shown by list_flows)."),
+		flowTabIDArgs("The flow tab ID to enable (as shown by list_flows). It must be a single path segment: no /, \\, or %, and not . or .."),
 	)
 	s.addWriteTool(enableFlow, s.handleEnableFlow)
 
