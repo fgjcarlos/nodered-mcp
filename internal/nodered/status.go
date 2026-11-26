@@ -182,6 +182,7 @@ type StatusSnapshot struct {
 type StatusTail struct {
 	wsURL    string
 	token    string
+	client   *Client
 	insecure bool
 
 	mu        sync.Mutex
@@ -203,11 +204,9 @@ func NewStatusTail(c *Client) (*StatusTail, error) {
 	if err != nil {
 		return nil, err
 	}
-	token := ""
-	if ta, ok := c.auth.(*tokenAuth); ok {
-		token = ta.token
-	}
-	return newStatusTail(wsURL, token, c.insecure), nil
+	tail := newStatusTail(wsURL, c.staticToken, c.insecure)
+	tail.client = c
+	return tail, nil
 }
 
 func newStatusTail(wsURL, token string, insecure bool) *StatusTail {
@@ -233,6 +232,9 @@ func (t *StatusTail) Run(ctx context.Context) {
 				return
 			}
 			t.setState(false, err)
+			if errors.Is(err, errAdminCredentials) {
+				return
+			}
 			slog.Debug("status tail disconnected, will retry", "error", err, "retry_in", delay)
 		}
 		if ctx.Err() != nil {
@@ -251,7 +253,7 @@ func (t *StatusTail) Run(ctx context.Context) {
 }
 
 // session runs one connection from dial to disconnect.
-func (t *StatusTail) session(ctx context.Context) error {
+func (t *StatusTail) session(ctx context.Context) (sessionErr error) {
 	opts := &websocket.DialOptions{}
 	if t.insecure {
 		opts.HTTPClient = &http.Client{Transport: &http.Transport{
@@ -259,7 +261,16 @@ func (t *StatusTail) session(ctx context.Context) error {
 		}}
 	}
 
-	conn, _, err := websocket.Dial(ctx, t.wsURL, opts)
+	token, lease, err := tailAdminToken(ctx, t.client, t.token)
+	if err != nil {
+		return err
+	}
+	if t.client != nil && t.client.passwordAuth != nil {
+		opts.HTTPClient = t.client.httpClient
+		defer sanitizeTailAuthError(&sessionErr, token, t.client.passwordAuth.password)
+	}
+
+	conn, _, err := websocket.Dial(ctx, tailAdminURL(t.wsURL, lease), opts)
 	if err != nil {
 		// Name the redacted destination and scrub the wrapped error, which
 		// reports the handshake URL itself. Issue #312.
@@ -271,8 +282,11 @@ func (t *StatusTail) session(ctx context.Context) error {
 	// explicit value so the reasoning is on the page.
 	conn.SetReadLimit(1 << 20)
 
-	if t.token != "" {
-		if err := t.authenticate(ctx, conn); err != nil {
+	if token != "" {
+		if err := t.authenticate(ctx, conn, token); err != nil {
+			if lease != nil && errors.Is(err, errCommsAuthRejected) {
+				t.client.passwordAuth.invalidate(ctx, lease)
+			}
 			return err
 		}
 	}
@@ -308,8 +322,8 @@ func (t *StatusTail) logConnected() {
 // authenticate is the same /comms auth handshake DebugTail uses.
 // Both tails are on the same socket shape, so the reply envelope
 // (object or array) is parsed the same way.
-func (t *StatusTail) authenticate(ctx context.Context, conn *websocket.Conn) error {
-	frame, err := json.Marshal(map[string]string{"auth": t.token})
+func (t *StatusTail) authenticate(ctx context.Context, conn *websocket.Conn, token string) error {
+	frame, err := json.Marshal(map[string]string{"auth": token})
 	if err != nil {
 		return fmt.Errorf("encoding auth: %w", err)
 	}
@@ -338,7 +352,7 @@ func (t *StatusTail) authenticate(ctx context.Context, conn *websocket.Conn) err
 		}
 	}
 	if reply.Auth != "ok" {
-		return errors.New("authentication rejected by Node-RED (token invalid or lacking status.read)")
+		return errCommsAuthRejected
 	}
 	return nil
 }

@@ -55,8 +55,8 @@ contraseña).
 |---|---|---|---|
 | `NODERED_URL` | `http://localhost:1880` | `--url` | URL base de Node-RED |
 | `NODERED_TOKEN` | *(vacío)* | `--token` | [Token](glossary.md#token) bearer |
-| `NODERED_USERNAME` | *(vacío)* | — | Autenticación básica (alternativa) |
-| `NODERED_PASSWORD` | *(vacío)* | — | Autenticación básica (alternativa) |
+| `NODERED_USERNAME` | *(vacío)* | — | Inicio de sesión con contraseña de `adminAuth` (recomendado) |
+| `NODERED_PASSWORD` | *(vacío)* | — | Inicio de sesión con contraseña de `adminAuth` (recomendado) |
 | `NODERED_INSECURE` | `false` | — | Omitir la verificación TLS |
 
 ### Tokens en la URL

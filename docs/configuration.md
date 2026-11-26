@@ -51,8 +51,8 @@ login enabled, the defaults work as they are. If it uses the
 |---|---|---|---|
 | `NODERED_URL` | `http://localhost:1880` | `--url` | Base URL of Node-RED |
 | `NODERED_TOKEN` | *(empty)* | `--token` | Bearer [token](glossary.md#token) |
-| `NODERED_USERNAME` | *(empty)* | — | Basic auth (alternative) |
-| `NODERED_PASSWORD` | *(empty)* | — | Basic auth (alternative) |
+| `NODERED_USERNAME` | *(empty)* | — | Node-RED `adminAuth` password grant (recommended) |
+| `NODERED_PASSWORD` | *(empty)* | — | Node-RED `adminAuth` password grant (recommended) |
 | `NODERED_INSECURE` | `false` | — | Skip TLS verify |
 
 ### Tokens in the URL

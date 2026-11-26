@@ -22,11 +22,12 @@ import (
 // It is safe for concurrent use: each call uses its own request and the
 // underlying *http.Client is concurrency-safe.
 type Client struct {
-	baseURL    string
-	httpClient *http.Client
-	auth       authStrategy
-	backupDir  string
-	backupKeep int
+	baseURL      string
+	httpClient   *http.Client
+	staticToken  string
+	passwordAuth *passwordAuth
+	backupDir    string
+	backupKeep   int
 	// insecure is retained because the /comms WebSocket dials separately from
 	// httpClient and needs the same TLS decision.
 	insecure bool
@@ -67,31 +68,6 @@ type Client struct {
 	policy               NodePolicy
 	registeredTypesCache registeredTypeCache
 }
-
-// authStrategy encapsulates how Authorization headers are produced.
-type authStrategy interface {
-	apply(req *http.Request)
-}
-
-type tokenAuth struct{ token string }
-
-func (a *tokenAuth) apply(req *http.Request) {
-	if a.token != "" {
-		req.Header.Set("Authorization", "Bearer "+a.token)
-	}
-}
-
-type basicAuth struct{ username, password string }
-
-func (a *basicAuth) apply(req *http.Request) {
-	if a.username != "" {
-		req.SetBasicAuth(a.username, a.password)
-	}
-}
-
-type noAuth struct{}
-
-func (a *noAuth) apply(req *http.Request) {}
 
 // Options controls how the client is constructed.
 type Options struct {
@@ -147,14 +123,10 @@ func NewClient(opts Options) (*Client, error) {
 	// install path to MITM. See issue #83.
 	registryClient := &http.Client{}
 
-	var auth authStrategy
-	switch {
-	case opts.Token != "":
-		auth = &tokenAuth{token: opts.Token}
-	case opts.Username != "":
-		auth = &basicAuth{username: opts.Username, password: opts.Password}
-	default:
-		auth = &noAuth{}
+	var password *passwordAuth
+	if opts.Token == "" && opts.Username != "" {
+		password = &passwordAuth{username: opts.Username, password: opts.Password}
+		httpClient.CheckRedirect = safeAdminRedirect
 	}
 
 	if opts.Insecure {
@@ -171,7 +143,8 @@ func NewClient(opts Options) (*Client, error) {
 	return &Client{
 		baseURL:          opts.BaseURL,
 		httpClient:       httpClient,
-		auth:             auth,
+		staticToken:      opts.Token,
+		passwordAuth:     password,
 		backupDir:        opts.BackupDir,
 		backupKeep:       bk,
 		insecure:         opts.Insecure,
@@ -270,20 +243,18 @@ func (c *Client) doURL(ctx context.Context, method, u, errorPath string, body in
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "application/json")
-	c.auth.apply(req)
+	if c.staticToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.staticToken)
+	}
 	for _, opt := range reqOpts {
 		opt(req)
 	}
 
 	slog.Debug("nodered request", "method", method, "url", RedactURL(u))
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.sendAdmin(req, "cannot reach Node-RED at "+RedactURL(u))
 	if err != nil {
-		// Wrap as a connectivity error naming the redacted destination, not
-		// the full request URL. redactedWrap is still required on top of that:
-		// the wrapped *url.Error renders the raw URL in its own .Error(), so a
-		// plain %w would still leak the token. Issue #312.
-		return &TransportError{Err: fmt.Errorf("cannot reach Node-RED at %s: %w", RedactURL(u), redactedWrap(err))}
+		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -297,13 +268,13 @@ func (c *Client) doURL(ctx context.Context, method, u, errorPath string, body in
 			StatusCode: resp.StatusCode,
 			Method:     method,
 			Path:       errorPath,
-			Body:       string(respBody),
+			Body:       c.adminErrorBody(resp, respBody),
 		}
 	}
 
 	if out != nil && len(respBody) > 0 {
 		if err := json.Unmarshal(respBody, out); err != nil {
-			return fmt.Errorf("decoding response: %w (body: %s)", err, string(respBody))
+			return fmt.Errorf("decoding response: %w (body: %s)", err, c.adminErrorBody(resp, respBody))
 		}
 	}
 	return nil
@@ -360,16 +331,15 @@ func (c *Client) getRaw(ctx context.Context, path string) ([]byte, error) {
 		return nil, fmt.Errorf("building request: %w", urlErrorReason(err))
 	}
 	req.Header.Set("Accept", "application/json, text/plain")
-	c.auth.apply(req)
+	if c.staticToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.staticToken)
+	}
 
 	slog.Debug("nodered raw request", "method", "GET", "url", RedactURL(joined))
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.sendAdmin(req, "calling GET "+RedactURL(joined))
 	if err != nil {
-		// Name the redacted destination, and scrub the wrapped error's own
-		// string: a *url.Error renders the raw URL, so %w alone leaks the
-		// token. Issue #312.
-		return nil, &TransportError{Err: fmt.Errorf("calling GET %s: %w", RedactURL(joined), redactedWrap(err))}
+		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -383,7 +353,7 @@ func (c *Client) getRaw(ctx context.Context, path string) ([]byte, error) {
 			StatusCode: resp.StatusCode,
 			Method:     "GET",
 			Path:       redactedPath(joined),
-			Body:       string(respBody),
+			Body:       c.adminErrorBody(resp, respBody),
 		}
 	}
 	return respBody, nil

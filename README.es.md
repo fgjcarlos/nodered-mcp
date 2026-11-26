@@ -178,6 +178,14 @@ Configura el límite con estas variables de entorno:
 | `MCP_HTTP_RATE_BURST` | `10` | Máxima ráfaga de solicitudes por IP de origen. |
 | `MCP_HTTP_RATE_DISABLED` | `false` | Usa `true` para desactivar el límite de solicitudes. |
 
+## Autenticación de administración de Node-RED
+
+Si Node-RED tiene `adminAuth` habilitado, usa preferentemente `NODERED_USERNAME`
+y `NODERED_PASSWORD`. El cliente los intercambia por un token bearer en memoria
+y lo renueva automáticamente. Si configuras `NODERED_TOKEN`, este tiene
+prioridad, caduca (a los siete días por defecto para los tokens de inicio de
+sesión de Node-RED) y debes reemplazarlo manualmente. Usa HTTPS para instancias remotas.
+
 ## Documentación
 
 En las [herramientas de pestañas de flujo](./docs/es/tools.md#flujos), como
