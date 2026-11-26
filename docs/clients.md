@@ -154,9 +154,10 @@ preview output as sensitive if your config stores tokens unusually.
 The same limitation as `--write` applies: for clients with no safe
 config target (Claude Code, VS Code, OpenCode, Pi) the preview prints
 the same manual snippet a plain `init` prints for your answers (still
-without `NODERED_TOKEN`) and exits with an error, so automation can detect
-that nothing was merged. `--dry-run` and `--write` together are
-rejected as contradictory.
+without `NODERED_TOKEN`). With `--all`, it reports that no merge preview is
+available and exits successfully. Without `--all`, it exits with an error
+so automation can detect that nothing was merged. `--dry-run` and
+`--write` cannot be combined.
 
 ## Claude Desktop
 

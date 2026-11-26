@@ -163,9 +163,10 @@ como sensible si tu configuración guarda tokens de forma poco habitual.
 Se aplica la misma limitación que con `--write`: para los clientes sin un
 destino de configuración seguro (Claude Code, VS Code, OpenCode, Pi), la vista
 previa imprime el mismo snippet manual que imprime un `init` normal con tus
-respuestas (también sin `NODERED_TOKEN`) y termina con un error, para que la
-automatización pueda detectar que no se fusionó nada. `--dry-run` y `--write`
-juntos se rechazan por contradictorios.
+respuestas (también sin `NODERED_TOKEN`). Con `--all`, avisa que no hay una
+vista previa de la fusión y termina correctamente. Sin `--all`, termina con
+un error para que la automatización pueda detectar que no se fusionó nada.
+`--dry-run` y `--write` no se pueden combinar.
 
 ## Claude Desktop
 

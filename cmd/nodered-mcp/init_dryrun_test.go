@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -370,8 +371,8 @@ func TestRunInit_DryRunAndWriteRejected(t *testing.T) {
 	}
 }
 
-// TestRunInit_DryRunUnsupportedTarget prints the snippet and errors just
-// like --write does for Claude Code, VS Code, OpenCode, Pi.
+// TestRunInit_DryRunUnsupportedTarget checks that without --all, dry-run
+// still prints a manual snippet and reports an error.
 func TestRunInit_DryRunUnsupportedTarget(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
@@ -407,16 +408,14 @@ func TestRunInit_DryRunUnsupportedTarget(t *testing.T) {
 		close(done)
 	}()
 
-	// The catalog returns claude-code when forced via --all. There's no
-	// chooser, so the *first* client is taken. Force claude-code by
-	// overriding detectClients.
+	// Simulate Claude Code as the only detected client.
 	oldDetect := detectClients
 	detectClients = func(_ bool) []mcpClient {
 		return []mcpClient{{key: "claude-code", name: "Claude Code"}}
 	}
 	defer func() { detectClients = oldDetect }()
 
-	err := runInit([]string{"--all", "--dry-run"})
+	err := runInit([]string{"--dry-run"})
 	outW.Close()
 	<-done
 	if err == nil {
@@ -556,6 +555,44 @@ func runInitOutput(t *testing.T, input string, args ...string) (string, string, 
 		t.Fatal(err)
 	}
 	return out, string(stderrData), runErr
+}
+
+func TestRunInit_AllDryRunFallsBackToSnippet(t *testing.T) {
+	for _, name := range []string{"Claude Code", "Pi"} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+			t.Setenv("APPDATA", home)
+			t.Setenv("XDG_CONFIG_HOME", home)
+			choice := ""
+			for i, client := range detectClients(true) {
+				if client.name == name {
+					choice = strconv.Itoa(i + 1)
+					break
+				}
+			}
+			if choice == "" {
+				t.Fatalf("%s missing from --all menu", name)
+			}
+			input := "http://nodered.lan:1880\nfake-test-token\n/srv/backups\n" + choice + "\n"
+			plain, plainStderr, err := runInitOutput(t, input, "--all")
+			if err != nil || plain == "" {
+				t.Fatalf("plain init: stdout = %q, err = %v", plain, err)
+			}
+			out, stderr, err := runInitOutput(t, input, "--all", "--dry-run")
+			if err != nil || out != plain || strings.Contains(out+stderr, "fake-test-token") {
+				t.Errorf("dry-run: stdout = %q, stderr = %q, err = %v; want the plain snippet and success without leaking the token", out, stderr, err)
+			}
+			wantStderr := plainStderr + "\n# dry-run: no merge preview for " + name + "; showing the manual setup snippet instead.\n"
+			if stderr != wantStderr {
+				t.Errorf("stderr = %q, want %q", stderr, wantStderr)
+			}
+			if entries, err := os.ReadDir(home); err != nil || len(entries) != 0 {
+				t.Errorf("dry-run changed HOME: %v (err %v)", entries, err)
+			}
+		})
+	}
 }
 
 // TestRunInit_DryRunUnsupportedTargetKeepsAnswers pins #394: for a client
