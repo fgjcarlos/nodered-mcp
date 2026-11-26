@@ -15,6 +15,8 @@ import (
 const orderedConfig = `[
  {"id":"a","type":"tab","label":"A","env":[{"name":"KEEP","value":"yes"}],"unknown":{"keep":true}},
  {"id":"n","type":"comment","z":"a","x":1,"y":2,"name":"before","credentials":{"secret":"retained"},"unknown":42},
+ {"id":"k","type":"function","z":"a","x":3,"y":4,"wires":[]},
+ {"id":"k2","type":"debug","z":"a","x":5,"y":6},
  {"id":"cfg","type":"broker","z":"a","credentials":{"secret":"config"}},
  {"id":"b","type":"tab","label":"B"},
  {"id":"other","type":"debug","z":"b","unknown":[1,2]},
@@ -36,7 +38,7 @@ func orderedRuntime(t *testing.T, conflict bool) (*Client, *RawFlow, *int, *int)
 		}
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/flow/a":
-			_, _ = io.WriteString(w, `{"id":"a","label":"A","nodes":[{"id":"n","type":"comment","z":"a","x":1,"y":2,"name":"before","unknown":42}],"configs":[{"id":"cfg","type":"broker","z":"a"}]}`)
+			_, _ = io.WriteString(w, `{"id":"a","label":"A","nodes":[{"id":"n","type":"comment","z":"a","x":1,"y":2,"name":"before","unknown":42},{"id":"k","type":"function","z":"a","x":3,"y":4,"wires":[]},{"id":"k2","type":"debug","z":"a","x":5,"y":6}],"configs":[{"id":"cfg","type":"broker","z":"a"}]}`)
 		case r.Method == "GET" && r.URL.Path == "/flows":
 			reads++
 			if r.Header.Get("Node-RED-API-Version") == "v2" {
@@ -331,9 +333,9 @@ func TestSharedFlowEditsPreserveOtherEntries(t *testing.T) {
 				}
 			}
 		}},
-		{"connect", func(c *Client) error { return c.ConnectNodes(context.Background(), "a", "n", 0, "cfg") }, func(t *testing.T, items []map[string]any) {
-			if !reflect.DeepEqual(items[1]["wires"], []any{[]any{"cfg"}}) {
-				t.Errorf("wires=%v", items[1]["wires"])
+		{"connect", func(c *Client) error { return c.ConnectNodes(context.Background(), "a", "k", 0, "k2") }, func(t *testing.T, items []map[string]any) {
+			if !reflect.DeepEqual(items[2]["wires"], []any{[]any{"k2"}}) {
+				t.Errorf("wires=%v", items[2]["wires"])
 			}
 		}},
 		{"disabled", func(c *Client) error { return c.SetFlowDisabled(context.Background(), "a", true) }, func(t *testing.T, items []map[string]any) {
@@ -367,14 +369,17 @@ func TestSharedFlowEditsPreserveOtherEntries(t *testing.T) {
 
 func assertUnaffectedEntries(t *testing.T, got []map[string]any) {
 	t.Helper()
-	var initial, unaffected []map[string]any
+	var initial []map[string]any
 	_ = json.Unmarshal([]byte(orderedConfig), &initial)
-	for _, m := range got {
-		if m["id"] != "a" && m["z"] != "a" {
-			unaffected = append(unaffected, m)
+	outsideTabA := func(entries []map[string]any) (kept []map[string]any) {
+		for _, m := range entries {
+			if m["id"] != "a" && m["z"] != "a" {
+				kept = append(kept, m)
+			}
 		}
+		return kept
 	}
-	if !reflect.DeepEqual(unaffected, initial[3:]) {
+	if !reflect.DeepEqual(outsideTabA(got), outsideTabA(initial)) {
 		t.Errorf("unaffected entries changed: %v", got)
 	}
 }

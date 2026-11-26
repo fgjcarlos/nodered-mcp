@@ -101,6 +101,93 @@ func TestValidateFlow_MissingID(t *testing.T) {
 
 // Issue kinds stay stable across changes: a model that learns to read
 // "dangling_wire" must not have to relearn it after a refactor.
+// validate_flow must not call a document clean while it carries a wire that
+// can never deliver (issue #448): connect_nodes refuses to create one, and
+// this report is what tells the operator which wire to remove. Both shapes
+// validate_flow accepts are covered: a tab document and the flat GET /flows
+// array.
+func TestValidateFlow_ReportsImpossibleWires(t *testing.T) {
+	assertImpossible := func(t *testing.T, issues []FlowIssue) {
+		t.Helper()
+		var got []FlowIssue
+		for _, issue := range issues {
+			if issue.Kind == IssueImpossibleWire {
+				got = append(got, issue)
+			}
+		}
+		if len(got) != 2 {
+			t.Fatalf("expected the two impossible wires (src→dst, cfg→broker), got %+v", issues)
+		}
+		for _, issue := range got {
+			if issue.NodeID == "src" && issue.Target == "dst" && strings.Contains(issue.Message, "no outputs") {
+				continue
+			}
+			if issue.NodeID == "cfg" && issue.Target == "broker" && strings.Contains(issue.Message, "config") {
+				continue
+			}
+			t.Errorf("unexpected impossible wire issue %+v", issue)
+		}
+	}
+	tab := `{
+	  "id":"tabA","label":"Home",
+	  "nodes":[
+	    {"id":"src","type":"debug","z":"tabA","x":1,"y":1,"wires":[["dst"]]},
+	    {"id":"dst","type":"inject","z":"tabA","x":2,"y":2,"wires":[]},
+	    {"id":"cfg","type":"function","z":"tabA","x":3,"y":3,"wires":[["broker"]]}
+	  ],
+	  "configs":[{"id":"broker","type":"mqtt-broker","z":"tabA"}]
+	}`
+	assertImpossible(t, ValidateFlow(RawFlow(tab)))
+	flat := `[{"id":"tabA","type":"tab"},{"id":"src","type":"debug","z":"tabA","x":1,"y":1,"wires":[["dst"]]},{"id":"dst","type":"inject","z":"tabA","x":2,"y":2,"wires":[]},{"id":"cfg","type":"function","z":"tabA","x":3,"y":3,"wires":[["broker"]]},{"id":"broker","type":"mqtt-broker","z":"tabA"}]`
+	assertImpossible(t, ValidateFlows(RawFlow(flat)))
+}
+
+// A wire into a node without inputs is reported like one from a node
+// without outputs. The wires of a link out that carries links are the
+// runtime's to recompute, so they are skipped here too.
+func TestValidateFlow_ReportsAWireIntoANodeWithoutInputs(t *testing.T) {
+	tab := `{"id":"tabA","nodes":[
+	  {"id":"fn","type":"function","z":"tabA","x":1,"y":1,"wires":[["inj"]]},
+	  {"id":"inj","type":"inject","z":"tabA","x":2,"y":2,"wires":[]},
+	  {"id":"lo","type":"link out","z":"tabA","x":3,"y":3,"links":["inj"],"wires":[["inj"]]}
+	]}`
+	var got []FlowIssue
+	for _, issue := range ValidateFlow(RawFlow(tab)) {
+		if issue.Kind == IssueImpossibleWire {
+			got = append(got, issue)
+		}
+	}
+	if len(got) != 1 || got[0].NodeID != "fn" || got[0].Target != "inj" || !strings.Contains(got[0].Message, "no inputs") {
+		t.Fatalf("expected exactly fn→inj reported without inputs, got %+v", got)
+	}
+}
+
+// The write paths keep accepting a configuration that already carries an
+// impossible wire: issue #448 scopes the refusal to connect_nodes and the
+// report to validate_flow. If either guard starts refusing, this pins the
+// change so it is a decision, not an accident.
+func TestValidateFlow_ImpossibleWireIsNotADeploymentError(t *testing.T) {
+	tab := `{"id":"tabA","nodes":[{"id":"src","type":"debug","z":"tabA","x":1,"y":1,"wires":[["dst"]]},{"id":"dst","type":"inject","z":"tabA","x":2,"y":2,"wires":[]}]}`
+	if err := validateFlowWires(RawFlow(tab)); err != nil {
+		t.Errorf("the single-tab write guard must not refuse an impossible wire: %v", err)
+	}
+	flat := `[{"id":"tabA","type":"tab"},{"id":"src","type":"debug","z":"tabA","x":1,"y":1,"wires":[["dst"]]},{"id":"dst","type":"inject","z":"tabA","x":2,"y":2,"wires":[]}]`
+	var items []json.RawMessage
+	if err := json.Unmarshal([]byte(flat), &items); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateEffectiveConfig(items); err != nil {
+		t.Errorf("the full deployment must keep accepting an impossible wire: %v", err)
+	}
+	var reported bool
+	for _, issue := range ValidateFlows(RawFlow(flat)) {
+		reported = reported || issue.Kind == IssueImpossibleWire
+	}
+	if !reported {
+		t.Error("validate_flow must still report the impossible wire")
+	}
+}
+
 func TestValidateFlow_IssueKindsAreStable(t *testing.T) {
 	bad := `{
 	  "id":"tabA","label":"Home",

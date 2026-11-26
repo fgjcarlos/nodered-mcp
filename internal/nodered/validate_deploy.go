@@ -161,7 +161,16 @@ func effectiveConfigIssues(items []json.RawMessage) []FlowIssue {
 // resolve. The write paths call it before they snapshot anything and
 // before they contact the runtime.
 func validateEffectiveConfig(items []json.RawMessage) error {
-	issues := effectiveConfigIssues(items)
+	var issues []FlowIssue
+	for _, issue := range effectiveConfigIssues(items) {
+		// An impossible wire is validate_flow's to report and
+		// connect_nodes' to refuse (issue #448); a configuration that
+		// already carries one stays deployable.
+		if issue.Kind == IssueImpossibleWire {
+			continue
+		}
+		issues = append(issues, issue)
+	}
 	if len(issues) == 0 {
 		return nil
 	}

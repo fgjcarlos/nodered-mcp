@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -598,5 +599,125 @@ func TestInstanceParamsParam_RejectsInvalidJSONString(t *testing.T) {
 	})
 	if !res.IsError {
 		t.Fatal("non-JSON params string should be a typed error")
+	}
+}
+
+// A JSON number arrives as a float64, so port 1.5 used to be truncated to
+// port 1 (issue #448). The handler is invoked directly: the guard fires
+// before any Node-RED call.
+func TestHandleConnectNodes_RejectsANonWholePort(t *testing.T) {
+	s := newTestServer(t, false)
+	for _, port := range []float64{1.5, -1, 1000} {
+		res, err := call(t, s.handleConnectNodes, map[string]any{
+			"flow_id": "tabA", "from_id": "a", "to_id": "b", "port": port,
+		})
+		if err != nil {
+			t.Fatalf("port %v: handleConnectNodes returned err=%v", port, err)
+		}
+		tc := res.Content[0].(mcp.TextContent)
+		if !res.IsError || !strings.Contains(tc.Text, "whole number from 0 to 999") {
+			t.Errorf("port %v: expected a refusal naming the rule, got %q", port, tc.Text)
+		}
+		if port == 1.5 && !strings.Contains(tc.Text, "1.5") {
+			t.Errorf("the refusal must echo the decimal port as sent, got %q", tc.Text)
+		}
+	}
+}
+
+// A wire that already exists is answered as such, with neither a deployment
+// nor a backup (issue #448): the mock records every request, and the backup
+// directory must stay empty. Only the snapshot read is expected.
+func TestHandleConnectNodes_ExistingWireDeploysNothing(t *testing.T) {
+	var requests []string
+	tab := []byte(`{"id":"tabA","label":"Home","nodes":[{"id":"n1","type":"inject","z":"tabA","x":1,"y":1,"wires":[["n2"]]},{"id":"n2","type":"function","z":"tabA","x":2,"y":1,"wires":[]}]}`)
+	s, backupDir := serverWithMockAndBackups(t, func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		if r.Method == http.MethodGet && r.URL.Path == "/flows" {
+			_, _ = w.Write(mockFlowSnapshot(r, tab))
+			return
+		}
+		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		http.Error(w, "unexpected request", http.StatusBadRequest)
+	})
+	res, err := call(t, s.handleConnectNodes, map[string]any{
+		"flow_id": "tabA", "from_id": "n1", "to_id": "n2", "port": float64(0),
+	})
+	if err != nil {
+		t.Fatalf("handleConnectNodes returned err=%v", err)
+	}
+	tc := res.Content[0].(mcp.TextContent)
+	if res.IsError || !strings.Contains(tc.Text, "already wired") || !strings.Contains(tc.Text, "no backup") {
+		t.Errorf("expected an already-wired answer without a backup, got %q", tc.Text)
+	}
+	for _, req := range requests {
+		if req != "GET /flows" {
+			t.Errorf("an existing wire must only read the snapshot, got %q", req)
+		}
+	}
+	if files, _ := os.ReadDir(backupDir); len(files) != 0 {
+		t.Errorf("an existing wire must not create a backup, got %d files", len(files))
+	}
+}
+
+// The complement of the test above: a wire that is NOT there must still be
+// written. Without it, answering "already connected" for every call would
+// look like a pass (issue #448).
+func TestHandleConnectNodes_NewWireDeploysAndBacksUp(t *testing.T) {
+	tab := []byte(`{"id":"tabA","label":"Home","nodes":[{"id":"n1","type":"function","z":"tabA","x":1,"y":1,"wires":[]},{"id":"n3","type":"debug","z":"tabA","x":3,"y":1,"wires":[]}]}`)
+	deployed := false
+	s, backupDir := serverWithMockAndBackups(t, func(w http.ResponseWriter, r *http.Request) {
+		if serveTestPalette(w, r) {
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/flows" {
+			_, _ = w.Write(mockFlowSnapshot(r, tab))
+			return
+		}
+		if mockTabDeployment(r) {
+			deployed = true
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		http.Error(w, "unexpected request", http.StatusBadRequest)
+	})
+	res, err := call(t, s.handleConnectNodes, map[string]any{
+		"flow_id": "tabA", "from_id": "n1", "to_id": "n3", "port": float64(0),
+	})
+	if err != nil {
+		t.Fatalf("handleConnectNodes returned err=%v", err)
+	}
+	tc := res.Content[0].(mcp.TextContent)
+	if res.IsError || !strings.Contains(tc.Text, "Wired") || !strings.Contains(tc.Text, "backup was taken") {
+		t.Fatalf("a new wire must be written and say so, got %q", tc.Text)
+	}
+	if !deployed {
+		t.Error("a new wire must deploy")
+	}
+	if files, _ := os.ReadDir(backupDir); len(files) == 0 {
+		t.Error("a new wire must create a backup")
+	}
+}
+
+// The issue's acceptance criterion is that validate_flow does not answer ok
+// on a flow carrying an impossible wire: the kind has to reach the caller and
+// flip ok, on both shapes the tool accepts (issue #448).
+func TestHandleValidateFlow_ImpossibleWireAffectsOK(t *testing.T) {
+	s := newTestServer(t, true)
+	for name, flow := range map[string]string{
+		"flat": `[{"id":"t","type":"tab"},{"id":"f","type":"function","z":"t","x":1,"y":1,"wires":[["i"]]},{"id":"i","type":"inject","z":"t","x":2,"y":2,"wires":[]}]`,
+		"tab":  `{"id":"t","nodes":[{"id":"a","type":"debug","z":"t","x":1,"y":1,"wires":[["b"]]},{"id":"b","type":"inject","z":"t","x":2,"y":2,"wires":[]}]}`,
+	} {
+		res, err := call(t, s.handleValidateFlow, map[string]any{"flow": flow})
+		if err != nil || res == nil || res.IsError {
+			t.Fatalf("%s: err=%v res=%v", name, err, res)
+		}
+		tc := res.Content[0].(mcp.TextContent)
+		if !strings.Contains(tc.Text, `"ok": false`) || !strings.Contains(tc.Text, "impossible_wire") || !strings.Contains(tc.Text, "1 issue(s)") {
+			t.Errorf("%s: an impossible wire must flip ok and name the kind, got %s", name, tc.Text)
+		}
 	}
 }

@@ -47,7 +47,7 @@ func TestValidateFlowSemanticWarnings(t *testing.T) {
 			name: "HTTP reachability through branches cycles and cross-tab links",
 			flow: `[{"id":"t","type":"tab"},{"id":"t2","type":"tab"},
 				{"id":"no","type":"http in","z":"t","x":1,"y":1,"wires":[["dead"]]},
-				{"id":"dead","type":"debug","z":"t","x":1,"y":1,"wires":[["dead"]]},
+				{"id":"dead","type":"function","z":"t","x":1,"y":1,"wires":[["dead"]]},
 				{"id":"yes","type":"http in","z":"t","x":1,"y":1,"wires":[["dead","out"]]},
 				{"id":"out","type":"link out","z":"t","x":1,"y":1,"links":["in"],"wires":[]},
 				{"id":"in","type":"link in","z":"t2","x":1,"y":1,"wires":[["reply"]]},

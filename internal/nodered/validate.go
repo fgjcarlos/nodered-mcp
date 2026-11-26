@@ -57,6 +57,12 @@ const (
 	// the flows at all (issue #336).
 	IssueMissingType    FlowIssueKind = "missing_type"
 	IssueFunctionSyntax FlowIssueKind = "function_syntax"
+	// IssueImpossibleWire is a wire that can never carry a message: its
+	// source has no outputs, its target has no inputs, or either end is a
+	// config node. connect_nodes refuses to create one (issue #448). The
+	// deployment paths keep accepting a configuration that already carries
+	// one, so the write guards do not refuse this kind.
+	IssueImpossibleWire FlowIssueKind = "impossible_wire"
 )
 
 // FlowGuardError is a refusal by the client-side guard of a flow
@@ -137,6 +143,7 @@ func validateFlow(flow RawFlow, checkFunctionSyntax bool) []FlowIssue {
 		ids[id] = true
 	}
 	issues = append(issues, validateWires(doc.Nodes, doc.Configs, ids)...)
+	issues = append(issues, validateWireEndpoints(doc)...)
 	issues = append(issues, validateLinkShapes(doc.Nodes, doc.Configs)...)
 
 	if issues == nil {
@@ -303,6 +310,56 @@ func linkOutOwnsWires(node map[string]json.RawMessage) bool {
 	}
 	_, hasWires := node["wires"]
 	return hasWires
+}
+
+// validateWireEndpoints reports every wire that can never carry a message
+// (IssueImpossibleWire): its source has no outputs, its target has no
+// inputs, or either end is a config node. connect_nodes refuses to create
+// such a wire, so validate_flow must not call the document clean while one
+// is there (issue #448). A dangling target is validateWires' to report, and
+// the wires of a link out that carries links are the runtime's to
+// recompute, so both are skipped here.
+func validateWireEndpoints(doc *flowDoc) []FlowIssue {
+	type end struct {
+		node     map[string]json.RawMessage
+		isConfig bool
+	}
+	ends := make(map[string]end, len(doc.Nodes)+len(doc.Configs))
+	for i, collection := range [][]map[string]json.RawMessage{doc.Nodes, doc.Configs} {
+		for _, node := range collection {
+			ends[nodeID(node)] = end{node, i == 1}
+		}
+	}
+	var issues []FlowIssue
+	for i, collection := range [][]map[string]json.RawMessage{doc.Nodes, doc.Configs} {
+		for _, node := range collection {
+			if linkOutOwnsWires(node) {
+				continue
+			}
+			wires, err := decodeWires(node)
+			if err != nil || wires == nil {
+				continue // validateWires reports the shape.
+			}
+			src := nodeID(node)
+			for port, targets := range wires {
+				for _, tgt := range targets {
+					e, ok := ends[tgt]
+					if !ok {
+						continue
+					}
+					if why := wireEndpointProblem(node, e.node, i == 1, e.isConfig); why != "" {
+						issues = append(issues, FlowIssue{
+							Kind:    IssueImpossibleWire,
+							NodeID:  src,
+							Target:  tgt,
+							Message: fmt.Sprintf("node %q wires port %d to %q; %s", src, port, tgt, why),
+						})
+					}
+				}
+			}
+		}
+	}
+	return issues
 }
 
 // validateLinkShapes reports the link nodes whose "links" field is not an
