@@ -1,5 +1,21 @@
 # Roadmap
 
+**English** | [Español](es/roadmap.md)
+
+This page shows where the project stands: which design questions are settled,
+what each released version added, and what is planned next. It is meant for
+anyone deciding whether to adopt or upgrade the server, and for contributors
+looking for open topics. For the day-to-day list of what you can ask your
+assistant, see [Tools](tools.md); for terms such as
+[tool](glossary.md#tool), [read-only mode](glossary.md#read-only-mode) or
+[denylist](glossary.md#denylist), see the [glossary](glossary.md).
+
+## Contents
+
+- [Open risks & decisions](#open-risks--decisions)
+- [Delivered versions](#delivered-versions)
+- [Planned](#planned)
+
 ## Open risks & decisions
 
 | Topic | Status |

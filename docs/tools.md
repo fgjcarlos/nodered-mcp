@@ -1,12 +1,52 @@
 # Tools
 
+**English** | [Español](es/tools.md)
+
+This page is the catalogue of everything the server lets an AI assistant do
+with your Node-RED: which [tools](glossary.md#tool) exist, which of them only
+look and which change things, and the safety rules that apply to the ones that
+change things. You need it if you want to know what to ask your assistant for,
+if you run the server in [read-only mode](glossary.md#read-only-mode), or if
+you have to decide whether a particular operation is safe to allow.
+
+## Contents
+
+- [How to read this page](#how-to-read-this-page)
+- [Node-type policy](#node-type-policy)
+- [Retry safety](#retry-safety)
+- [Timeout budgets](#timeout-budgets)
+- [Backup recovery limits](#backup-recovery-limits)
+- [Flows](#flows)
+- [Palette](#palette)
+- [Runtime, diagnostics, recovery](#runtime-diagnostics-recovery)
+- [Context helper recovery](#context-helper-recovery)
+- [Resources (3)](#resources-3)
+- [Prompts (2)](#prompts-2)
+- [Node-RED version detection](#node-red-version-detection)
+- [Reading `get_runtime_info`](#reading-get_runtime_info)
+
+## How to read this page
+
+A **tool** is one action the AI assistant can ask the server to perform, such
+as "list my flows" or "install a node". You do not call tools yourself: you
+write a normal request in your assistant's chat and the assistant picks the
+tool. Each tool has a fixed name (for example `list_flows`); the examples under
+each group below show the kind of sentence that leads to it. See the
+[glossary](glossary.md) for words such as [flow](glossary.md#flow),
+[tab](glossary.md#tab), [node](glossary.md#node) and
+[Admin API](glossary.md#admin-api).
+
 44 tools, 3 resources, 2 prompts. Tools are classified by risk:
 
-- **read** — no side effects.
-- **write** — mutates persisted configuration.
+- **read** — no side effects (it only looks; nothing changes).
+- **write** — mutates persisted configuration (it changes what is saved in Node-RED).
 - **action** — has a runtime side effect that is not persisted (e.g. `inject_node`).
 
-A write that changes the flow configuration takes a snapshot of it first; the
+In the tables below, **HTTP** is the [Admin API](glossary.md#admin-api) call
+the tool makes (`local` means it never contacts Node-RED), **Risk** is one of
+the three classes above, and **Notes** holds the details worth knowing.
+
+A write that changes the flow configuration takes a snapshot (a [backup](glossary.md#backup)) of it first; the
 palette writes and `inject_node` do not. See
 [Which writes snapshot the flow configuration](#which-writes-snapshot-the-flow-configuration).
 
@@ -20,6 +60,10 @@ The 21 tools marked `read` are the only ones registered under
 `--read-only`.
 
 ## Node-type policy
+
+In short: the server refuses to create or change nodes of certain dangerous
+types (by default `exec` and `system`, which can run commands on the host).
+The list is the [denylist](glossary.md#denylist).
 
 Every write tool that can carry a node type is subject to the
 `MCP_NODE_DENYLIST` policy (default `exec,system`). The policy is
@@ -40,6 +84,9 @@ Covered surfaces: `create_flow`, `update_flow`, `add_node`,
 same policy. See [`SECURITY.md`](../SECURITY.md).
 
 ## Retry safety
+
+In short: looking is retried automatically, changing is not, so that a change
+is never applied twice by accident.
 
 Read tools retry typed HTTP transport failures up to twice (three attempts
 in total), with a 15-second deadline per attempt. Validation errors and
@@ -71,6 +118,9 @@ carries, and three things follow:
   other editor's work. Read the flow again before retrying.
 
 ## Timeout budgets
+
+In short: every call has a time limit; slow operations such as installing a
+node get a longer one.
 
 Each tool attempt runs under a context deadline. The default is 15 seconds.
 The tools whose work legitimately outlasts it carry their own budget, so the
@@ -117,6 +167,10 @@ names the lock it was waiting for:
 - `waiting for write lock: context canceled; no action was started`
 
 ## Backup recovery limits
+
+In short: the automatic [backups](glossary.md#backup) restore the *shape* of
+your flows, but not passwords and other secrets stored by Node-RED. Read this
+before deleting anything.
 
 Automatic backups are **structural snapshots of `GET /flows`**, not full
 Node-RED disaster-recovery backups. `restore_backup` restores flow JSON only.
@@ -189,6 +243,19 @@ proceed.
 - `inject_node` — it fires a message; nothing is persisted.
 
 ## Flows
+
+A [flow](glossary.md#flow) (a [tab](glossary.md#tab) in the editor) is a set of
+connected [nodes](glossary.md#node); a [subflow](glossary.md#subflow) is a
+reusable group of nodes. These tools read and edit them.
+
+Example requests:
+
+- "Show me all my flows" uses `list_flows`.
+- "Find every node that talks to MQTT" uses `search_flows`.
+- "Create a new flow called Garden" uses `create_flow`.
+- "Add a debug node to the Garden flow" uses `add_node`.
+- "Is this flow valid before I deploy it?" uses `validate_flow`.
+- "Export the Garden flow so I can share it" uses `export_flow`.
 
 `get_flow`, `export_flow`, `update_flow`, `delete_flow`, `disable_flow`, and
 `enable_flow` require a tab identifier. Pass `flow_id` or the original `id`.
@@ -352,6 +419,17 @@ node definitions.
 
 ## Palette
 
+The [palette](glossary.md#palette) is the list of node types available in the
+editor. These tools look at it, search the public npm registry for more, and
+install, remove, enable or disable them.
+
+Example requests:
+
+- "Which nodes are installed?" uses `list_nodes`.
+- "Is there a node for Telegram?" uses `search_nodes`.
+- "Install node-red-contrib-influxdb" uses `install_node`.
+- "Disable that module for now" uses `disable_node`.
+
 | Tool | HTTP | Risk | Notes |
 |---|---|---|---|
 | `list_nodes` | `GET /nodes` | read | |
@@ -372,6 +450,20 @@ the package is trusted first. Skipping lifecycle scripts can make some packages
 unusable.
 
 ## Runtime, diagnostics, recovery
+
+These tools look at how Node-RED itself is doing (settings, logs, debug
+output, [context](glossary.md#context) values), start or stop the flows, and
+list or restore [backups](glossary.md#backup).
+
+Example requests:
+
+- "What version of Node-RED is this, and is it healthy?" uses `get_diagnostics` and `get_runtime_info`.
+- "What did the debug nodes print in the last minutes?" uses `get_debug_messages`.
+- "Show me the Node-RED logs" uses `get_runtime_logs`.
+- "What is stored in the global variable `counter`?" uses `get_context`.
+- "Show me my backups" uses `list_backups`.
+- "What changed between that backup and now?" uses `diff_flows`.
+- "Go back to the backup from this morning" uses `restore_backup`.
 
 | Tool | HTTP | Risk | Notes |
 |---|---|---|---|
@@ -418,6 +510,9 @@ those clients. This is not a distributed transaction or a cross-process singleto
 
 ## Resources (3)
 
+A [resource](glossary.md#resource) is a piece of read-only data the assistant
+can open directly, without calling a tool.
+
 | URI | Description |
 |---|---|
 | `nodered://flows/current` | The full current flow configuration |
@@ -426,10 +521,14 @@ those clients. This is not a distributed transaction or a cross-process singleto
 
 ## Prompts (2)
 
+A [prompt](glossary.md#prompt) is a ready-made request template the client can
+offer you, for example "explain this flow".
+
 | Name | Description |
 |---|---|
 | `explain_flow` | Describe what a flow does, its triggers, and external dependencies |
 | `generate_flow` | Build a flow from a plain-English description |
+
 ## Node-RED version detection
 
 A few tools need a minimum Node-RED version: `set_context` and
