@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -267,5 +268,51 @@ func TestAdminPasswordRejectionStopsTails(t *testing.T) {
 	}
 	if grants.Load() != 2 {
 		t.Errorf("expected one grant per tail, got %d", grants.Load())
+	}
+}
+
+func TestAdminPasswordFollowsSafeProxyRedirects(t *testing.T) {
+	const token = "synthetic-proxy-token"
+	var grants atomic.Int32
+	secure := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth/login":
+			fmt.Fprint(w, `{"type":"credentials"}`)
+		case "/auth/token":
+			grants.Add(1)
+			if r.Method != http.MethodPost {
+				t.Error("expected a secure password grant")
+			}
+			fmt.Fprintf(w, `{"access_token":%q,"expires_in":3600}`, token)
+		case "/flows":
+			http.Redirect(w, r, "/flows/", http.StatusMovedPermanently)
+		case "/flows/":
+			if r.Header.Get("Authorization") != "Bearer "+token {
+				t.Error("trusted redirect lost the bearer")
+			}
+			fmt.Fprint(w, `[]`)
+		case "/runtime":
+			http.Redirect(w, r, r.URL.Query().Get("destination"), http.StatusTemporaryRedirect)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer secure.Close()
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/auth/login" || r.Method != http.MethodGet || r.Header.Get("Authorization") != "" {
+			t.Error("credentials or authenticated traffic reached the HTTP proxy")
+		}
+		http.Redirect(w, r, secure.URL+r.URL.Path, http.StatusPermanentRedirect)
+	}))
+	defer proxy.Close()
+	c, err := NewClient(Options{BaseURL: proxy.URL, Username: "operator", Password: "synthetic-proxy-password", Insecure: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ListFlows(context.Background()); err != nil || grants.Load() != 1 {
+		t.Errorf("proxy login did not complete: %v", err)
+	}
+	if _, err := c.getRaw(context.Background(), "/runtime?destination="+url.QueryEscape(proxy.URL+"/downgrade")); err == nil || !strings.Contains(err.Error(), "HTTP 307") {
+		t.Errorf("authenticated HTTPS request should reject a downgrade: %v", err)
 	}
 }

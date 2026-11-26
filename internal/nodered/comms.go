@@ -183,7 +183,7 @@ func (t *DebugTail) session(ctx context.Context) (sessionErr error) {
 		defer sanitizeTailAuthError(&sessionErr, token, t.client.passwordAuth.password)
 	}
 
-	conn, _, err := websocket.Dial(ctx, t.wsURL, opts)
+	conn, _, err := websocket.Dial(ctx, tailAdminURL(t.wsURL, lease), opts)
 	if err != nil {
 		// Name the redacted destination and scrub the wrapped error, which
 		// reports the handshake URL itself. Issue #312.

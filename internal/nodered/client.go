@@ -126,7 +126,7 @@ func NewClient(opts Options) (*Client, error) {
 	var password *passwordAuth
 	if opts.Token == "" && opts.Username != "" {
 		password = &passwordAuth{username: opts.Username, password: opts.Password}
-		httpClient.CheckRedirect = stopAdminRedirect
+		httpClient.CheckRedirect = safeAdminRedirect
 	}
 
 	if opts.Insecure {
