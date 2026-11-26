@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"sort"
 	"strings"
 
@@ -313,8 +314,6 @@ func (s *Server) handleDeleteNode(ctx context.Context, req mcp.CallToolRequest) 
 }
 
 // handleConnectNodes wires one node's output port to another node.
-
-// handleConnectNodes wires one node's output port to another node.
 func (s *Server) handleConnectNodes(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	flowID, err := req.RequireString("flow_id")
 	if err != nil {
@@ -328,21 +327,29 @@ func (s *Server) handleConnectNodes(ctx context.Context, req mcp.CallToolRequest
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	port := int(req.GetFloat("port", 0))
-	if port < 0 || port > 999 {
-		return mcp.NewToolResultError(fmt.Sprintf("port %d is out of range (must be 0-999)", port)), nil
+	// A JSON number arrives as a float64: 1.5 used to be truncated to 1.
+	port := req.GetFloat("port", 0)
+	if port != math.Trunc(port) || port < 0 || port > 999 {
+		return mcp.NewToolResultError(fmt.Sprintf("port %v must be a whole number from 0 to 999", port)), nil
 	}
 	if fromID == toID {
 		return mcp.NewToolResultError("from_id and to_id must differ (wiring a node to itself creates an infinite message loop)"), nil
 	}
 	slog.Debug("tool: connect_nodes", "flow_id", flowID, "from", fromID, "port", port, "to", toID)
 
-	if err := s.nrClient.ConnectNodes(ctx, flowID, fromID, port, toID); err != nil {
+	if err := s.nrClient.ConnectNodes(ctx, flowID, fromID, int(port), toID); err != nil {
+		if errors.Is(err, nodered.ErrWireExists) {
+			// The edit stopped before the write: nothing was deployed and
+			// no backup was taken (issue #448).
+			return mcp.NewToolResultText(fmt.Sprintf(
+				"Node %q output %d is already wired to %q; nothing was deployed and no backup was taken.", fromID, int(port), toID,
+			)), nil
+		}
 		slog.Error("connect_nodes failed", "error", err, "flow_id", flowID)
 		return toolResultError(err, fmt.Sprintf("connecting nodes: %v", err))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf(
-		"Wired %q output %d to %q (a backup was taken first).", fromID, port, toID,
+		"Wired %q output %d to %q (a backup was taken first).", fromID, int(port), toID,
 	)), nil
 }
 

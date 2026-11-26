@@ -6,6 +6,23 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- `connect_nodes` validates what it wires (#448). A `port` that is not a
+  whole number from 0 to 999 is refused; 1.5 used to be truncated to 1.
+  A wire from a core node without outputs (debug, http response, link out,
+  mqtt out, websocket out, comment), into one without inputs (inject,
+  catch, status, link in, http in, mqtt in, websocket in, comment) or
+  touching a config node is refused with a message that names the node and
+  says why. A wire that already exists is answered as already connected,
+  without deploying or taking a backup; it used to be reported as wired
+  after a deployment and a backup. `validate_flow` reports such a wire
+  already in a flow as a new structural issue kind, `impossible_wire`, on
+  both the tab document and the flat array shapes; `set_flows` and
+  `update_flow` keep accepting a configuration that already carries one.
+  `GET /nodes` publishes no `inputs` or `outputs`, so third-party node
+  types are not judged by these rules.
+
 ## [0.10.0] - 2026-11-25
 
 ### Security
