@@ -143,7 +143,7 @@ func runInit(args []string) error {
 	// the two is contradictory (preview vs. commit) and is rejected below
 	// so callers can detect the misuse rather than have one flag silently
 	// shadow the other.
-	dryRun := fs.Bool("dry-run", false, "print the exact merged config that --write would commit, without touching the filesystem")
+	dryRun := fs.Bool("dry-run", false, "preview the --write merge without writing files; with --all, show a manual snippet for clients without a writable config target")
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return nil
@@ -178,7 +178,7 @@ func runInit(args []string) error {
 
 	switch {
 	case *dryRun:
-		return runInitDryRun(target, *name, bin, env, explicitName)
+		return runInitDryRun(target, *name, bin, env, explicitName, *all)
 	case *write:
 		var confirmOverwrite func() bool
 		if explicitName {
@@ -200,21 +200,25 @@ func runInit(args []string) error {
 
 // runInitDryRun previews the merge --write would commit for target,
 // without ever calling writeJSONObject. For clients with no safe write
-// target, it prints the manual snippet (as --write does) and returns the
-// same style of error.
+// target, it prints the manual snippet (as --write does) and returns an
+// error unless the client was selected with --all.
 //
 // The preview is the merged config with secret-bearing values masked, so
 // it is NOT byte-identical to the file --write produces when the existing
 // config already holds a value under a secret-bearing key: the preview
 // shows REDACTED where the file keeps the real value. The same entries
 // are merged, even when --write would first require confirmation.
-func runInitDryRun(target mcpClient, name, bin string, env map[string]string, explicitName bool) error {
+func runInitDryRun(target mcpClient, name, bin string, env map[string]string, explicitName, all bool) error {
 	path, rootKey, ok := writableTarget(target.key)
 	if !ok {
 		fmt.Fprintf(os.Stderr, "\n--- %s: %s ---\n", target.name, target.note)
 		fmt.Println(renderConfig(target.key, name, bin, env))
 		if _, ok := env["NODERED_TOKEN"]; ok {
 			printTokenOmittedNote()
+		}
+		if all {
+			fmt.Fprintf(os.Stderr, "\n# dry-run: no merge preview for %s; showing the manual setup snippet instead.\n", target.name)
+			return nil
 		}
 		fmt.Fprintf(os.Stderr, "\n(--dry-run isn't supported for %s — the merge preview requires a writable config target)\n", target.name)
 		return fmt.Errorf("--dry-run is not supported for %s: no preview was produced", target.name)

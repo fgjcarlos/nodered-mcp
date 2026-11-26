@@ -504,7 +504,8 @@ func (s *Server) registerTools() {
 		mcp.WithDescription(
 			"Install a node module from npm into the running Node-RED instance "+
 				"(adds it to the palette). MUTATES THE RUNTIME and can take a while "+
-				"since npm runs under the hood. Returns the installed module info.",
+				"since npm runs under the hood. Returns the installed module info. "+
+				"If the module is not found, use search_nodes to find the correct package name.",
 		),
 		mcp.WithString("module", mcp.Required(),
 			mcp.Description("The npm package name, e.g. \"node-red-dashboard\".")),

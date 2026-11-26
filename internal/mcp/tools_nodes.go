@@ -82,7 +82,13 @@ func (s *Server) handleInstallNode(ctx context.Context, req mcp.CallToolRequest)
 	info, err := s.nrClient.InstallNode(ctx, module, version)
 	if err != nil {
 		slog.Error("install_node failed", "error", err, "module", module)
-		return toolResultError(err, paletteFailureMessage(err, fmt.Sprintf("calling Node-RED: %v", err)))
+		message := paletteFailureMessage(err, fmt.Sprintf("calling Node-RED: %v", err))
+		var apiErr *nodered.APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound &&
+			apiErr.Method == http.MethodPost && apiErr.Path == "/nodes" {
+			message += " Node-RED could not find the module on the npm registry. Use search_nodes to find the correct package name."
+		}
+		return toolResultError(err, message)
 	}
 	out, err := json.MarshalIndent(info, "", "  ")
 	if err != nil {

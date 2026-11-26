@@ -151,7 +151,6 @@ portTargetIssues    internal/nodered/validate_deploy.go    9
 ownerRuleIssues    internal/nodered/validate_deploy.go    4
 newConfigIndex    internal/nodered/validate_deploy.go    8
 validateTabEntries    internal/nodered/validate_deploy.go    8
-withoutLinkOutWires    internal/nodered/validate_deploy.go    8
 linksShapeIssues    internal/nodered/validate_deploy.go    4
 decodeConfigEntry    internal/nodered/validate_deploy.go    5
 effectiveConfigItems    internal/nodered/validate_deploy.go    5
