@@ -61,10 +61,10 @@ nodered-mcp init --write
 
 Te pregunta:
 
-1. **URL de Node-RED** (pulsa Enter para mantener `http://localhost:1880`).
-2. **Token de Node-RED** (opcional; pulsa Enter para omitirlo, consulta
+1. **URL de Node-RED** (pulsa Intro para mantener `http://localhost:1880`).
+2. **Token de Node-RED** (opcional; pulsa Intro para omitirlo, consulta
    [la siguiente sección](#un-token-si-node-red-pide-inicio-de-sesión)).
-3. **Directorio de copias de seguridad** (pulsa Enter para mantener `backups`).
+3. **Directorio de copias de seguridad** (pulsa Intro para mantener `backups`).
 
 Si encuentra más de un cliente instalado, te pregunta cuál configurar. Si no
 encuentra ninguno, se detiene; vuelve a ejecutarlo con `--all`.
@@ -136,7 +136,7 @@ Esto viene incorporado:
   Node-RED, así que conserva también tu propia copia; consulta los
   [límites de recuperación de copias de seguridad](tools.md#límites-de-la-recuperación-de-copias-de-seguridad).
 - **Lista de bloqueo.** Los nodos de los tipos `exec` y `system`, que ejecutan
-  comandos en tu computadora, se rechazan por defecto (`MCP_NODE_DENYLIST`).
+  comandos en tu ordenador, se rechazan por defecto (`MCP_NODE_DENYLIST`).
   Consulta [`SECURITY.md`](../../SECURITY.md) antes de cambiarlo.
 
 ## Próximos pasos

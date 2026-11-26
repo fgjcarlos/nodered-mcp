@@ -35,9 +35,9 @@ cual sea el modelo subyacente.
 
 ## Instalación
 
-Tres canales soportados. Elige el que mejor te encaje:
+Tres canales admitidos. Elige el que mejor te encaje:
 
-### Plataformas soportadas (canal npm)
+### Plataformas compatibles (canal npm)
 
 El paquete npm publica binarios nativos precompilados para todas
 las plataformas de escritorio comunes vía `optionalDependencies`.
@@ -53,9 +53,9 @@ instalación — no tienes que elegir nada:
 Los seis paquetes `@fgjcarlos/nodered-mcp-<plat>-<arch>` son
 paquetes internos de plataforma — instalas el principal
 `@fgjcarlos/nodered-mcp` y npm descarga el que corresponda. Cada
-uno declara un filtro `os`/`cpu` para que npm solo baje el binario
-que coincide con tu máquina. Para arquitecturas no soportadas
-(p.ej. Linux PowerPC, FreeBSD), usa `go install` o Docker.
+uno declara un filtro `os`/`cpu` para que npm solo descargue el binario
+que coincide con tu máquina. Para arquitecturas no admitidas
+(p. ej. Linux PowerPC, FreeBSD), usa `go install` o Docker.
 
 ```bash
 # npm — Linux, macOS y Windows en amd64/arm64. Recomendado.
@@ -77,7 +77,7 @@ mecanismo `optionalDependencies` del registro. Al ejecutar `npm install
 -g @fgjcarlos/nodered-mcp`, npm resuelve uno de los seis paquetes
 de plataforma con scope (`@fgjcarlos/nodered-mcp-<plat>-<arch>`)
 filtrando por `os`/`cpu`, y el wrapper en `bin/nodered-mcp.js`
-re-executa el ejecutable correspondiente. No se ejecutan scripts
+vuelve a ejecutar el ejecutable correspondiente. No se ejecutan scripts
 de lifecycle durante la instalación — `npm install -g --ignore-scripts
 @fgjcarlos/nodered-mcp` funciona en entornos que desactivan
 postinstall. La integridad del registro reemplaza al verificador de
@@ -155,10 +155,10 @@ docker run --rm --name nodered-mcp \
   ghcr.io/fgjcarlos/nodered-mcp:latest
 ```
 
-El volumen `nodered-backups` es donde la imagen escribe la copia que toma
+El volumen `nodered-backups` es donde la imagen escribe la copia que hace
 antes de cada llamada que muta la configuración de flows (`NODERED_BACKUP_DIR`).
-Mantenelo montado: sin
-el, las copias viven en la capa escribible del contenedor y se pierden cuando
+Mantenlo montado: sin
+él, las copias viven en la capa escribible del contenedor y se pierden cuando
 se recrea. `docker run --rm` borra el contenedor, no el volumen con nombre,
 así que recrear el contenedor conserva el historial de copias.
 
@@ -172,7 +172,7 @@ El transporte HTTP limita las solicitudes a **1 solicitud por segundo por IP de 
 
 Configura el límite con estas variables de entorno:
 
-| Variable | Predeterminado | Descripción |
+| Variable | Por defecto | Descripción |
 |---|---:|---|
 | `MCP_HTTP_RATE_PER_SEC` | `1` | Solicitudes sostenidas por segundo por IP de origen. |
 | `MCP_HTTP_RATE_BURST` | `10` | Máxima ráfaga de solicitudes por IP de origen. |
@@ -212,11 +212,11 @@ en marcha exige guardarraíles. Hay tres integrados:
   configuración antes y falla en cerrado si no puede escribirlo.
   Las operaciones de paleta (`install_node`, `uninstall_node`, `enable_node`,
   `disable_node`) y `inject_node` cambian los módulos instalados o disparan un
-  mensaje, no la configuración de flows, y no toman snapshot.
+  mensaje, no la configuración de flows, y no hacen snapshot.
   Solo permite recuperar la estructura: estos snapshots no recuperan las
-  credenciales borradas. Antes de borrar o reemplazar flows, prepará un backup
+  credenciales borradas. Antes de borrar o reemplazar flows, prepara un backup
   externo autorizado que incluya el almacén cifrado de credenciales y sus
-  claves/configuración originales; consultá los
+  claves/configuración originales; consulta los
   [límites y el procedimiento de recuperación](./docs/es/tools.md#límites-de-la-recuperación-de-copias-de-seguridad).
 - Los wires se validan antes de que la escritura llegue al runtime;
   los destinos colgantes se rechazan en la capa MCP.
@@ -237,14 +237,14 @@ nuevo el flow actual antes de reintentar una edición tras un conflicto.
 
 Las tools de lectura reintentan los fallos de transporte hasta dos veces. Las
 tools mutantes se ejecutan una sola vez: si la conexión se cierra sin una
-respuesta completa, la tool informa un resultado indeterminado y pide
+respuesta completa, la tool informa de un resultado indeterminado y pide
 revisar el runtime antes de repetir la operación, porque la acción puede
 haberse ejecutado ya.
 
 Arranca con `--read-only` (o `MCP_READ_ONLY=true`) para anunciar
-solo las 21 tools de lectura y esconder todas las mutantes en el
-registro. `inject_node` también se esconde: disparar un inject puede
-mandar una orden real a un dispositivo real.
+solo las 21 tools de lectura y ocultar todas las mutantes en el
+registro. `inject_node` también se oculta: disparar un inject puede
+enviar una orden real a un dispositivo real.
 
 Modelo de amenaza completo y checklist de hardening:
 [`SECURITY.md`](./SECURITY.md).
@@ -262,4 +262,4 @@ auditorías históricas están bajo [`docs/`](./docs/). Consulta
 
 ## Licencia
 
-MIT. Ver [`LICENSE`](./LICENSE).
+MIT. Consulta [`LICENSE`](./LICENSE).

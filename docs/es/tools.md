@@ -53,13 +53,13 @@ herramienta (`local` significa que nunca contacta con Node-RED), **Risk**
 (riesgo) es una de las tres clases anteriores y **Notes** (notas) recoge los
 detalles que conviene conocer.
 
-Una escritura que cambia la configuración de flujos toma antes una instantánea
+Una escritura que cambia la configuración de flujos hace antes una instantánea
 (una [copia de seguridad](glossary.md#copia-de-seguridad-backup)) de ella; las
 escrituras de la paleta e `inject_node` no. Consulta
 [Qué escrituras guardan una instantánea de la configuración de flujos](#qué-escrituras-guardan-una-instantánea-de-la-configuración-de-flujos).
 
 La separación `read` / `write` se aplica en el **registro** de las
-herramientas, no dentro de cada manejador: las 23 herramientas que modifican no
+herramientas, no dentro de cada gestor: las 23 herramientas que modifican no
 se anuncian cuando se usa `--read-only`, de modo que un modelo no puede llamar
 a lo que no ve. `inject_node` cuenta como una herramienta que modifica:
 disparar un inject puede enviar una orden real a hardware real.
@@ -80,7 +80,7 @@ sobre la configuración efectiva que desplegaría la escritura, y el documento s
 recorre de forma recursiva, de modo que un tipo prohibido anidado dentro de la
 definición de un subflujo también se rechaza. `update_node` se juzga sobre el
 nodo tal como queda después de combinar el parche. El rechazo nombra
-`MCP_NODE_DENYLIST` y el tipo infractor. Ocurre antes de tomar ninguna
+`MCP_NODE_DENYLIST` y el tipo infractor. Ocurre antes de hacer ninguna
 instantánea de copia de seguridad y, en toda superficie cuyo contenido efectivo
 se conoce de antemano, antes de contactar con el runtime. Dos superficies no
 pueden conocerlo de antemano: `update_node` y `connect_nodes` se juzgan sobre lo
@@ -110,7 +110,7 @@ ya. Inspecciona el runtime de Node-RED antes de repetir la operación; un error
 final no prueba que no haya cambiado nada. Las copias de seguridad protegen la
 recuperación de la configuración, no frente a mensajes duplicados ni a
 comandos de hardware. Esta política rige las repeticiones automáticas de los
-manejadores MCP; el reintento existente de `set_context` tras un HTTP 404
+gestores MCP; el reintento existente de `set_context` tras un HTTP 404
 explícito relacionado con el aprovisionamiento no cambia.
 
 ### Ediciones concurrentes
@@ -174,9 +174,9 @@ rechazo indica que no se inició ninguna acción, y nada llega al runtime.
 Dos bloqueos protegen una escritura, y ambas esperas son cancelables: el
 bloqueo propio del servidor para el ayudante de contexto y el bloqueo de
 escritura del cliente que serializa los endpoints que modifican. Una escritura
-que llega mientras uno de ellos está tomado se rinde cuando su contexto
+que llega mientras uno de ellos está ocupado se rinde cuando su contexto
 termina (cancelado por quien llama o fuera de su propio plazo), y se rinde
-antes de tomar ninguna instantánea o de contactar con el runtime. El rechazo
+antes de hacer ninguna instantánea o de contactar con el runtime. El rechazo
 nombra el bloqueo que estaba esperando:
 
 - `waiting for context helper lock: context canceled; no action was started`
@@ -338,7 +338,7 @@ contiene con `update_subflow` (una instancia anidada en otro subflujo);
 
 Un despliegue instala una configuración completa, así que se comprueba como un
 todo antes de enviar nada al runtime. La comprobación es local: nada llega a
-Node-RED y no se toma ninguna copia de seguridad cuando la configuración se
+Node-RED y no se hace ninguna copia de seguridad cuando la configuración se
 rechaza.
 
 Las reglas son las que aplica el runtime al mismo array (con una excepción,
@@ -370,7 +370,7 @@ contra esa pestaña como las de cualquier otro nodo).
 
 `set_flows` aplica estas reglas al array que recibe, y `restore_backup` las
 aplica a la copia de seguridad que va a instalar. Una copia de seguridad que ya
-no valida (una tomada de un runtime que tenía una referencia rota, o editada a
+no valida (una sacada de un runtime que tenía una referencia rota, o editada a
 mano) se rechaza con la lista de problemas; `restore_backup` con `force=true`
 la instala de todos modos, y el resultado indica que se instaló sin validar.
 Esa es la vía de recuperación, y hay que pedirla de forma explícita. `force`
@@ -470,7 +470,7 @@ Ejemplos de peticiones:
 Cuando Node-RED devuelve su respuesta genérica `unexpected_error` / `Install
 failed` para cualquiera de las dos operaciones de paleta, el error remite a los
 operadores a la salida del runtime de Node-RED (stdout, `journalctl`,
-`docker logs` o un manejador de logs configurado en `settings.js`), donde se
+`docker logs` o un gestor de logs configurado en `settings.js`), donde se
 escriben los detalles de npm. Las causas habituales incluyen scripts de ciclo
 de vida que fallan y una versión de Node incompatible. Una instalación manual
 en el directorio de usuario con `npm install --ignore-scripts <module>` puede
@@ -629,7 +629,7 @@ solución conocida que recomendar. Una herramienta de `/comms` que todavía no s
 ha observado informa `stream_unknown` en su lugar, para que cada estado
 conserve un único significado.
 
-Cada razón se deriva de una sonda que el manejador ya ejecutó. Nada de esto se
+Cada razón se deriva de una sonda que el gestor ya ejecutó. Nada de esto se
 infiere, y no se toca ningún endpoint que modifique para producirlo. La razón de
 versión nombra el mínimo real de esa herramienta concreta, así que
 `set_context` (necesita 5.0.0) y `get_diagnostics` (necesita 3.1.0) dan

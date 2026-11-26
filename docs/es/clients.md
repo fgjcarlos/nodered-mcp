@@ -351,6 +351,6 @@ en lugar de a un comando. En los clientes que admiten `url` o `type: http`:
 
 Sustituye `your-token` por el valor de `MCP_HTTP_TOKEN` definido en el
 servidor. Elimina el bloque `headers` solo si el servidor está enlazado a
-loopback (accesible únicamente desde esta computadora) y se ejecuta sin token.
+loopback (accesible únicamente desde este ordenador) y se ejecuta sin token.
 
 Reinicia el cliente tras conectarlo. Las 44 herramientas deberían aparecer.

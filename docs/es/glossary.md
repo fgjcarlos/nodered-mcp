@@ -66,7 +66,7 @@ escritura o acción. Más a fondo: [herramientas](tools.md).
 
 Una lista de tipos de nodo que `nodered-mcp` se niega a añadir o desplegar.
 Por defecto bloquea `exec` y `system`, que ejecutan comandos en tu
-computadora. Se configura con `MCP_NODE_DENYLIST`. Más a fondo:
+ordenador. Se configura con `MCP_NODE_DENYLIST`. Más a fondo:
 [configuración](configuration.md#seguridad) y
 [`SECURITY.md`](../../SECURITY.md).
 

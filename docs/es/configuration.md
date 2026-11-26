@@ -128,7 +128,7 @@ Omite esta sección si tu cliente inicia `nodered-mcp` por sí mismo mediante
 |---|---|---|---|
 | `MCP_HTTP_ADDR` | `:8090` | `--http-addr` | Dirección de escucha del transporte http |
 | `MCP_HTTP_TOKEN` | *(vacío)* | `--http-token` | Bearer token del transporte http. **Obligatorio** si la dirección no es loopback |
-| `MCP_HTTP_MAX_BODY` | `33554432` (32 MiB) | — | Límite del cuerpo de una única solicitud, en bytes. Se aplica antes de ejecutar cualquier manejador, de modo que un POST demasiado grande no pueda agotar la memoria |
+| `MCP_HTTP_MAX_BODY` | `33554432` (32 MiB) | — | Límite del cuerpo de una única solicitud, en bytes. Se aplica antes de ejecutar cualquier gestor, de modo que un POST demasiado grande no pueda agotar la memoria |
 | `MCP_HTTP_RATE_PER_SEC` | `1.0` | — | Solicitudes por segundo en régimen estable permitidas por IP de origen |
 | `MCP_HTTP_RATE_BURST` | `10` | — | Cuántas solicitudes puede enviar de golpe una misma IP de origen antes de que se limite |
 | `MCP_HTTP_RATE_DISABLED` | `false` | — | Desactiva por completo el limitador de solicitudes. Para pruebas, entornos aislados o cuando la limitación se gestiona en otra capa |

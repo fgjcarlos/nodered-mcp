@@ -6,7 +6,7 @@ Un [transporte](glossary.md#transporte) es el canal que usan la app de IA y
 `nodered-mcp` para comunicarse. Esta página explica los dos canales
 disponibles, cuál conviene elegir y cómo proteger el que funciona por red.
 Solo la necesitas si quieres compartir un servidor entre varias apps o
-computadoras, o si te da curiosidad cómo funciona la conexión; en caso
+ordenadores, o si te da curiosidad cómo funciona la conexión; en caso
 contrario, el valor por defecto es suficiente.
 
 ## Contenido
@@ -21,7 +21,7 @@ contrario, el valor por defecto es suficiente.
 
 | Si tú... | Usa |
 |---|---|
-| ejecutas una app de IA en la misma computadora que `nodered-mcp` | stdio (predeterminado, no hay nada que configurar) |
+| ejecutas una app de IA en el mismo ordenador que `nodered-mcp` | stdio (predeterminado, no hay nada que configurar) |
 | quieres un servidor de larga duración compartido por varias apps o máquinas | http |
 
 En la práctica: con stdio la configuración de tu cliente dice
@@ -91,7 +91,7 @@ equivocado no revela cuánto del token era correcto, y el token nunca aparece
 en una respuesta. Las solicitudes rechazadas se registran con la dirección de
 quien las hizo.
 
-Aquí sigue sin haber cifrado de transporte: en una red no confiable,
+Aquí sigue sin haber cifrado de transporte: en una red no fiable,
 colócalo detrás de un proxy inverso que termine TLS. Los clientes web
 alojados que necesitan OAuth en lugar de un token fijo se tratan en la
 siguiente sección.

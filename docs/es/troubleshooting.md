@@ -57,7 +57,7 @@ Confirma que `--transport http` está definido y que el puerto de
 
 **Se rechaza una escritura con un error de copia de seguridad.** Las copias de
 seguridad son «fail-closed» por diseño (una copia de seguridad es una copia
-guardada de tus flujos que se toma antes de cada cambio): si la instantánea no
+guardada de tus flujos que se hace antes de cada cambio): si la instantánea no
 se puede escribir, la escritura no continúa, de modo que nunca cambias flujos
 sin una forma de volver atrás. Comprueba que `NODERED_BACKUP_DIR` existe y es
 escribible.

@@ -120,7 +120,7 @@ determina si una operación se reintenta. Los errores HTTP completos y los
 errores de validación local mantienen sus respuestas de error de herramienta
 existentes.
 
-Los manejadores que modifican nunca se repiten automáticamente. Un fallo de
+Los gestores que modifican nunca se repiten automáticamente. Un fallo de
 transporte devuelve un resultado de error de herramienta que indica que el
 resultado es indeterminado y que quien llama debe inspeccionar el runtime antes
 de repetir la operación. Perder una respuesta no deshace la acción. Las guardas
@@ -231,7 +231,7 @@ necesita, donde los necesita. Nunca se pierde ningún campo.
 
 **Reglas:**
 
-- Los flujos y los nodos se manejan como **JSON opaco**. Cero pérdida de campos.
+- Los flujos y los nodos se tratan como **JSON opaco**. Cero pérdida de campos.
 - Solo se analizan los campos concretos que hacen falta en el punto de uso
   (por ejemplo, extraer `id` / `type` / `label` para un resumen legible).
 - El servidor nunca reescribe un nodo que no entiende: lo pasa tal cual.
@@ -310,12 +310,12 @@ El servidor mantiene `ctxHelperMu` durante el descubrimiento, el
 aprovisionamiento y el envío del inject. Las demás herramientas de escritura
 registradas usan el mismo mutex, y el bloqueo de escritura existente del
 cliente se adquiere en segundo lugar. `restore_backup` conserva su bloqueo a
-nivel de manejador y la invalidación de la caché. Los clientes externos no
+nivel de gestor y la invalidación de la caché. Los clientes externos no
 comparten estos bloqueos locales al proceso. Los ayudantes editados o
 parciales se conservan, no se tratan como código ejecutable de confianza. Ambos
 bloqueos esperan con el contexto de quien llama: una escritura cuyo contexto se
 cancela o cuyo plazo vence se rinde en lugar de seguir en cola, y se rinde
-antes de tomar ninguna instantánea o de contactar al runtime (issue #347).
+antes de hacer ninguna instantánea o de contactar con el runtime (issue #347).
 Consulta [Recuperación del ayudante de contexto](tools.md#recuperación-del-ayudante-de-contexto)
 para conocer los límites que afectan al operador.
 
@@ -328,7 +328,7 @@ con una marca de tiempo. `POST /flows/state` (inicio/parada del runtime)
 también lo guarda.
 
 Las operaciones de paleta (`POST /nodes`, `DELETE /nodes/:module`,
-`PUT /nodes/:module`) y `inject_node` (`POST /inject/:id`) no toman ninguna
+`PUT /nodes/:module`) y `inject_node` (`POST /inject/:id`) no hacen ninguna
 instantánea: cambian los módulos instalados o lanzan un mensaje, no la
 configuración de flujos persistida.
 
@@ -338,7 +338,7 @@ configuración de flujos persistida.
 - Retención: se conservan las `NODERED_BACKUP_KEEP` instantáneas más recientes
   (50 por defecto; `0` desactiva la poda). La poda nunca bloquea una escritura.
 - Nombre de archivo: `flows-<YYYYMMDD-HHMMSS.NNNNNNNNN>-<seq>.json` (UTC, más
-  un contador por proceso que distingue dos instantáneas tomadas en el mismo
+  un contador por proceso que distingue dos instantáneas hechas en el mismo
   nanosegundo).
 - Las instantáneas cubren solo la estructura de flujos que devuelve
   `GET /flows`, no el almacén de credenciales cifradas independiente de
