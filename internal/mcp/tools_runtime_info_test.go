@@ -9,8 +9,38 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+func TestNodeRedAuthRequired(t *testing.T) {
+	const hint = "Node-RED requires authentication: configure NODERED_USERNAME/NODERED_PASSWORD or NODERED_TOKEN"
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			s, _ := serverWithMockVersionProbe(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/settings", "/flows":
+					http.Error(w, http.StatusText(status), status)
+				default:
+					http.NotFound(w, r)
+				}
+			})
+			res, err := call(t, s.handleGetRuntimeInfo, map[string]any{})
+			if err != nil || res == nil || !res.IsError || len(res.Content) != 1 || res.Content[0] != (mcp.TextContent{Type: "text", Text: hint}) {
+				t.Errorf("get_runtime_info: got %#v, %v; want a tool error with %q", res, err, hint)
+			}
+			if status == http.StatusUnauthorized {
+				res, err := call(t, s.handleListFlows, map[string]any{})
+				if err != nil || res == nil || !res.IsError || len(res.Content) != 1 {
+					t.Fatalf("list_flows: got %#v, %v; want one tool error", res, err)
+				}
+				want := "calling Node-RED: nodered GET /flows: HTTP 401: " + hint
+				if res.Content[0] != (mcp.TextContent{Type: "text", Text: want}) {
+					t.Errorf("list_flows: got %#v; want %q", res.Content[0], want)
+				}
+			}
+		})
+	}
+}
+
 // TestHandleGetRuntimeInfo_AlwaysReturnsJson is the smoke test:
-// regardless of which probes fail, the handler must return a JSON
+// for ordinary probe failures, the handler must return a JSON
 // block the operator can read.
 func TestHandleGetRuntimeInfo_AlwaysReturnsJson(t *testing.T) {
 	s := newTestServer(t, false)

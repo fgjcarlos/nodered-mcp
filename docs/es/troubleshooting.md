@@ -30,15 +30,14 @@ la práctica: ejecuta `nodered-mcp version` en una terminal. Si imprime una
 versión, el binario está en tu `PATH`; si dice «command not found», usa la
 ruta completa en la configuración de tu cliente.
 
-**401 o 403 de Node-RED.** Falta el [token](glossary.md#token) o no tiene el
-alcance (scope) necesario. Con `adminAuth` habilitado (el inicio de sesión de
-Node-RED para su [API de administración](glossary.md#api-de-administración)),
-genera un token con permiso de escritura sobre los flujos.
+**401 o 403 de Node-RED.** Para `adminAuth` de Node-RED, configura
+`NODERED_USERNAME` y `NODERED_PASSWORD`, o asigna a `NODERED_TOKEN` un
+[token](glossary.md#token) con los permisos necesarios. `get_runtime_info`
+indica este problema de autenticación si Node-RED deniega el acceso a `/settings`.
 
 **«Node-RED version was not detected».** El MCP lee la versión del runtime
-mediante `GET /settings`. Cuando esa lectura falla —el runtime está caído,
-`/settings` requiere una autenticación de administración que el token no
-cubre, o un proxy elimina la ruta— la versión queda desconocida y las
+mediante `GET /settings`. Cuando esa lectura falla —el runtime está caído
+o un proxy elimina la ruta— la versión queda desconocida y las
 herramientas condicionadas por versión (`set_context`, `inject_node` con un
 payload) continúan sin comprobar la versión, y lo indican en el resultado. El
 MCP reintenta la sonda en operaciones posteriores, así que un runtime que

@@ -51,14 +51,22 @@ type capabilityGuidanceEntry struct {
 // tool returns Node-RED's own report (memory, OS, runtime state);
 // this one answers "what can this MCP actually do here?".
 //
-// The handler is best-effort: every probe has a deadline, and
-// every failure becomes "unknown" in the JSON rather than a
-// surface-level error. The user wants the matrix even when a
-// single probe fails.
+// The handler is best-effort unless access to /settings is denied.
+// Other probe failures produce an incomplete capability matrix.
 func (s *Server) handleGetRuntimeInfo(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	slog.Debug("tool: get_runtime_info")
 
-	probe := s.runtimeProbe(ctx)
+	settingsCtx, cancel := probeCtx(ctx, runtimeInfoProbeTimeout)
+	raw, err := s.nrClient.GetSettings(settingsCtx)
+	cancel()
+	if err != nil {
+		var apiErr *nodered.APIError
+		if errors.As(err, &apiErr) && (apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden) {
+			return mcp.NewToolResultError(nodered.AuthRequiredMessage), nil
+		}
+		slog.Warn("get_runtime_info: /settings probe failed", "error", err)
+	}
+	probe := s.runtimeProbe(ctx, raw)
 
 	var info runtimeInfo
 	info.NodeRed.Version = probe.NodeRedVersion.String()
@@ -82,14 +90,8 @@ func (s *Server) handleGetRuntimeInfo(ctx context.Context, _ mcp.CallToolRequest
 	// Settings + runtimeState come from /settings; we keep them as
 	// raw JSON so we do not pin ourselves to NR's schema. Missing
 	// fields surface as nil and are dropped by `omitempty`.
-	settingsCtx, settingsCancel := probeCtx(ctx, runtimeInfoProbeTimeout)
-	defer settingsCancel()
-	if raw, err := s.nrClient.GetSettings(settingsCtx); err == nil {
-		info.NodeRed.Settings = extractRuntimeInfoSubdoc(raw, "flowFile")
-		info.NodeRed.RuntimeState = extractRuntimeInfoSubdoc(raw, "runtimeState")
-	} else {
-		slog.Warn("get_runtime_info: /settings probe failed", "error", err)
-	}
+	info.NodeRed.Settings = extractRuntimeInfoSubdoc(raw, "flowFile")
+	info.NodeRed.RuntimeState = extractRuntimeInfoSubdoc(raw, "runtimeState")
 
 	return mcp.NewToolResultText("```json\n" + prettyJSON(mustMarshal(info)) + "\n```"), nil
 }
@@ -98,7 +100,7 @@ func (s *Server) handleGetRuntimeInfo(ctx context.Context, _ mcp.CallToolRequest
 // into a RuntimeProbe, together with what the /comms tails observed.
 // Each probe uses its own deadline so a slow Node-RED cannot stall the
 // others.
-func (s *Server) runtimeProbe(ctx context.Context) RuntimeProbe {
+func (s *Server) runtimeProbe(ctx context.Context, settings json.RawMessage) RuntimeProbe {
 	p := RuntimeProbe{DebugStreamEnabled: s.debugStream}
 
 	// What did the /comms tails actually do? The opt-in above is
@@ -114,15 +116,8 @@ func (s *Server) runtimeProbe(ctx context.Context) RuntimeProbe {
 	defer versionCancel()
 	p.NodeRedVersion = s.nrClient.NodeRedVersion(versionCtx)
 
-	// 2. Runtime-state gate. Read it from /settings so the probe
-	// stays inside the same call that gave us the version.
-	rsCtx, rsCancel := probeCtx(ctx, runtimeInfoProbeTimeout)
-	defer rsCancel()
-	if raw, err := s.nrClient.GetSettings(rsCtx); err == nil {
-		p.RuntimeStateEnabled = parseRuntimeStateEnabled(raw)
-	} else {
-		slog.Warn("get_runtime_info: /settings probe failed", "error", err)
-	}
+	// 2. Runtime-state gate, from the same /settings response shown to the user.
+	p.RuntimeStateEnabled = parseRuntimeStateEnabled(settings)
 
 	// 3. /logs mounted? Stock NR < 5.x exposed it; stock 5.x
 	// does not. Use the typed Logs() helper and treat the 404 as

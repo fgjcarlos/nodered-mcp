@@ -570,7 +570,10 @@ Two properties are worth knowing:
   attempt, and a later gated operation probes again.
 
 When the version cannot be detected, `get_runtime_info` reports the
-capability as `unknown`. Calls that check the version are **not** refused
+capability as `unknown`. If Node-RED denies access to `/settings` with `401`
+or `403`, the tool instead returns an error that names the credentials to
+configure (see [Troubleshooting](troubleshooting.md)). Calls that check the
+version are **not** refused
 on that basis alone. Their success message carries the suffix "Node-RED
 version was not detected; this call was not verified against the minimum
 version".
