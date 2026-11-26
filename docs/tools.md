@@ -442,6 +442,9 @@ Example requests:
 | `enable_node` | `PUT /nodes/:module[/:set]` | write | |
 | `disable_node` | `PUT /nodes/:module[/:set]` | write | |
 
+If `install_node` returns HTTP 404, use `search_nodes` to find the correct npm
+package name before retrying.
+
 When Node-RED returns its generic `unexpected_error` / `Install failed` response
 for either palette operation, the error points operators to Node-RED's runtime
 output (stdout, `journalctl`, `docker logs`, or a configured `settings.js`

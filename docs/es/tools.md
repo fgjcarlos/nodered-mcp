@@ -468,6 +468,9 @@ Ejemplos de peticiones:
 | `enable_node` | `PUT /nodes/:module[/:set]` | write | |
 | `disable_node` | `PUT /nodes/:module[/:set]` | write | |
 
+Si `install_node` devuelve HTTP 404, usa `search_nodes` para encontrar el nombre
+correcto del paquete de npm antes de volver a intentarlo.
+
 Cuando Node-RED devuelve su respuesta genérica `unexpected_error` / `Install
 failed` para cualquiera de las dos operaciones de paleta, el error remite a los
 operadores a la salida del runtime de Node-RED (stdout, `journalctl`,

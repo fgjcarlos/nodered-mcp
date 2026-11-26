@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -137,6 +138,46 @@ func TestPaletteInstallFailureGuidance(t *testing.T) {
 				if !strings.Contains(got, want) {
 					t.Errorf("error missing %q: %s", want, got)
 				}
+			}
+		})
+	}
+}
+
+func TestInstallNodeModuleNotFoundGuidance(t *testing.T) {
+	const module = "node-red-contrib-does-not-exist-xyz"
+	const body = `{"code":404,"message":"Module not found"}`
+	for _, tc := range []struct {
+		tool, method, path, want string
+	}{
+		{"install_node", http.MethodPost, "/nodes", " Node-RED could not find the module on the npm registry. Use search_nodes to find the correct package name."},
+		{"uninstall_node", http.MethodDelete, "/nodes/" + module, ""},
+	} {
+		t.Run(tc.tool, func(t *testing.T) {
+			var requests atomic.Int32
+			s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				if r.Method != tc.method || r.URL.Path != tc.path {
+					t.Errorf("request = %s %s, want %s %s", r.Method, r.URL.Path, tc.method, tc.path)
+				}
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(body))
+			})
+			raw := registeredToolCall(t, s, tc.tool, map[string]any{"module": module})
+			var response struct {
+				Result struct {
+					IsError bool              `json:"isError"`
+					Content []mcp.TextContent `json:"content"`
+				} `json:"result"`
+			}
+			if err := json.Unmarshal(raw, &response); err != nil {
+				t.Fatal(err)
+			}
+			want := "calling Node-RED: nodered " + tc.method + " " + tc.path + ": HTTP 404: " + body + tc.want
+			if !response.Result.IsError || len(response.Result.Content) != 1 || response.Result.Content[0].Type != "text" || response.Result.Content[0].Text != want {
+				t.Errorf("response = %s, want tool error %q", raw, want)
+			}
+			if got := requests.Load(); got != 1 {
+				t.Errorf("HTTP requests = %d, want 1", got)
 			}
 		})
 	}
