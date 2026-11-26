@@ -1,14 +1,38 @@
 # Troubleshooting
 
+**English** | [Español](es/troubleshooting.md)
+
+This page is for when something does not work: the assistant shows no Node-RED
+tools, Node-RED answers with an error, a change is refused, or the install
+fails on your system. Find the symptom in bold, then follow the steps under
+it. A good first move for any problem is to look at the server's log output
+(see "No log output" below) and to confirm that Node-RED itself is running and
+reachable at the URL you configured (`NODERED_URL`, see
+[Configuration](configuration.md)).
+
+## Contents
+
+- [Connection and tools](#connection-and-tools)
+- [Backups](#backups)
+- [Installation and platform problems](#installation-and-platform-problems)
+
+## Connection and tools
+
 **Tools do not appear.** Confirm the binary is on the `PATH`, or use
 an absolute path in `command`. On Windows, escape the backslashes:
 `C:\\path\\nodered-mcp.exe`. Running `nodered-mcp init` resolves the
 path for you. If it must fall back to the command name, make sure
-`nodered-mcp` is available on the MCP client's `PATH`.
+`nodered-mcp` is available on the MCP client's `PATH`. (The `PATH` is the
+list of folders your system searches for programs; the MCP
+[client](glossary.md#client) is the AI app, such as Claude Desktop.) In
+practice: run `nodered-mcp version` in a terminal. If it prints a version, the
+binary is on your `PATH`; if it says "command not found", use the full path in
+your client configuration.
 
-**401 or 403 from Node-RED.** The token is missing or lacks the
-required scope. With `adminAuth` enabled, generate a token with
-write permission on flows.
+**401 or 403 from Node-RED.** The [token](glossary.md#token) is missing or
+lacks the required scope. With `adminAuth` enabled (Node-RED's login for its
+[admin API](glossary.md#admin-api)), generate a token with write permission on
+flows.
 
 **"Node-RED version was not detected".** The MCP reads the runtime
 version from `GET /settings`. When that read fails — the runtime is
@@ -20,15 +44,19 @@ later operations, so a runtime that comes up after start-up is picked
 up without a restart.
 
 **No log output.** Logs are written to stderr; stdout is reserved
-for JSON-RPC frames on the stdio transport. Increase verbosity with
+for JSON-RPC frames on the [stdio](glossary.md#stdio) transport (the
+machine-readable messages between the app and the server). Increase verbosity with
 `--log-level debug`.
 
-**HTTP transport does not connect.** Confirm `--transport http` is
+**HTTP transport does not connect.** (See [Transports](transports.md).) Confirm `--transport http` is
 set and that the `--http-addr` port is free.
 
+## Backups
+
 **A write is refused with a backup error.** Backups are fail-closed
-by design: if the snapshot cannot be written, the write does not
-proceed. Check that `NODERED_BACKUP_DIR` exists and is writable.
+by design (a backup is a saved copy of your flows taken before each change):
+if the snapshot cannot be written, the write does not proceed, so you never
+change flows without a way back. Check that `NODERED_BACKUP_DIR` exists and is writable.
 
 In the container image the directory is `/var/lib/nodered-mcp/backups`
 and the server runs as the `nonroot` user (uid 65532), so a bind mount
@@ -43,6 +71,8 @@ an empty named volume, so the container can write the snapshot into the
 volume it is mounted on. A volume that already holds root-owned files
 (one created by another image, or written to as root) keeps that
 ownership: empty it or recreate it.
+
+## Installation and platform problems
 
 **Windows: orphaned npm shims (legacy).** A `npm i -g
 @fgjcarlos/nodered-mcp` from a version before 0.5.16 could leave three
@@ -61,7 +91,7 @@ The script is idempotent; every Remove-Item tolerates a missing
 file, so re-running it is safe. No admin required, no PATH
 modified.
 
-**Platform-specific install issues**
+The entries below are specific to one operating system or CPU type.
 
 **macOS — "cannot be opened because the developer cannot be verified."**
 The npm-shipped binaries are not code-signed with an Apple Developer ID.
