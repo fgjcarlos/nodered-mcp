@@ -387,6 +387,14 @@ de las referencias de la configuración sino de lo que un despliegue puede hacer
 al runtime. La validación de la sintaxis de las funciones sigue siendo
 obligatoria con o sin force.
 
+`validate_flow` y las comprobaciones de despliegue rechazan el uso de
+`import()` dinámico dentro de un nodo Function. Node-RED 5.0.10 reconoce la
+sintaxis, pero el entorno aislado del nodo no proporciona la función que
+necesita para cargar un módulo de esa manera. Para usar un módulo, agrégalo
+en la pestaña **Setup** del nodo Function y usa la variable configurada en
+tu código. Esto requiere que `functionExternalModules` esté habilitado en
+Node-RED.
+
 Esa regla de la pestaña se decide decodificando el `type` de cada entrada, no
 buscando texto en la carga útil. El mismo documento se comporta igual tanto si
 llega como una cadena compacta, como una cadena con sangrías o como un array de

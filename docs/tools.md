@@ -362,6 +362,13 @@ about the references of the configuration but about what a deployment
 may do to the runtime. Function syntax validation remains mandatory with
 or without force.
 
+`validate_flow` and deployment checks reject dynamic `import()` inside a
+Function node. Node-RED 5.0.10 parses it, but its Function node sandbox does
+not provide the callback needed to load a module that way. To use a module,
+add it in the Function node's **Setup** tab and use the configured variable
+in your code. This requires `functionExternalModules` to be enabled in
+Node-RED.
+
 That tab rule is decided by decoding the `type` of every entry, not by
 searching the payload for text. The same document behaves the same
 whether it arrives as a compact string, as an indented string or as an
