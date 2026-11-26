@@ -460,7 +460,9 @@ func DeleteNodeFromFlow(flow RawFlow, id string) (RawFlow, error) {
 // ConnectNodesInFlow wires an output port of one node to another. The port is
 // appended to, not replaced, and the wires array grows if the port index is
 // beyond its current length — a switch node's later outputs do not exist in
-// the array until something uses them.
+// the array until something uses them. A wire the runtime would never carry is
+// refused, and a wire that already exists is reported as ErrWireExists so the
+// caller does not deploy an unchanged tab.
 func ConnectNodesInFlow(flow RawFlow, fromID string, port int, toID string) (RawFlow, error) {
 	if fromID == "" || toID == "" {
 		return nil, fmt.Errorf("both a source and a target node id are required")
@@ -481,21 +483,17 @@ func ConnectNodesInFlow(flow RawFlow, fromID string, port int, toID string) (Raw
 	if err != nil {
 		return nil, err
 	}
-	fromCollection, from, found := doc.locate(fromID)
-	if !found {
-		return nil, fmt.Errorf("no node with id %q in this flow", fromID)
-	}
-	if !doc.exists(toID) {
-		return nil, fmt.Errorf("cannot wire to %q: no node with that id in this flow", toID)
+	src, err := wireEndpoints(doc, fromID, toID)
+	if err != nil {
+		return nil, err
 	}
 
-	src := (*fromCollection)[from]
 	srcType, _ := jsTypeString(src["type"])
 	if n, ok := declaredOutputs(semanticNode{fromID, srcType, src}); ok && port >= n {
 		return nil, fmt.Errorf("node %q has %d output(s); port %d does not exist and a wire there would never fire", fromID, n, port)
 	}
 
-	wires, err := decodeWires((*fromCollection)[from])
+	wires, err := decodeWires(src)
 	if err != nil {
 		return nil, err
 	}
@@ -503,15 +501,18 @@ func ConnectNodesInFlow(flow RawFlow, fromID string, port int, toID string) (Raw
 		wires = append(wires, []string{})
 	}
 	// Node-RED tolerates a duplicated target but then delivers the message
-	// twice, which reads as a flow that fires everything twice.
+	// twice, which reads as a flow that fires everything twice. The caller
+	// is told instead of the tab being written back unchanged: that no-op
+	// used to be reported as "Wired" after a deployment and a backup
+	// (issue #448).
 	for _, existing := range wires[port] {
 		if existing == toID {
-			return doc.encode()
+			return nil, fmt.Errorf("%w: node %q output %d already wires to %q", ErrWireExists, fromID, port, toID)
 		}
 	}
 	wires[port] = append(wires[port], toID)
 
-	if err := setWires((*fromCollection)[from], wires); err != nil {
+	if err := setWires(src, wires); err != nil {
 		return nil, err
 	}
 	return doc.encode()

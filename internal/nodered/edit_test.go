@@ -2,6 +2,7 @@ package nodered
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -288,14 +289,16 @@ func TestConnectNodesGrowsTheWiresArrayForAHigherPort(t *testing.T) {
 	}
 }
 
-func TestConnectNodesIsIdempotent(t *testing.T) {
+// A wire that is already there is reported as such, never duplicated, so
+// the MCP layer answers "already connected" without deploying or taking a
+// backup (issue #448). No document comes back: there is nothing to write.
+func TestConnectNodesReportsAnExistingWire(t *testing.T) {
 	got, err := ConnectNodesInFlow(RawFlow(sampleTab), "n1", 0, "n2")
-	if err != nil {
-		t.Fatalf("ConnectNodesInFlow: %v", err)
+	if !errors.Is(err, ErrWireExists) {
+		t.Fatalf("expected ErrWireExists for an existing wire, got %v", err)
 	}
-	port0 := nodeByID(t, got, "n1")["wires"].([]any)[0].([]any)
-	if len(port0) != 1 {
-		t.Errorf("connecting an existing link should not duplicate it, got %v", port0)
+	if got != nil {
+		t.Errorf("an existing wire must produce no document, got %s", got)
 	}
 }
 
@@ -346,12 +349,15 @@ func TestConnectNodesRejectsSelfWire(t *testing.T) {
 }
 
 // TestConnectNodesAcceptsLoopBetweenTwoDistinctNodes guards against the
-// self-loop check firing on a legitimate two-node wire. Two distinct ids are
-// the only thing the new guard cares about; if it ever short-circuits on
-// equality by accident, this regression catches it.
+// self-loop check firing on a legitimate two-node wire, in both directions.
+// sampleTab has no free valid pair (n1 → n2 → n3 is already wired), so the
+// loop is built on two function nodes.
 func TestConnectNodesAcceptsLoopBetweenTwoDistinctNodes(t *testing.T) {
-	if _, err := ConnectNodesInFlow(RawFlow(sampleTab), "n3", 0, "n1"); err != nil {
-		t.Fatalf("wiring two distinct nodes should succeed, got: %v", err)
+	tab := `{"id":"t","nodes":[{"id":"a","type":"function","x":1,"y":1,"wires":[]},{"id":"b","type":"function","x":2,"y":1,"wires":[]}]}`
+	for _, pair := range [][2]string{{"a", "b"}, {"b", "a"}} {
+		if _, err := ConnectNodesInFlow(RawFlow(tab), pair[0], 0, pair[1]); err != nil {
+			t.Errorf("wiring %s to %s should succeed, got: %v", pair[0], pair[1], err)
+		}
 	}
 }
 
@@ -365,7 +371,7 @@ func TestEditsProduceValidFlows(t *testing.T) {
 		{"add", func(f RawFlow) (RawFlow, error) {
 			return AddNodeToFlow(f, json.RawMessage(`{"id":"n9","type":"debug","z":"tabA","x":580,"y":80,"wires":[]}`))
 		}},
-		{"connect", func(f RawFlow) (RawFlow, error) { return ConnectNodesInFlow(f, "n3", 0, "n9") }},
+		{"connect", func(f RawFlow) (RawFlow, error) { return ConnectNodesInFlow(f, "n2", 0, "n9") }},
 		{"update", func(f RawFlow) (RawFlow, error) {
 			return UpdateNodeInFlow(f, "n9", map[string]json.RawMessage{"name": json.RawMessage(`"tap"`)})
 		}},
@@ -473,7 +479,8 @@ func TestConnectNodesRefusesAPortBeyondDeclaredOutputs(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "1 output") {
 		t.Fatalf("expected a refusal naming the output count, got %v", err)
 	}
-	if _, err := ConnectNodesInFlow(RawFlow(sampleTab), "n2", 0, "n1"); err != nil {
+	fd := `{"id":"t","nodes":[{"id":"f","type":"function","x":1,"y":1,"outputs":1,"wires":[]},{"id":"d","type":"debug","x":2,"y":1,"wires":[]}]}`
+	if _, err := ConnectNodesInFlow(RawFlow(fd), "f", 0, "d"); err != nil {
 		t.Errorf("port 0 of a 1-output node must still connect: %v", err)
 	}
 	// A switch has one output per rule.
@@ -483,5 +490,48 @@ func TestConnectNodesRefusesAPortBeyondDeclaredOutputs(t *testing.T) {
 	}
 	if _, err := ConnectNodesInFlow(RawFlow(sw), "s", 2, "d"); err == nil {
 		t.Errorf("port 2 of a 2-rule switch must be refused")
+	}
+}
+
+// pairTab is a tab holding exactly one source and one target of the given
+// types, unwired: the shape the endpoint rules below are exercised on.
+func pairTab(srcType, tgtType string) RawFlow {
+	return RawFlow(`{"id":"t","nodes":[{"id":"s","type":"` + srcType + `","x":1,"y":1,"wires":[]},{"id":"d","type":"` + tgtType + `","x":2,"y":1,"wires":[]}]}`)
+}
+
+// A wire that can never carry a message is refused with the reason, not
+// reported wired (issue #448): the runtime never sends on an output a node
+// does not have, and drops a wire from a link out.
+func TestConnectNodesRefusesAWireFromANodeWithoutOutputs(t *testing.T) {
+	for _, src := range []string{"debug", "link out", "http response", "mqtt out", "comment"} {
+		_, err := ConnectNodesInFlow(pairTab(src, "function"), "s", 0, "d")
+		if err == nil || !strings.Contains(err.Error(), "no outputs") {
+			t.Errorf("%s: expected a refusal naming the missing outputs, got %v", src, err)
+		}
+	}
+	// The refusal of a link out says how it does deliver.
+	if _, err := ConnectNodesInFlow(pairTab("link out", "function"), "s", 0, "d"); err == nil || !strings.Contains(err.Error(), "link in") {
+		t.Errorf("a link out refusal must point at link in nodes, got %v", err)
+	}
+}
+
+func TestConnectNodesRefusesAWireIntoANodeWithoutInputs(t *testing.T) {
+	for _, tgt := range []string{"inject", "comment", "link in", "catch", "status", "http in"} {
+		_, err := ConnectNodesInFlow(pairTab("function", tgt), "s", 0, "d")
+		if err == nil || !strings.Contains(err.Error(), "no inputs") {
+			t.Errorf("%s: expected a refusal naming the missing inputs, got %v", tgt, err)
+		}
+	}
+	// A config node has neither side.
+	if _, err := ConnectNodesInFlow(RawFlow(sampleTab), "n1", 0, "b1"); err == nil || !strings.Contains(err.Error(), "config") {
+		t.Errorf("expected a refusal for a wire into a config node, got %v", err)
+	}
+	if _, err := ConnectNodesInFlow(RawFlow(sampleTab), "b1", 0, "n2"); err == nil || !strings.Contains(err.Error(), "config") {
+		t.Errorf("expected a refusal for a wire from a config node, got %v", err)
+	}
+	// A type outside the core table is not judged: GET /nodes publishes no
+	// port counts, so a third-party node keeps both sides.
+	if _, err := ConnectNodesInFlow(pairTab("contrib-source", "contrib-target"), "s", 0, "d"); err != nil {
+		t.Errorf("a third-party pair must connect: %v", err)
 	}
 }
