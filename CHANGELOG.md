@@ -8,6 +8,15 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- The tools that write one subflow instance bound its wires by the
+  definition's outputs (#473). `add_node`, `update_node` (on the merged node)
+  and `connect_nodes` now refuse an instance wired past the outputs of its
+  subflow with the message `instantiate_subflow` already used, and send no
+  deployment. So does a `wires` value that is not an array of arrays, on
+  every one of those paths. The runtime indexes an instance's wires by the
+  definition's outputs, so such a port never fired. `set_flows`,
+  `update_flow` and `restore_backup` take a whole configuration and do not
+  apply this rule yet.
 - Subflow instances no longer outlive their outputs (#451). `instantiate_subflow`
   refuses `wires` with more ports than the definition has outputs, and no
   longer tells you to wire up an instance that came with its wires.

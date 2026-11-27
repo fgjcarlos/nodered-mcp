@@ -440,13 +440,16 @@ excepción. Esto se notifica como `invalid_subflow_port` en `create_subflow`,
 `update_subflow`, `set_flows`, `restore_backup` y `validate_flow`. Las
 conexiones de un puerto `in` llevan solo un `id`.
 
-El número de puertos `out` también acota a cada instancia del subflujo.
-`instantiate_subflow` rechaza `wires` con más puertos que salidas tiene la
-definición, y `update_subflow` rechaza una definición que dejaría una
-instancia cableada a una salida que ya no existe: lista las instancias y no
-escribe nada, salvo que se pase `prune_wires`; en ese caso primero elimina
-esas conexiones, pestaña por pestaña y dentro de cualquier otra definición
-que anide una instancia.
+El número de puertos `out` también acota a cada instancia del subflujo, en
+cualquiera de las rutas que escriben una: `add_node`, `update_node` (sobre el
+nodo tal como lo llevaría el despliegue), `connect_nodes` (la instancia de
+origen) e `instantiate_subflow` rechazan `wires` con más puertos que salidas
+tiene la definición, y ninguna despliega nada si rechaza. Un valor `wires` que
+no sea un array de arrays se rechaza en las cuatro. `update_subflow` rechaza
+una definición que dejaría una instancia cableada a una salida que ya no
+existe: lista las instancias y no escribe nada, salvo que se pase
+`prune_wires`; en ese caso primero elimina esas conexiones, pestaña por
+pestaña y dentro de cualquier otra definición que anide una instancia.
 
 ### Advertencias semánticas de `validate_flow`
 
