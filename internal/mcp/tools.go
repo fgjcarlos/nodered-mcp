@@ -397,7 +397,10 @@ func (s *Server) registerTools() {
 				"exists; use create_subflow for new ones.\n\n"+
 				"The definition is validated with the same rules a tab is: a wire inside "+
 				"the subflow that names a node which is not in it, and a node whose z "+
-				"names another tab, are refused before the runtime is contacted.\n\n"+
+				"names another tab, are refused before the runtime is contacted. An "+
+				"update that leaves an instance wired to an output the new definition "+
+				"no longer has is refused with the list of instances, unless prune_wires "+
+				"is set.\n\n"+
 				"WARNING: this tool can deploy any node type, including exec/system "+
 				"nodes that execute shell commands on the Node-RED host. The MCP "+
 				"server blocks a configurable set of node types (MCP_NODE_DENYLIST, "+
@@ -410,6 +413,8 @@ func (s *Server) registerTools() {
 			mcp.Description("The subflow definition ID to replace.")),
 		mcp.WithString("subflow", mcp.Required(),
 			mcp.Description("The replacement subflow definition as a JSON object or JSON-encoded string. The id field must match the path id.")),
+		mcp.WithBoolean("prune_wires",
+			mcp.Description("Set to true to remove the wires that sit on outputs the new definition no longer has. Without it such an update is refused with the list of instances that would lose a wire, and nothing is written.")),
 	)
 	s.addWriteTool(updateSubflow, s.handleUpdateSubflow)
 
@@ -442,7 +447,8 @@ func (s *Server) registerTools() {
 				"env, custom keys) are taken from the params argument verbatim, "+
 				"so callers can pass instance-level overrides without the MCP "+
 				"having to know about them.\n\n"+
-				"The wires are validated like any other node add. If flow_id does "+
+				"The wires are validated like any other node add, and may not have "+
+				"more ports than the subflow has outputs. If flow_id does "+
 				"not exist, or subflow_id is not a known definition, the call fails "+
 				"before anything is written. Read /list_subflows first to discover "+
 				"available subflow ids, and /get_flow first to find tab ids.\n\n"+

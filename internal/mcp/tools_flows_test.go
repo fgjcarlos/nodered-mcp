@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -719,5 +720,92 @@ func TestHandleValidateFlow_ImpossibleWireAffectsOK(t *testing.T) {
 		if !strings.Contains(tc.Text, `"ok": false`) || !strings.Contains(tc.Text, "impossible_wire") || !strings.Contains(tc.Text, "1 issue(s)") {
 			t.Errorf("%s: an impossible wire must flip ok and name the kind, got %s", name, tc.Text)
 		}
+	}
+}
+
+// toolText returns the text a tool result carries.
+func toolText(res *mcp.CallToolResult) string {
+	return res.Content[0].(mcp.TextContent).Text
+}
+
+// TestHandleInstantiateSubflow_HintOnlyWithoutWires covers issue #451: the
+// hint to wire the instance up is noise when the caller passed wires.
+func TestHandleInstantiateSubflow_HintOnlyWithoutWires(t *testing.T) {
+	const globalEnvelope = `{"subflows":[{"id":"sf1","name":"Helper","out":[{}]}],"configs":[]}`
+	const flowsList = `{"rev":"r","flows":[{"id":"tab1","type":"tab","disabled":false},{"id":"sf1","type":"subflow","name":"Helper","in":[],"out":[{}]},{"id":"n1","type":"debug","z":"tab1","x":10,"y":10,"wires":[]}]}`
+	s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/flows":
+			_, _ = w.Write([]byte(flowsList))
+		case "/flow/global":
+			_, _ = w.Write([]byte(globalEnvelope))
+		default:
+			http.Error(w, "unexpected "+r.Method+" "+r.URL.Path, http.StatusBadRequest)
+		}
+	})
+
+	res, err := call(t, s.handleInstantiateSubflow, map[string]any{
+		"flow_id": "tab1", "subflow_id": "sf1",
+		"params": map[string]any{"id": "inst1", "x": 100, "y": 100, "wires": [][]string{{"n1"}}},
+	})
+	if err != nil || res.IsError {
+		t.Fatalf("wired instance: err=%v res=%v", err, res)
+	}
+	if strings.Contains(toolText(res), "Wire it up with connect_nodes") {
+		t.Errorf("an instance that came with wires is told to wire up: %s", toolText(res))
+	}
+
+	res, err = call(t, s.handleInstantiateSubflow, map[string]any{"flow_id": "tab1", "subflow_id": "sf1"})
+	if err != nil || res.IsError {
+		t.Fatalf("bare instance: err=%v res=%v", err, res)
+	}
+	if !strings.Contains(toolText(res), "Wire it up with connect_nodes") {
+		t.Errorf("an instance without wires is not told to wire up: %s", toolText(res))
+	}
+}
+
+// TestHandleUpdateSubflow_PruneWires covers issue #451 at the tool
+// boundary: without prune_wires the handler reports the instances that
+// would lose a wire and nothing is written; with it, the wires are trimmed
+// and the definition replaced.
+func TestHandleUpdateSubflow_PruneWires(t *testing.T) {
+	const twoOutputs = `{"id":"sf1","type":"subflow","name":"Helper","in":[],"out":[{"x":300,"y":100,"wires":[]},{"x":300,"y":140,"wires":[]}]}`
+	envelope := `{"subflows":[` + twoOutputs + `],"configs":[]}`
+	flowsList := `{"rev":"r","flows":[{"id":"tab1","type":"tab","disabled":false},` + twoOutputs +
+		`,{"id":"n1","type":"debug","z":"tab1","x":10,"y":10,"wires":[]},{"id":"inst","type":"subflow:sf1","z":"tab1","x":50,"y":50,"wires":[["n1"],["n1"]]}]}`
+	var postBody []byte
+	s, _ := serverWithMock(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/flows":
+			if r.Method == "POST" {
+				postBody, _ = io.ReadAll(r.Body)
+			}
+			_, _ = w.Write([]byte(flowsList))
+		case "/flow/global":
+			_, _ = w.Write([]byte(envelope))
+		default:
+			http.Error(w, "unexpected "+r.Method+" "+r.URL.Path, http.StatusBadRequest)
+		}
+	})
+	definition := map[string]any{"id": "sf1", "type": "subflow", "name": "Helper", "in": []any{},
+		"out": []any{map[string]any{"x": 300, "y": 100, "wires": []any{}}}}
+
+	res, err := call(t, s.handleUpdateSubflow, map[string]any{"id": "sf1", "subflow": definition})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !res.IsError || !strings.Contains(toolText(res), `instance node "inst" in tab "tab1"`) {
+		t.Fatalf("expected the update to be refused with the instance, got %v", res)
+	}
+	if postBody != nil {
+		t.Fatalf("a refused update deployed a tab: %s", postBody)
+	}
+
+	res, err = call(t, s.handleUpdateSubflow, map[string]any{"id": "sf1", "subflow": definition, "prune_wires": true})
+	if err != nil || res.IsError {
+		t.Fatalf("pruned update: err=%v res=%v", err, res)
+	}
+	if !strings.Contains(string(postBody), `"wires":[["n1"]]`) {
+		t.Errorf("the instance wires were not trimmed in the deployed tab: %s", postBody)
 	}
 }
