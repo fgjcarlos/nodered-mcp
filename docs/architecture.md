@@ -249,7 +249,7 @@ fields it needs, where it needs them. No field is ever lost.
   (`add_node`, `update_node`, `delete_node`, `connect_nodes`) and
   `update_flow` as the escape hatch for full rewrites. `update_node`
   **merges** properties instead of replacing; `delete_node` cleans
-  up incoming wires; `connect_nodes` appends to the named port and
+  up every reference (wires, links, groups, scope); `connect_nodes` appends to the named port and
   grows the wires array when that port does not exist yet.
 
 ## Safety: node-type policy on every write (issue #329)

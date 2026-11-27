@@ -3,6 +3,7 @@ package nodered
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -254,6 +255,56 @@ func TestDeleteNodeAlsoRemovesWiresPointingAtIt(t *testing.T) {
 func TestDeleteNodeRejectsAnUnknownNode(t *testing.T) {
 	if _, err := DeleteNodeFromFlow(RawFlow(sampleTab), "nope"); err == nil {
 		t.Fatal("expected deleting a non-existent node to be rejected")
+	}
+}
+
+// refsTab carries every kind of reference delete_node has to clean up, not
+// only wires: link out `links`, group `nodes`, catch/status/complete `scope`
+// and the `g` of group members (issue #450).
+const refsTab = `{
+  "id": "tabR",
+  "nodes": [
+    {"id":"src","type":"inject","z":"tabR","x":10,"y":10,"wires":[["linkIn"]]},
+    {"id":"linkIn","type":"link in","z":"tabR","x":100,"y":10,"wires":[]},
+    {"id":"linkOut","type":"link out","z":"tabR","x":200,"y":10,"links":["linkIn"],"wires":[]},
+    {"id":"gOuter","type":"group","z":"tabR","x":0,"y":0,"nodes":["gInner","m2"]},
+    {"id":"gInner","type":"group","z":"tabR","g":"gOuter","x":0,"y":0,"nodes":["m1"]},
+    {"id":"m1","type":"inject","z":"tabR","g":"gInner","x":10,"y":10,"wires":[]},
+    {"id":"m2","type":"inject","z":"tabR","g":"gOuter","x":10,"y":10,"wires":[]},
+    {"id":"catch","type":"catch","z":"tabR","x":10,"y":10,"scope":["m1"],"wires":[]}
+  ]
+}`
+
+func TestDeleteNodeCleansEveryReference(t *testing.T) {
+	for _, id := range []string{"linkIn", "gInner", "gOuter", "m1"} {
+		got, err := DeleteNodeFromFlow(RawFlow(refsTab), id)
+		if err != nil {
+			t.Fatalf("deleting %s: %v", id, err)
+		}
+		if nodeByID(t, got, id) != nil {
+			t.Errorf("deleting %s: the node is still present", id)
+		}
+		if strings.Contains(string(got), `"`+id+`"`) {
+			t.Errorf("deleting %s left a reference behind: %s", id, got)
+		}
+	}
+
+	// Members of a nested group move up to its parent.
+	got, err := DeleteNodeFromFlow(RawFlow(refsTab), "gInner")
+	if err != nil {
+		t.Fatalf("deleting gInner: %v", err)
+	}
+	if g := nodeByID(t, got, "m1")["g"]; g != "gOuter" {
+		t.Errorf("expected m1 to move up to gOuter, got g=%v", g)
+	}
+
+	// A port that only wired to the deleted node stays, empty.
+	got, err = DeleteNodeFromFlow(RawFlow(refsTab), "linkIn")
+	if err != nil {
+		t.Fatalf("deleting linkIn: %v", err)
+	}
+	if w := fmt.Sprint(nodeByID(t, got, "src")["wires"]); w != "[[]]" {
+		t.Errorf("expected src to keep an empty port 0, got wires=%s", w)
 	}
 }
 

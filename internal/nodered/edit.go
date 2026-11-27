@@ -133,7 +133,7 @@ func (c *Client) UpdateNode(ctx context.Context, flowID, nodeID string, patch ma
 	})
 }
 
-// DeleteNode removes a node and any wires pointing at it.
+// DeleteNode removes a node and every reference to it.
 func (c *Client) DeleteNode(ctx context.Context, flowID, nodeID string) error {
 	return c.editFlow(ctx, flowID, func(f RawFlow, _ []json.RawMessage) (RawFlow, error) {
 		return DeleteNodeFromFlow(f, nodeID)
@@ -422,9 +422,12 @@ func UpdateNodeInFlow(flow RawFlow, id string, patch map[string]json.RawMessage)
 	return doc.encode()
 }
 
-// DeleteNodeFromFlow removes a node and every wire pointing at it. Leaving the
-// wires behind would produce exactly the dangling references the write path
-// rejects — and that Node-RED itself accepts in silence.
+// DeleteNodeFromFlow removes a node and every reference to it: the wires
+// aimed at it, the `links` of link out nodes, the `nodes` of groups and the
+// `scope` of catch, status and complete nodes. When the node is a group its
+// members move up to that group's parent, or lose their group when it was
+// top-level. Leaving any of these behind would produce exactly the dangling
+// references Node-RED itself accepts in silence (issue #450).
 func DeleteNodeFromFlow(flow RawFlow, id string) (RawFlow, error) {
 	if id == "" {
 		return nil, fmt.Errorf("node id is required")
@@ -437,35 +440,88 @@ func DeleteNodeFromFlow(flow RawFlow, id string) (RawFlow, error) {
 	if !found {
 		return nil, fmt.Errorf("no node with id %q in this flow", id)
 	}
+	parentG := stringField((*collection)[i], "g")
 
 	*collection = append((*collection)[:i], (*collection)[i+1:]...)
 
-	// Only canvas nodes carry wires, but sweeping both collections costs
-	// nothing and cannot miss a reference.
+	// Only canvas nodes carry wires, links, groups or scope, but sweeping both
+	// collections costs nothing and cannot miss a reference.
 	for _, node := range append(append([]map[string]json.RawMessage{}, doc.Nodes...), doc.Configs...) {
-		wires, err := decodeWires(node)
-		if err != nil || wires == nil {
-			continue
-		}
-		changed := false
-		for p, port := range wires {
-			kept := port[:0:0]
-			for _, target := range port {
-				if target == id {
-					changed = true
-					continue
-				}
-				kept = append(kept, target)
-			}
-			wires[p] = kept
-		}
-		if changed {
-			if err := setWires(node, wires); err != nil {
-				return nil, err
-			}
+		if err := forgetNode(node, id, parentG); err != nil {
+			return nil, err
 		}
 	}
 	return doc.encode()
+}
+
+// forgetNode strips id from one remaining node: from every port of its
+// wires, from the `links` of a link out, from the `nodes` of a group and from
+// the `scope` of catch, status and complete nodes. A member of the deleted
+// group moves up to that group's parent (parentG), or loses its group when
+// the deleted one was top-level.
+func forgetNode(node map[string]json.RawMessage, id, parentG string) error {
+	if err := stripWires(node, id); err != nil {
+		return err
+	}
+	for _, key := range []string{"links", "scope", "nodes"} {
+		stripRef(node, key, id)
+	}
+	if stringField(node, "g") == id {
+		if parentG == "" {
+			delete(node, "g")
+		} else {
+			node["g"], _ = json.Marshal(parentG)
+		}
+	}
+	return nil
+}
+
+// stripWires removes id from every port of a node's wires. A node without
+// wires (a config node, for instance) is left alone.
+func stripWires(node map[string]json.RawMessage, id string) error {
+	wires, err := decodeWires(node)
+	if err != nil || wires == nil {
+		return nil
+	}
+	changed := false
+	for p, port := range wires {
+		kept := port[:0:0]
+		for _, target := range port {
+			if target == id {
+				changed = true
+				continue
+			}
+			kept = append(kept, target)
+		}
+		wires[p] = kept
+	}
+	if changed {
+		return setWires(node, wires)
+	}
+	return nil
+}
+
+// stripRef removes id from a string-array field such as the `links` of a
+// link out, the `nodes` of a group or the `scope` of catch, status and
+// complete nodes. A field that is absent, null, unreadable or does not hold
+// id is left untouched.
+func stripRef(node map[string]json.RawMessage, key, id string) {
+	var refs []string
+	if json.Unmarshal(node[key], &refs) != nil {
+		return
+	}
+	kept := make([]string, 0, len(refs))
+	found := false
+	for _, ref := range refs {
+		if ref == id {
+			found = true
+			continue
+		}
+		kept = append(kept, ref)
+	}
+	if found {
+		node[key], _ = json.Marshal(kept)
+	}
 }
 
 // ConnectNodesInFlow wires an output port of one node to another. The port is

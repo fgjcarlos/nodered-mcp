@@ -215,9 +215,11 @@ func (s *Server) registerTools() {
 	// ---- delete_node ----------------------------------------------------
 	deleteNode := mcp.NewTool("delete_node",
 		mcp.WithDescription(
-			"Remove one node from a flow tab, and every wire pointing at it.\n\n"+
-				"Cleaning up the incoming wires matters: Node-RED accepts wires aimed at "+
-				"a node that no longer exists and simply never delivers to them, leaving "+
+			"Remove one node from a flow tab, and every reference to it: wires, "+
+				"link out links, group members, and the scope of catch, status and "+
+				"complete nodes. Members of a deleted group move up to its parent group.\n\n"+
+				"Cleaning up matters: Node-RED accepts references aimed at a node that no "+
+				"longer exists and simply never delivers to them, leaving "+
 				"a flow that looks intact and quietly does less than it should.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
 				"write; restore_backup recovers the flow structure only. "+backupRecoveryWarning,

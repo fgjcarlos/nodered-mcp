@@ -255,8 +255,8 @@ necesita, donde los necesita. Nunca se pierde ningún campo.
 - **Estrategia de edición:** ambas, con las granulares por defecto
   (`add_node`, `update_node`, `delete_node`, `connect_nodes`) y
   `update_flow` como vía de escape para reescrituras completas. `update_node`
-  **combina** propiedades en lugar de reemplazarlas; `delete_node` limpia los
-  cables entrantes; `connect_nodes` añade al puerto indicado y amplía el array
+  **combina** propiedades en lugar de reemplazarlas; `delete_node` limpia todas las
+  referencias (cables, enlaces, grupos, scope); `connect_nodes` añade al puerto indicado y amplía el array
   `wires` cuando ese puerto todavía no existe.
 
 ## Seguridad: política de tipos de nodo en cada escritura (issue #329)
