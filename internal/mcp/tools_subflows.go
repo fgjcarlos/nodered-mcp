@@ -91,7 +91,7 @@ func (s *Server) handleUpdateSubflow(ctx context.Context, req mcp.CallToolReques
 	}
 	slog.Debug("tool: update_subflow", "id", id)
 
-	if err := s.nrClient.UpdateSubflow(ctx, id, raw); err != nil {
+	if err := s.nrClient.UpdateSubflow(ctx, id, raw, req.GetBool("prune_wires", false)); err != nil {
 		slog.Error("update_subflow failed", "error", err, "id", id)
 		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
@@ -144,9 +144,17 @@ func (s *Server) handleInstantiateSubflow(ctx context.Context, req mcp.CallToolR
 		slog.Error("instantiate_subflow failed", "error", err, "flow_id", flowID, "subflow_id", subflowID)
 		return toolResultError(err, fmt.Sprintf("calling Node-RED: %v", err))
 	}
+	// The hint is noise for an instance that came with its wires.
+	hint := " Wire it up with connect_nodes."
+	var wired struct {
+		Wires []json.RawMessage `json:"wires"`
+	}
+	if json.Unmarshal(node, &wired) == nil && len(wired.Wires) > 0 {
+		hint = ""
+	}
 	return mcp.NewToolResultText(fmt.Sprintf(
-		"Subflow instance added to flow %q (a backup was taken first). Wire it up with connect_nodes.\n\n```json\n%s\n```",
-		flowID, prettyJSON(node),
+		"Subflow instance added to flow %q (a backup was taken first).%s\n\n```json\n%s\n```",
+		flowID, hint, prettyJSON(node),
 	)), nil
 }
 

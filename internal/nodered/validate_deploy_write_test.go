@@ -182,7 +182,7 @@ func TestUpdateSubflow_RefusesDefinitionWhoseNodeBelongsToAnotherTab(t *testing.
 	    {"id":"inner","type":"inject","z":"t1","x":140,"y":140,"wires":[]}
 	  ]
 	}`)
-	err := c.UpdateSubflow(context.Background(), "sf_a", def)
+	err := c.UpdateSubflow(context.Background(), "sf_a", def, false)
 	if err == nil {
 		t.Fatal("expected UpdateSubflow to refuse a node that belongs to another tab, got nil")
 	}

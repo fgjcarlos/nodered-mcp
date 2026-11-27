@@ -296,9 +296,9 @@ and `set_context` still use `id` for flow and node scopes.
 | `list_subflows` | `GET /flow/global` | read | |
 | `get_subflow` | `GET /flow/global` | read | |
 | `create_subflow` | `PUT /flow/global` | write | The definition's topology is validated first |
-| `update_subflow` | `PUT /flow/global` | write | The definition's topology is validated first |
+| `update_subflow` | `PUT /flow/global` | write | The definition's topology is validated first; instances wired to a removed output are listed and the update refused, or trimmed with `prune_wires` |
 | `delete_subflow` | `PUT /flow/global` | write | Refuses while the definition is still instantiated |
-| `instantiate_subflow` | `GET /flows` + `POST /flows` | write | |
+| `instantiate_subflow` | `GET /flows` + `POST /flows` | write | `wires` may not have more ports than the subflow has outputs |
 
 ### Deleting a subflow definition
 
@@ -413,6 +413,14 @@ is not below the number of `in` ports makes the start throw. These are
 reported as `invalid_subflow_port` by `create_subflow`, `update_subflow`,
 `set_flows`, `restore_backup` and `validate_flow`. The wires of an `in`
 port carry only an `id`.
+
+The number of `out` ports also bounds every instance of the subflow.
+`instantiate_subflow` refuses `wires` with more ports than the definition
+has outputs, and `update_subflow` refuses a definition that would leave an
+instance wired to an output that no longer exists, listing the instances
+and writing nothing, unless `prune_wires` is set: then those wires are
+removed first, tab by tab, and inside any other definition that nests an
+instance.
 
 ### Semantic warnings in `validate_flow`
 

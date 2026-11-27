@@ -243,7 +243,7 @@ func (c *Client) CreateSubflow(ctx context.Context, subflow json.RawMessage) (Ra
 // *APIError(404) when the id is not present in the current set, so
 // the caller can distinguish "missing" from "no change" without
 // comparing snapshots.
-func (c *Client) UpdateSubflow(ctx context.Context, id string, subflow json.RawMessage) error {
+func (c *Client) UpdateSubflow(ctx context.Context, id string, subflow json.RawMessage, pruneWires bool) error {
 	release, err := c.writeGuard(ctx)
 	if err != nil {
 		return err
@@ -314,6 +314,12 @@ func (c *Client) UpdateSubflow(ctx context.Context, id string, subflow json.RawM
 		}
 	}
 	if err := c.deniedSubflowInstance(prepared, all); err != nil {
+		return err
+	}
+	// Issue #451: an instance keeps the wires it had, so a definition with
+	// fewer outputs would leave them pointing at a port that no longer
+	// exists.
+	if err := c.reconcileInstanceWires(ctx, id, subflowOutputCount(prepared), pruneWires, existing, all); err != nil {
 		return err
 	}
 	return c.putGlobalSubflowsLocked(ctx, all, configs)
@@ -655,8 +661,9 @@ func subflowOwnerKinds(items []json.RawMessage) map[string]string {
 	return kinds
 }
 
-// subflowReferences finds every place the runtime still uses the
-// subflow definition id.
+// eachSubflowInstance hands visit every instance node of the subflow id the
+// runtime holds, with the node itself, and returns the first error visit
+// reports.
 //
 // Two shapes have to be covered:
 //
@@ -671,25 +678,23 @@ func subflowOwnerKinds(items []json.RawMessage) map[string]string {
 // it is the one that can tell a nested instance from a tab instance
 // when the flat array does not name the owner.
 //
-// definitions is the set of subflow definitions the caller already
-// read for the delete itself, so the nested scan costs no extra
-// request.
-func (c *Client) subflowReferences(ctx context.Context, id string, definitions SubflowList) ([]SubflowReference, error) {
+// definitions is the set of subflow definitions the caller already read, so
+// the nested scan costs no extra request.
+func (c *Client) eachSubflowInstance(ctx context.Context, id string, definitions SubflowList, visit func(ref SubflowReference, node map[string]json.RawMessage) error) error {
 	wantType := "subflow:" + id
-	var refs []SubflowReference
 	seen := make(map[string]bool)
 
-	add := func(ref SubflowReference) {
+	add := func(ref SubflowReference, node map[string]json.RawMessage) error {
 		// The owner kind is deliberately not part of the key: the same
 		// instance can be seen by both scans, and reporting it twice
 		// with contradictory owners ("in subflow sf_b" and "in tab
 		// sf_b") is worse than reporting it once.
 		key := ref.Owner + "|" + ref.NodeID
 		if seen[key] {
-			return
+			return nil
 		}
 		seen[key] = true
-		refs = append(refs, ref)
+		return visit(ref, node)
 	}
 
 	// The members of the definition being deleted. An instance inside
@@ -714,11 +719,11 @@ func (c *Client) subflowReferences(ctx context.Context, id string, definitions S
 			// Name the definition that cannot be read, and the one
 			// that was asked for: without both, the operator cannot
 			// tell which definition to repair.
-			return nil, fmt.Errorf("subflow definition %q cannot be checked for references to %q: %w", defItem.ID, id, err)
+			return fmt.Errorf("subflow definition %q cannot be checked for references to %q: %w", defItem.ID, id, err)
 		}
 		if defItem.ID == id {
-			// The definition being deleted is not a reference to
-			// itself.
+			// The definition being deleted or replaced is not a
+			// reference to itself.
 			for _, member := range members {
 				if memberID := nodeID(member); memberID != "" {
 					selfMembers[memberID] = true
@@ -730,11 +735,13 @@ func (c *Client) subflowReferences(ctx context.Context, id string, definitions S
 			if !memberIsInstance(member, wantType) {
 				continue
 			}
-			add(SubflowReference{
+			if err := add(SubflowReference{
 				Owner:     defItem.ID,
 				OwnerKind: SubflowOwnerSubflow,
 				NodeID:    nodeID(member),
-			})
+			}, member); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -742,11 +749,11 @@ func (c *Client) subflowReferences(ctx context.Context, id string, definitions S
 	// configuration, tabs and their nodes included.
 	flat, err := c.ListFlows(ctx)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	items, err := subflowFlowItems(flat)
 	if err != nil {
-		return nil, fmt.Errorf("the flow configuration could not be read: %w", err)
+		return fmt.Errorf("the flow configuration could not be read: %w", err)
 	}
 	kinds := subflowOwnerKinds(items)
 	for _, item := range items {
@@ -755,15 +762,15 @@ func (c *Client) subflowReferences(ctx context.Context, id string, definitions S
 			// The type could not be read at all, so the node cannot
 			// be classified. "Cannot be checked" is not "no
 			// references": the delete is refused.
-			return nil, fmt.Errorf("a node in the flow configuration has an unreadable type, so its references to %q could not be checked", id)
+			return fmt.Errorf("a node in the flow configuration has an unreadable type, so its references to %q could not be checked", id)
 		}
 		if it.Type != wantType {
 			continue
 		}
 		if it.IDOK && selfMembers[it.ID] {
 			// The instance lives inside the definition being
-			// deleted. It goes away with it, and the runtime does
-			// not report a missing type for it.
+			// deleted or replaced. It goes away with it, and the
+			// runtime does not report a missing type for it.
 			continue
 		}
 		owner, kind := it.Z, kinds[it.Z]
@@ -782,9 +789,208 @@ func (c *Client) subflowReferences(ctx context.Context, id string, definitions S
 			// guessed.
 			kind = SubflowOwnerUnknown
 		}
-		add(SubflowReference{Owner: owner, OwnerKind: kind, NodeID: it.ID})
+		var node map[string]json.RawMessage
+		if err := json.Unmarshal(item, &node); err != nil {
+			return fmt.Errorf("instance node %q in the flow configuration cannot be read, so its wires cannot be checked: %w", it.ID, err)
+		}
+		if err := add(SubflowReference{Owner: owner, OwnerKind: kind, NodeID: it.ID}, node); err != nil {
+			return err
+		}
 	}
-	return refs, nil
+	return nil
+}
+
+// subflowReferences lists every place the runtime still uses the subflow
+// definition id.
+func (c *Client) subflowReferences(ctx context.Context, id string, definitions SubflowList) ([]SubflowReference, error) {
+	var refs []SubflowReference
+	err := c.eachSubflowInstance(ctx, id, definitions, func(ref SubflowReference, _ map[string]json.RawMessage) error {
+		refs = append(refs, ref)
+		return nil
+	})
+	return refs, err
+}
+
+// subflowOutputCount is the number of outputs of a subflow definition: the
+// length of its "out" array. A definition without "out" has none.
+func subflowOutputCount(def json.RawMessage) int {
+	var d struct {
+		Out []json.RawMessage `json:"out"`
+	}
+	_ = json.Unmarshal(def, &d)
+	return len(d.Out)
+}
+
+// instancePorts is the number of ports a node's wires array carries. Wires
+// that cannot be read count as none.
+func instancePorts(node map[string]json.RawMessage) int {
+	var wires []json.RawMessage
+	if json.Unmarshal(node["wires"], &wires) != nil {
+		return 0
+	}
+	return len(wires)
+}
+
+// orphanedPorts lists the ports of an instance node that carry a wire and sit
+// at or beyond outputs.
+func orphanedPorts(node map[string]json.RawMessage, outputs int) []int {
+	var wires [][]json.RawMessage
+	if json.Unmarshal(node["wires"], &wires) != nil {
+		return nil
+	}
+	var ports []int
+	for i := outputs; i < len(wires); i++ {
+		if len(wires[i]) > 0 {
+			ports = append(ports, i)
+		}
+	}
+	return ports
+}
+
+// trimWires cuts a node's wires down to its first outputs ports and reports
+// whether a port was removed.
+func trimWires(node map[string]json.RawMessage, outputs int) bool {
+	var wires []json.RawMessage
+	if json.Unmarshal(node["wires"], &wires) != nil || len(wires) <= outputs {
+		return false
+	}
+	node["wires"], _ = json.Marshal(wires[:outputs])
+	return true
+}
+
+// wiredInstance is an instance node that keeps a wire on a port at or
+// beyond the output count a replacement definition has.
+type wiredInstance struct {
+	ref   SubflowReference
+	ports []int
+}
+
+// reconcileInstanceWires guards a definition that now has outputs ports: an
+// instance wired to a later port is refused with the list of instances and
+// nothing is written, unless prune is set. With prune the wire is removed
+// from every instance first: each affected tab is deployed on its own, and
+// an instance nested in another definition is rewritten in defs, which the
+// caller writes next. The caller holds writeMu.
+func (c *Client) reconcileInstanceWires(ctx context.Context, id string, outputs int, prune bool, definitions SubflowList, defs []json.RawMessage) error {
+	var instances []wiredInstance
+	if err := c.eachSubflowInstance(ctx, id, definitions, func(ref SubflowReference, node map[string]json.RawMessage) error {
+		if ports := orphanedPorts(node, outputs); len(ports) > 0 {
+			instances = append(instances, wiredInstance{ref: ref, ports: ports})
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if len(instances) == 0 {
+		return nil
+	}
+	if !prune {
+		var b strings.Builder
+		fmt.Fprintf(&b, "subflow %q would have %d output(s), but %d instance(s) keep a wire on a port that would no longer exist; nothing was written", id, outputs, len(instances))
+		for _, in := range instances {
+			fmt.Fprintf(&b, "\n  - %s: port(s) %v", in.ref.describe(), in.ports)
+		}
+		b.WriteString("\npass prune_wires: true to remove those wires, or rewire the instances with update_node first")
+		return errors.New(b.String())
+	}
+	// An instance at global scope, in an owner the configuration does not
+	// name, or without a readable id has no write path: refuse before any
+	// tab is deployed. An empty id would match every node without one.
+	tabs := make(map[string][]string)
+	nested := make(map[string][]string)
+	for _, in := range instances {
+		switch {
+		case in.ref.NodeID == "":
+			return fmt.Errorf("%s cannot be pruned automatically", in.ref.describe())
+		case in.ref.OwnerKind == SubflowOwnerTab:
+			tabs[in.ref.Owner] = append(tabs[in.ref.Owner], in.ref.NodeID)
+		case in.ref.OwnerKind == SubflowOwnerSubflow:
+			nested[in.ref.Owner] = append(nested[in.ref.Owner], in.ref.NodeID)
+		default:
+			return fmt.Errorf("%s cannot be pruned automatically", in.ref.describe())
+		}
+	}
+	for tab, ids := range tabs {
+		if err := c.pruneInstancesInTab(ctx, tab, ids, outputs); err != nil {
+			return err
+		}
+	}
+	for owner, ids := range nested {
+		if err := pruneInstancesInDefinition(defs, owner, ids, outputs); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// pruneInstancesInTab trims the wires of the given instances in their tab and
+// deploys the tab on a fresh snapshot. The caller holds writeMu.
+func (c *Client) pruneInstancesInTab(ctx context.Context, tabID string, instances []string, outputs int) error {
+	snap, err := c.readFlowSnapshot(ctx)
+	if err != nil {
+		return err
+	}
+	current, ok := synthesizeFlowFromFlat(snap.raw, tabID)
+	if !ok {
+		return flowTabNotFound(tabID)
+	}
+	doc, err := decodeFlow(current)
+	if err != nil {
+		return err
+	}
+	trimmed := 0
+	for _, nodes := range [][]map[string]json.RawMessage{doc.Nodes, doc.Configs} {
+		for _, node := range nodes {
+			for _, id := range instances {
+				if id != "" && nodeID(node) == id && trimWires(node, outputs) {
+					trimmed++
+				}
+			}
+		}
+	}
+	if trimmed != len(instances) {
+		return fmt.Errorf("tab %q no longer holds every instance that was to be pruned; retry the update", tabID)
+	}
+	next, err := doc.encode()
+	if err != nil {
+		return err
+	}
+	return c.deployFlowUpdateOn(ctx, tabID, next, snap, false)
+}
+
+// pruneInstancesInDefinition trims the wires of the given instances inside
+// the definition owner, in place in defs.
+func pruneInstancesInDefinition(defs []json.RawMessage, owner string, instances []string, outputs int) error {
+	for i, def := range defs {
+		if decodeFlowItem(def).ID != owner {
+			continue
+		}
+		var d map[string]json.RawMessage
+		if err := json.Unmarshal(def, &d); err != nil {
+			return fmt.Errorf("subflow definition %q cannot be rewritten: %w", owner, err)
+		}
+		for _, key := range []string{"nodes", "configs"} {
+			raw, ok := d[key]
+			if !ok {
+				continue
+			}
+			var members []map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &members); err != nil {
+				return fmt.Errorf("subflow definition %q has an unreadable %s array: %w", owner, key, err)
+			}
+			for _, member := range members {
+				for _, id := range instances {
+					if id != "" && nodeID(member) == id {
+						trimWires(member, outputs)
+					}
+				}
+			}
+			d[key], _ = json.Marshal(members)
+		}
+		defs[i], _ = json.Marshal(d)
+		return nil
+	}
+	return fmt.Errorf("subflow definition %q is no longer in the configuration", owner)
 }
 
 // memberIsInstance reports whether a member of a subflow definition is
@@ -1004,8 +1210,14 @@ func (c *Client) InstantiateSubflow(ctx context.Context, flowID, subflowID strin
 	if err := c.deniedNodeType(built); err != nil {
 		return nil, err
 	}
-	if _, err := c.GetSubflow(ctx, subflowID); err != nil {
+	def, err := c.GetSubflow(ctx, subflowID)
+	if err != nil {
 		return nil, err
+	}
+	// Issue #451: the runtime indexes an instance's wires by the outputs
+	// of its definition, so a port past them can never fire.
+	if outputs, ports := subflowOutputCount(def), instancePorts(node); ports > outputs {
+		return nil, fmt.Errorf("subflow %q has %d output(s), but the instance wires %d port(s): wires must have at most %d port(s)", subflowID, outputs, ports, outputs)
 	}
 	if err := c.AddNode(ctx, flowID, built); err != nil {
 		return nil, err

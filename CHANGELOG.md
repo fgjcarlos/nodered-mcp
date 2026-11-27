@@ -8,6 +8,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Subflow instances no longer outlive their outputs (#451). `instantiate_subflow`
+  refuses `wires` with more ports than the definition has outputs, and no
+  longer tells you to wire up an instance that came with its wires.
+  `update_subflow` refuses a definition that would leave an instance wired
+  to an output that no longer exists, listing the instances and writing
+  nothing, unless the new `prune_wires` parameter removes those wires
+  first.
 - `delete_node` removes every reference to the deleted node (#450), not
   only wires: the `links` of link out nodes, the `nodes` of groups and the
   `scope` of catch, status and complete nodes. Members of a deleted group

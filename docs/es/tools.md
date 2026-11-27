@@ -324,9 +324,9 @@ y `get_context` y `set_context` siguen usando `id` para los ámbitos de flujo y 
 | `list_subflows` | `GET /flow/global` | read | |
 | `get_subflow` | `GET /flow/global` | read | |
 | `create_subflow` | `PUT /flow/global` | write | Primero se valida la topología de la definición |
-| `update_subflow` | `PUT /flow/global` | write | Primero se valida la topología de la definición |
+| `update_subflow` | `PUT /flow/global` | write | Primero se valida la topología de la definición; si una instancia queda cableada a una salida eliminada se listan las instancias y se rechaza, o se recortan con `prune_wires` |
 | `delete_subflow` | `PUT /flow/global` | write | Rechaza mientras la definición siga instanciada |
-| `instantiate_subflow` | `GET /flows` + `POST /flows` | write | |
+| `instantiate_subflow` | `GET /flows` + `POST /flows` | write | `wires` no puede tener más puertos que salidas tiene el subflujo |
 
 ### Eliminar la definición de un subflujo
 
@@ -439,6 +439,14 @@ sea menor que el número de puertos `in` hace que el arranque lance una
 excepción. Esto se notifica como `invalid_subflow_port` en `create_subflow`,
 `update_subflow`, `set_flows`, `restore_backup` y `validate_flow`. Las
 conexiones de un puerto `in` llevan solo un `id`.
+
+El número de puertos `out` también acota a cada instancia del subflujo.
+`instantiate_subflow` rechaza `wires` con más puertos que salidas tiene la
+definición, y `update_subflow` rechaza una definición que dejaría una
+instancia cableada a una salida que ya no existe: lista las instancias y no
+escribe nada, salvo que se pase `prune_wires`; en ese caso primero elimina
+esas conexiones, pestaña por pestaña y dentro de cualquier otra definición
+que anide una instancia.
 
 ### Advertencias semánticas de `validate_flow`
 

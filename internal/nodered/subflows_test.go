@@ -286,7 +286,7 @@ func TestUpdateSubflow_Replaces(t *testing.T) {
 	c := clientWithBackup(t, srv.URL)
 
 	updated := json.RawMessage(`{"id":"sf_a","type":"subflow","name":"A-renamed","in":[],"out":[],"env":[],"nodes":[]}`)
-	if err := c.UpdateSubflow(context.Background(), "sf_a", updated); err != nil {
+	if err := c.UpdateSubflow(context.Background(), "sf_a", updated, false); err != nil {
 		t.Fatalf("UpdateSubflow: %v", err)
 	}
 	if !strings.Contains(string(putBody), `"name":"A-renamed"`) {
@@ -310,7 +310,7 @@ func TestUpdateSubflow_NotFound(t *testing.T) {
 
 	c := clientWithBackup(t, srv.URL)
 	body := json.RawMessage(`{"id":"sf_missing","type":"subflow","name":"X","in":[],"out":[],"env":[],"nodes":[]}`)
-	err := c.UpdateSubflow(context.Background(), "sf_missing", body)
+	err := c.UpdateSubflow(context.Background(), "sf_missing", body, false)
 	if err == nil {
 		t.Fatal("expected not-found error, got nil")
 	}
@@ -335,7 +335,7 @@ func TestUpdateSubflow_BodyIDMismatch(t *testing.T) {
 
 	c := clientWithBackup(t, srv.URL)
 	body := json.RawMessage(`{"id":"sf_other","type":"subflow","name":"X","in":[],"out":[],"env":[],"nodes":[]}`)
-	err := c.UpdateSubflow(context.Background(), "sf_a", body)
+	err := c.UpdateSubflow(context.Background(), "sf_a", body, false)
 	if err == nil {
 		t.Fatal("expected id-mismatch error, got nil")
 	}
@@ -627,7 +627,9 @@ func TestInstantiateSubflow_HappyPath(t *testing.T) {
 
 	c := clientWithBackup(t, srv.URL)
 
-	params := json.RawMessage(`{"id":"inst_1","name":"first","x":300,"y":300,"wires":[[]]}`)
+	// A subflow without outputs takes no wires port (issue #451), so the
+	// happy path carries none.
+	params := json.RawMessage(`{"id":"inst_1","name":"first","x":300,"y":300}`)
 	created, err := c.InstantiateSubflow(context.Background(), "tab_x", "sf_a", params)
 	if err != nil {
 		t.Fatalf("InstantiateSubflow: %v", err)
@@ -1469,5 +1471,231 @@ func TestDeleteSubflow_RefusesWhenInstanceTypeArrayHoldsANumber(t *testing.T) {
 	}
 	if inUse.Refs[0].NodeID != "i1" {
 		t.Errorf("unexpected reference: %+v", inUse.Refs[0])
+	}
+}
+
+// updateSubflowRuntime serves a /flow/global envelope and a revisioned
+// /flows array, and records what a PUT or a POST carries. Each stays nil
+// while the runtime has not been written to.
+func updateSubflowRuntime(t *testing.T, envelope, flows string) (*Client, *[]byte, *[]byte) {
+	t.Helper()
+	var (
+		mu       sync.Mutex
+		putBody  []byte
+		postBody []byte
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flow/global":
+			_, _ = w.Write([]byte(envelope))
+		case r.Method == "PUT" && r.URL.Path == "/flow/global":
+			putBody, _ = io.ReadAll(r.Body)
+			_, _ = w.Write([]byte(`{"id":"sf_a"}`))
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			_, _ = w.Write([]byte(flows))
+		case r.Method == "POST" && r.URL.Path == "/flows":
+			postBody, _ = io.ReadAll(r.Body)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return clientWithBackup(t, srv.URL), &putBody, &postBody
+}
+
+// fieldOfObject decodes raw and returns the field of the object with the
+// given id, wherever it sits in the document. Nil when there is none.
+func fieldOfObject(t *testing.T, raw []byte, id, field string) any {
+	t.Helper()
+	var doc any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("decoding %s: %v", raw, err)
+	}
+	var found any
+	var walk func(any)
+	walk = func(v any) {
+		switch v := v.(type) {
+		case map[string]any:
+			if v["id"] == id {
+				if got, ok := v[field]; ok {
+					found = got
+					return
+				}
+			}
+			for _, x := range v {
+				walk(x)
+			}
+		case []any:
+			for _, x := range v {
+				walk(x)
+			}
+		}
+	}
+	walk(doc)
+	return found
+}
+
+// compactJSON re-encodes a decoded value for comparison.
+func compactJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// The fixtures of issue #451: sf_a has two outputs and an instance wired on
+// both, inst_t in a tab and inst_n inside sf_b. A definition with one output
+// would orphan the second wire of each.
+const (
+	sfATwoOutputs   = `{"id":"sf_a","type":"subflow","name":"A","in":[],"out":[{"x":300,"y":100,"wires":[]},{"x":300,"y":140,"wires":[]}]}`
+	sfAOneOutput    = `{"id":"sf_a","type":"subflow","name":"A","in":[],"out":[{"x":300,"y":100,"wires":[]}]}`
+	sfBWithInstance = `{"id":"sf_b","type":"subflow","name":"B","in":[],"out":[],"nodes":[
+		{"id":"n_b","type":"debug","z":"sf_b","x":100,"y":100,"wires":[]},
+		{"id":"inst_n","type":"subflow:sf_a","z":"sf_b","x":200,"y":100,"wires":[["n_b"],["n_b"]]}]}`
+	tabWithInstance = `{
+		"id":"tab_x","label":"X","nodes":[
+			{"id":"n1","type":"debug","z":"tab_x","x":100,"y":100,"wires":[]},
+			{"id":"n2","type":"debug","z":"tab_x","x":100,"y":140,"wires":[]},
+			{"id":"inst_t","type":"subflow:sf_a","z":"tab_x","x":200,"y":100,"wires":[["n1"],["n2"]]}]}`
+	// The runtime lists a nested instance in the flat array as well.
+	flatNestedInstance = `{"id":"inst_n","type":"subflow:sf_a","z":"sf_b","x":200,"y":100,"wires":[["n_b"],["n_b"]]}`
+)
+
+// TestUpdateSubflow_InstanceWiredPastOutputs covers issue #451: dropping an
+// output an instance is wired to is refused with the list of instances and
+// nothing written; with pruning, the tab instance is trimmed by its own
+// deployment and the nested one in the definitions write.
+func TestUpdateSubflow_InstanceWiredPastOutputs(t *testing.T) {
+	envelope := `{"id":"global","subflows":[` + sfATwoOutputs + `,` + sfBWithInstance + `],"configs":[]}`
+	flows := string(testRevisionedTabWith(t, tabWithInstance,
+		json.RawMessage(sfATwoOutputs), json.RawMessage(sfBWithInstance), json.RawMessage(flatNestedInstance)))
+	c, putBody, postBody := updateSubflowRuntime(t, envelope, flows)
+
+	err := c.UpdateSubflow(context.Background(), "sf_a", json.RawMessage(sfAOneOutput), false)
+	if err == nil {
+		t.Fatal("expected the update to be refused while instances keep a wire on port 1")
+	}
+	for _, want := range []string{
+		`instance node "inst_t" in tab "tab_x"`,
+		`instance node "inst_n" in subflow "sf_b"`,
+		"prune_wires",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error does not mention %q: %v", want, err)
+		}
+	}
+	if *putBody != nil || *postBody != nil {
+		t.Errorf("a refused update wrote to the runtime: PUT %s POST %s", *putBody, *postBody)
+	}
+
+	if err := c.UpdateSubflow(context.Background(), "sf_a", json.RawMessage(sfAOneOutput), true); err != nil {
+		t.Fatalf("UpdateSubflow with pruning: %v", err)
+	}
+	if got := compactJSON(t, fieldOfObject(t, *postBody, "inst_t", "wires")); got != `[["n1"]]` {
+		t.Errorf("tab instance wires were not trimmed: %s", got)
+	}
+	for _, id := range []string{"n1", "n2"} {
+		if fieldOfObject(t, *postBody, id, "type") != "debug" {
+			t.Errorf("node %s missing from the deployed tab: %s", id, *postBody)
+		}
+	}
+	if got := compactJSON(t, fieldOfObject(t, *putBody, "inst_n", "wires")); got != `[["n_b"]]` {
+		t.Errorf("nested instance wires were not trimmed: %s", got)
+	}
+	if outs, ok := fieldOfObject(t, *putBody, "sf_a", "out").([]any); !ok || len(outs) != 1 {
+		t.Errorf("PUT body does not carry the one-output definition: %s", *putBody)
+	}
+}
+
+// TestUpdateSubflow_PruneRefusesGlobalInstance: an instance filed at global
+// scope has no write path, so pruning refuses before deploying any tab.
+func TestUpdateSubflow_PruneRefusesGlobalInstance(t *testing.T) {
+	globalInstance := `{"id":"inst_g","type":"subflow:sf_a","x":200,"y":100,"wires":[["n1"],["n1"]]}`
+	envelope := `{"id":"global","subflows":[` + sfATwoOutputs + `],"configs":[]}`
+	flows := string(testRevisionedTabWith(t, tabWithInstance, json.RawMessage(sfATwoOutputs), json.RawMessage(globalInstance)))
+	c, putBody, postBody := updateSubflowRuntime(t, envelope, flows)
+
+	err := c.UpdateSubflow(context.Background(), "sf_a", json.RawMessage(sfAOneOutput), true)
+	if err == nil || !strings.Contains(err.Error(), `instance node "inst_g"`) || !strings.Contains(err.Error(), "cannot be pruned") {
+		t.Fatalf("expected the global instance to be refused, got %v", err)
+	}
+	if *putBody != nil || *postBody != nil {
+		t.Errorf("a refused update wrote to the runtime: PUT %s POST %s", *putBody, *postBody)
+	}
+}
+
+// TestUpdateSubflow_PruneRefusesUnnameableInstance: an instance whose id is
+// not a string cannot be named in a rewrite. Matching it by its empty id
+// would trim every node without a readable id, so pruning refuses before
+// any write.
+func TestUpdateSubflow_PruneRefusesUnnameableInstance(t *testing.T) {
+	instance := `{"id":7,"type":"subflow:sf_a","z":"sf_b","x":200,"y":100,"wires":[["n_b"],["n_b"]]}`
+	other := `{"id":8,"type":"switch","z":"sf_b","x":250,"y":100,"rules":[{},{}],"wires":[["n_b"],["n_b"]]}`
+	sfB := `{"id":"sf_b","type":"subflow","name":"B","in":[],"out":[],"nodes":[
+		{"id":"n_b","type":"debug","z":"sf_b","x":100,"y":100,"wires":[]},` + instance + `,` + other + `]}`
+	envelope := `{"id":"global","subflows":[` + sfATwoOutputs + `,` + sfB + `],"configs":[]}`
+	flows := string(testRevisionedTabWith(t, `{"id":"tab_x","label":"X","nodes":[]}`,
+		json.RawMessage(sfATwoOutputs), json.RawMessage(sfB), json.RawMessage(instance), json.RawMessage(other)))
+	c, putBody, postBody := updateSubflowRuntime(t, envelope, flows)
+
+	err := c.UpdateSubflow(context.Background(), "sf_a", json.RawMessage(sfAOneOutput), true)
+	if err == nil || !strings.Contains(err.Error(), "cannot be pruned") {
+		t.Fatalf("expected the unnameable instance to be refused, got %v", err)
+	}
+	if *putBody != nil || *postBody != nil {
+		t.Errorf("a refused prune wrote to the runtime: PUT %s POST %s", *putBody, *postBody)
+	}
+}
+
+// TestInstantiateSubflow_PortsBeyondOutputs covers issue #451: an instance
+// wired past the definition's outputs is refused before anything is written;
+// one wired up to the last output is added.
+func TestInstantiateSubflow_PortsBeyondOutputs(t *testing.T) {
+	def := json.RawMessage(`{"id":"sf_a","type":"subflow","name":"A","in":[],"out":[{"x":300,"y":100,"wires":[]},{"x":300,"y":140,"wires":[]}]}`)
+	tab := `{"id":"tab_x","label":"X","nodes":[{"id":"n1","type":"debug","z":"tab_x","x":140,"y":140,"wires":[]}]}`
+	for _, tc := range []struct{ name, wires, wantErr string }{
+		{"three ports on two outputs", `[["n1"],["n1"],["n1"]]`, `subflow "sf_a" has 2 output(s), but the instance wires 3 port(s)`},
+		{"one port per output", `[["n1"],[]]`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var posted bool
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == "GET" && r.URL.Path == "/flow/global":
+					_, _ = w.Write([]byte(`{"id":"global","subflows":[` + string(def) + `],"configs":[]}`))
+				case r.Method == "GET" && r.URL.Path == "/flows":
+					_, _ = w.Write(testRevisionedTabWith(t, tab, def))
+				case r.Method == "POST" && r.URL.Path == "/flows":
+					posted = true
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+				}
+			}))
+			t.Cleanup(srv.Close)
+
+			params := json.RawMessage(`{"id":"inst_1","x":300,"y":300,"wires":` + tc.wires + `}`)
+			_, err := clientWithBackup(t, srv.URL).InstantiateSubflow(context.Background(), "tab_x", "sf_a", params)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("InstantiateSubflow: %v", err)
+				}
+				if !posted {
+					t.Error("the instance wired up to the last output was not deployed")
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("expected %q, got %v", tc.wantErr, err)
+			}
+			if posted {
+				t.Error("an instance with more ports than outputs was deployed")
+			}
+		})
 	}
 }
