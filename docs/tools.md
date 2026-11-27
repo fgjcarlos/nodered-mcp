@@ -422,8 +422,12 @@ has outputs, and none of them deploys on a refusal. A `wires` value that is
 not an array of arrays is refused on all four. `update_subflow` refuses a
 definition that would leave an instance wired to an output that no longer
 exists, listing the instances and writing nothing, unless `prune_wires` is
-set: then those wires are removed first, tab by tab, and inside any other
-definition that nests an instance.
+set: then those wires are removed first, every affected tab is trimmed and
+deployed in one deployment (in sorted id order), and any other definition
+that nests an instance is trimmed too. The definition is written after that
+deployment: if that write fails, the tabs stay trimmed and the definition
+keeps its old outputs, and repeating the call with `prune_wires` finishes
+the job.
 
 ### Semantic warnings in `validate_flow`
 

@@ -69,25 +69,44 @@ func (c *Client) deployFlowUpdate(ctx context.Context, id string, flow RawFlow) 
 // on: the entries of the tab are replaced in that snapshot's array, and the
 // deployment carries that snapshot's revision.
 func (c *Client) deployFlowUpdateOn(ctx context.Context, id string, flow RawFlow, snap *flowSnapshot, checkTabTypes bool) error {
-	next, err := replaceFlowEntries(snap.flows, id, flow)
-	if err != nil {
-		return err
-	}
-	if err := validateDeployedTab(next, id, flow); err != nil {
-		return err
-	}
-	// Issue #334: this deploy posts the whole array, so the rules that
-	// need the whole configuration are applied to it as well — but only
-	// to the entries of the tab being written. The rest of the
-	// configuration is the runtime's own state, and a problem there is
-	// not the caller's to answer for: refusing it would make the tab
-	// impossible to repair.
-	if err := validateTabEntries(next, id); err != nil {
-		return err
-	}
-	if checkTabTypes {
-		if err := c.validateRegisteredNodeTypes(ctx, flow, next); err != nil {
+	return c.deployFlowUpdatesOn(ctx, snap, checkTabTypes, []tabUpdate{{id: id, flow: flow}})
+}
+
+// tabUpdate is one tab's replacement document, built on a snapshot.
+type tabUpdate struct {
+	id   string
+	flow RawFlow
+}
+
+// deployFlowUpdatesOn replaces every tab's entries in the snapshot's array
+// cumulatively, judges each tab as the single-tab path judges it, then takes
+// one backup and posts one revision-checked deployment. Deploying the tabs
+// together is what keeps a failed prune atomic: the runtime never ends up
+// with only some of the tabs trimmed.
+func (c *Client) deployFlowUpdatesOn(ctx context.Context, snap *flowSnapshot, checkTabTypes bool, updates []tabUpdate) error {
+	next := snap.flows
+	for _, u := range updates {
+		var err error
+		next, err = replaceFlowEntries(next, u.id, u.flow)
+		if err != nil {
 			return err
+		}
+		if err := validateDeployedTab(next, u.id, u.flow); err != nil {
+			return err
+		}
+		// Issue #334: this deploy posts the whole array, so the rules that
+		// need the whole configuration are applied to it as well — but only
+		// to the entries of the tab being written. The rest of the
+		// configuration is the runtime's own state, and a problem there is
+		// not the caller's to answer for: refusing it would make the tab
+		// impossible to repair.
+		if err := validateTabEntries(next, u.id); err != nil {
+			return err
+		}
+		if checkTabTypes {
+			if err := c.validateRegisteredNodeTypes(ctx, u.flow, next); err != nil {
+				return err
+			}
 		}
 	}
 	if _, err := c.saveFlowSnapshot(snap.raw); err != nil {

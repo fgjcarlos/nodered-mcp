@@ -448,8 +448,12 @@ tiene la definición, y ninguna despliega nada si rechaza. Un valor `wires` que
 no sea un array de arrays se rechaza en las cuatro. `update_subflow` rechaza
 una definición que dejaría una instancia cableada a una salida que ya no
 existe: lista las instancias y no escribe nada, salvo que se pase
-`prune_wires`; en ese caso primero elimina esas conexiones, pestaña por
-pestaña y dentro de cualquier otra definición que anide una instancia.
+`prune_wires`; en ese caso primero elimina esas conexiones, recorta todas las
+pestañas afectadas y las despliega en un solo despliegue (por orden de id), y
+también recorta cualquier otra definición que anide una instancia. La
+definición se escribe después de ese despliegue: si esa escritura falla, las
+pestañas quedan recortadas y la definición conserva sus salidas antiguas, y
+repetir la llamada con `prune_wires` termina el trabajo.
 
 ### Advertencias semánticas de `validate_flow`
 
