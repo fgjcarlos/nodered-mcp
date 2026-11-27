@@ -118,7 +118,11 @@ func (c *Client) UpdateNode(ctx context.Context, flowID, nodeID string, patch ma
 			return nil, err
 		}
 		if collection, index, ok := doc.locate(nodeID); ok {
-			if issues := validateFunctionNode((*collection)[index]); len(issues) > 0 {
+			node := (*collection)[index]
+			if err := validateUpdatedLinks(node, patch, flows); err != nil {
+				return nil, err
+			}
+			if issues := validateFunctionNode(node); len(issues) > 0 {
 				return nil, &FlowGuardError{Message: issues[0].Message}
 			}
 		}
@@ -398,15 +402,22 @@ func UpdateNodeInFlow(flow RawFlow, id string, patch map[string]json.RawMessage)
 		return nil, fmt.Errorf("no node with id %q in this flow", id)
 	}
 
+	node := (*collection)[i]
 	for k, v := range patch {
-		(*collection)[i][k] = v
+		node[k] = v
 	}
 	// A patch may rewrite z to a value that does not name the owning tab
 	// or any existing node in this flow. Node-RED silently rewrites such
 	// z to the owning tab id, which loses the wire the model intended —
 	// issue #99. Same check AddNodeToFlow runs on the new-node path.
-	if err := validateZRef(doc, stringField((*collection)[i], "z")); err != nil {
-		return nil, fmt.Errorf("node %q (%s): %w", id, nodeType((*collection)[i]), err)
+	if err := validateZRef(doc, stringField(node, "z")); err != nil {
+		return nil, fmt.Errorf("node %q (%s): %w", id, nodeType(node), err)
+	}
+	if err := validateUpdatedGroup(doc, node, patch); err != nil {
+		return nil, err
+	}
+	if err := validateUpdatedOutputWires(node, patch); err != nil {
+		return nil, err
 	}
 	return doc.encode()
 }
