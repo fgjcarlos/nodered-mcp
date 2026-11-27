@@ -655,8 +655,9 @@ func subflowOwnerKinds(items []json.RawMessage) map[string]string {
 	return kinds
 }
 
-// subflowReferences finds every place the runtime still uses the
-// subflow definition id.
+// eachSubflowInstance hands visit every instance node of the subflow id the
+// runtime holds, with the node itself, and returns the first error visit
+// reports.
 //
 // Two shapes have to be covered:
 //
@@ -671,25 +672,23 @@ func subflowOwnerKinds(items []json.RawMessage) map[string]string {
 // it is the one that can tell a nested instance from a tab instance
 // when the flat array does not name the owner.
 //
-// definitions is the set of subflow definitions the caller already
-// read for the delete itself, so the nested scan costs no extra
-// request.
-func (c *Client) subflowReferences(ctx context.Context, id string, definitions SubflowList) ([]SubflowReference, error) {
+// definitions is the set of subflow definitions the caller already read, so
+// the nested scan costs no extra request.
+func (c *Client) eachSubflowInstance(ctx context.Context, id string, definitions SubflowList, visit func(ref SubflowReference, node map[string]json.RawMessage) error) error {
 	wantType := "subflow:" + id
-	var refs []SubflowReference
 	seen := make(map[string]bool)
 
-	add := func(ref SubflowReference) {
+	add := func(ref SubflowReference, node map[string]json.RawMessage) error {
 		// The owner kind is deliberately not part of the key: the same
 		// instance can be seen by both scans, and reporting it twice
 		// with contradictory owners ("in subflow sf_b" and "in tab
 		// sf_b") is worse than reporting it once.
 		key := ref.Owner + "|" + ref.NodeID
 		if seen[key] {
-			return
+			return nil
 		}
 		seen[key] = true
-		refs = append(refs, ref)
+		return visit(ref, node)
 	}
 
 	// The members of the definition being deleted. An instance inside
@@ -714,11 +713,11 @@ func (c *Client) subflowReferences(ctx context.Context, id string, definitions S
 			// Name the definition that cannot be read, and the one
 			// that was asked for: without both, the operator cannot
 			// tell which definition to repair.
-			return nil, fmt.Errorf("subflow definition %q cannot be checked for references to %q: %w", defItem.ID, id, err)
+			return fmt.Errorf("subflow definition %q cannot be checked for references to %q: %w", defItem.ID, id, err)
 		}
 		if defItem.ID == id {
-			// The definition being deleted is not a reference to
-			// itself.
+			// The definition being deleted or replaced is not a
+			// reference to itself.
 			for _, member := range members {
 				if memberID := nodeID(member); memberID != "" {
 					selfMembers[memberID] = true
@@ -730,11 +729,13 @@ func (c *Client) subflowReferences(ctx context.Context, id string, definitions S
 			if !memberIsInstance(member, wantType) {
 				continue
 			}
-			add(SubflowReference{
+			if err := add(SubflowReference{
 				Owner:     defItem.ID,
 				OwnerKind: SubflowOwnerSubflow,
 				NodeID:    nodeID(member),
-			})
+			}, member); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -742,11 +743,11 @@ func (c *Client) subflowReferences(ctx context.Context, id string, definitions S
 	// configuration, tabs and their nodes included.
 	flat, err := c.ListFlows(ctx)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	items, err := subflowFlowItems(flat)
 	if err != nil {
-		return nil, fmt.Errorf("the flow configuration could not be read: %w", err)
+		return fmt.Errorf("the flow configuration could not be read: %w", err)
 	}
 	kinds := subflowOwnerKinds(items)
 	for _, item := range items {
@@ -755,15 +756,15 @@ func (c *Client) subflowReferences(ctx context.Context, id string, definitions S
 			// The type could not be read at all, so the node cannot
 			// be classified. "Cannot be checked" is not "no
 			// references": the delete is refused.
-			return nil, fmt.Errorf("a node in the flow configuration has an unreadable type, so its references to %q could not be checked", id)
+			return fmt.Errorf("a node in the flow configuration has an unreadable type, so its references to %q could not be checked", id)
 		}
 		if it.Type != wantType {
 			continue
 		}
 		if it.IDOK && selfMembers[it.ID] {
 			// The instance lives inside the definition being
-			// deleted. It goes away with it, and the runtime does
-			// not report a missing type for it.
+			// deleted or replaced. It goes away with it, and the
+			// runtime does not report a missing type for it.
 			continue
 		}
 		owner, kind := it.Z, kinds[it.Z]
@@ -782,9 +783,26 @@ func (c *Client) subflowReferences(ctx context.Context, id string, definitions S
 			// guessed.
 			kind = SubflowOwnerUnknown
 		}
-		add(SubflowReference{Owner: owner, OwnerKind: kind, NodeID: it.ID})
+		var node map[string]json.RawMessage
+		if err := json.Unmarshal(item, &node); err != nil {
+			return fmt.Errorf("instance node %q in the flow configuration cannot be read, so its wires cannot be checked: %w", it.ID, err)
+		}
+		if err := add(SubflowReference{Owner: owner, OwnerKind: kind, NodeID: it.ID}, node); err != nil {
+			return err
+		}
 	}
-	return refs, nil
+	return nil
+}
+
+// subflowReferences lists every place the runtime still uses the subflow
+// definition id.
+func (c *Client) subflowReferences(ctx context.Context, id string, definitions SubflowList) ([]SubflowReference, error) {
+	var refs []SubflowReference
+	err := c.eachSubflowInstance(ctx, id, definitions, func(ref SubflowReference, _ map[string]json.RawMessage) error {
+		refs = append(refs, ref)
+		return nil
+	})
+	return refs, err
 }
 
 // memberIsInstance reports whether a member of a subflow definition is
