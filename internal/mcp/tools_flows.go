@@ -289,9 +289,7 @@ func (s *Server) handleUpdateNode(ctx context.Context, req mcp.CallToolRequest) 
 	)), nil
 }
 
-// handleDeleteNode removes one node and the wires pointing at it.
-
-// handleDeleteNode removes one node and the wires pointing at it.
+// handleDeleteNode removes one node and every reference to it.
 func (s *Server) handleDeleteNode(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	flowID, err := req.RequireString("flow_id")
 	if err != nil {
@@ -308,7 +306,7 @@ func (s *Server) handleDeleteNode(ctx context.Context, req mcp.CallToolRequest) 
 		return toolResultError(err, fmt.Sprintf("deleting node: %v", err))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf(
-		"Node %q deleted from flow %q, along with any wires pointing at it (a backup was taken first).",
+		"Node %q deleted from flow %q, along with every reference to it (a backup was taken first).",
 		nodeID, flowID,
 	)), nil
 }

@@ -8,6 +8,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- `delete_node` removes every reference to the deleted node (#450), not
+  only wires: the `links` of link out nodes, the `nodes` of groups and the
+  `scope` of catch, status and complete nodes. Members of a deleted group
+  move up to its parent group, or lose their group when it was top-level.
+  These references used to be left behind, pointing at a node that no
+  longer exists.
 - `connect_nodes` validates what it wires (#448). A `port` that is not a
   whole number from 0 to 999 is refused; 1.5 used to be truncated to 1.
   A wire from a core node without outputs (debug, http response, link out,
