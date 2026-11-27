@@ -20,6 +20,100 @@ import (
 // rejection BEFORE the write, not to invent new rules. Anything a write would
 // accept must be reported as a non-issue here.
 
+// These update-only checks run on merged properties before deployment. Check
+// fields the patch affects so unrelated edits can still repair legacy flows.
+func validateUpdatedGroup(doc *flowDoc, node, patch map[string]json.RawMessage) error {
+	if raw, changed := patch["g"]; changed {
+		var group string
+		if err := json.Unmarshal(raw, &group); err != nil {
+			return fmt.Errorf("node %q: g must be a group ID or null", nodeID(node))
+		}
+		if group != "" {
+			collection, i, found := doc.locate(group)
+			if !found || nodeType((*collection)[i]) != "group" {
+				return fmt.Errorf("node %q references unknown group %q in g", nodeID(node), group)
+			}
+		}
+	}
+	if nodeType(node) == "group" && (patch["nodes"] != nil || patch["type"] != nil) {
+		return validateUpdatedRefList(node, "nodes", "member", doc.exists)
+	}
+	return nil
+}
+
+func validateUpdatedLinks(node, patch map[string]json.RawMessage, flows []json.RawMessage) error {
+	if patch["links"] == nil && patch["type"] == nil {
+		return nil
+	}
+	switch nodeType(node) {
+	case "link in", "link out", "link call":
+		// Unlike group membership, links can point outside the edited tab.
+		index, err := indexFlowEntries(flows)
+		if err != nil {
+			return err
+		}
+		return validateUpdatedRefList(node, "links", "link target", func(id string) bool {
+			return index[id] != nil
+		})
+	}
+	return nil
+}
+
+func validateUpdatedRefList(node map[string]json.RawMessage, field, kind string, exists func(string) bool) error {
+	raw := node[field]
+	if raw == nil {
+		return nil
+	}
+	var refs []string
+	if err := json.Unmarshal(raw, &refs); err != nil {
+		return fmt.Errorf("node %q: %s must be an array of IDs or null", nodeID(node), field)
+	}
+	for _, ref := range refs {
+		if !exists(ref) {
+			return fmt.Errorf("node %q references unknown %s %q in %s", nodeID(node), kind, ref, field)
+		}
+	}
+	return nil
+}
+
+func validateUpdatedOutputWires(node, patch map[string]json.RawMessage) error {
+	if patch["outputs"] == nil && patch["wires"] == nil && patch["rules"] == nil && patch["type"] == nil {
+		return nil
+	}
+	if linkOutOwnsWires(node) {
+		return nil
+	}
+	count, known := declaredOutputs(semanticNode{nodeID(node), nodeType(node), node})
+	if !known && patch["outputs"] != nil {
+		// Other node types can explicitly declare an output count as well.
+		raw := node["outputs"]
+		value, ok := rawString(raw)
+		if !ok {
+			value = strings.TrimSpace(string(raw))
+		}
+		var err error
+		count, err = strconv.Atoi(value)
+		known = err == nil && count >= 0
+	}
+	if !known {
+		return nil
+	}
+	wires, err := decodeWires(node)
+	if err != nil {
+		return err
+	}
+	var wiredPorts []int
+	for port, targets := range wires {
+		if port >= count && len(targets) != 0 {
+			wiredPorts = append(wiredPorts, port)
+		}
+	}
+	if len(wiredPorts) != 0 {
+		return fmt.Errorf("node %q has %d output(s); ports %v still have wires", nodeID(node), count, wiredPorts)
+	}
+	return nil
+}
+
 // FlowIssueKind classifies a structural problem found in a flow document.
 type FlowIssueKind string
 

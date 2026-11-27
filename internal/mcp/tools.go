@@ -191,8 +191,9 @@ func (s *Server) registerTools() {
 				"untouched, including ones specific to that node type. This is the safe "+
 				"way to retune a node: change an MQTT topic, an HTTP url, a function "+
 				"body, or a name without risking the rest of the flow.\n\n"+
-				"A node's id cannot be changed, because the wires reference it. The "+
-				"wires are validated before the write.\n\n"+
+				"A node's id cannot be changed, because the wires reference it. Patches "+
+				"that introduce broken group, link, wire or flow references are rejected before deployment. "+
+				"To remove an output that still has wires, clear those wires in the same patch.\n\n"+
 				"WARNING: this tool can deploy any node type, including exec/system "+
 				"nodes that execute shell commands on the Node-RED host. The MCP "+
 				"server blocks a configurable set of node types (MCP_NODE_DENYLIST, "+
