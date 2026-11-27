@@ -394,15 +394,16 @@ func (s *Server) registerTools() {
 		mcp.WithDescription(
 			"Replace an existing subflow definition. The runtime's subflow "+
 				"collection is replaced wholesale, so this tool reads the "+
-				"current set, swaps the named entry, and writes the lot back. "+
-				"Fails with a 404-style error if no subflow with the given id "+
-				"exists; use create_subflow for new ones.\n\n"+
-				"The definition is validated with the same rules a tab is: a wire inside "+
-				"the subflow that names a node which is not in it, and a node whose z "+
-				"names another tab, are refused before the runtime is contacted. An "+
-				"update that leaves an instance wired to an output the new definition "+
-				"no longer has is refused with the list of instances, unless prune_wires "+
-				"is set.\n\n"+
+				"current set, swaps the named entry, and writes it back. "+
+				"Fails with a 404-style error if it does not exist; use "+
+				"create_subflow for new ones.\n\n"+
+				"The definition is validated with the same rules a tab is: a wire that "+
+				"names a node outside it, or a node whose z names another tab, is "+
+				"refused before the runtime is contacted. An update that leaves an "+
+				"instance wired to an output the new definition lacks is refused with "+
+				"the list of instances, unless prune_wires is set. With prune_wires the "+
+				"tabs are pruned first; if the definition write then fails, repeating the "+
+				"call finishes.\n\n"+
 				"WARNING: this tool can deploy any node type, including exec/system "+
 				"nodes that execute shell commands on the Node-RED host. The MCP "+
 				"server blocks a configurable set of node types (MCP_NODE_DENYLIST, "+
@@ -446,14 +447,13 @@ func (s *Server) registerTools() {
 				"The new node's type is set to \"subflow:<id>\" — the format the "+
 				"runtime and the editor both expect — and its z (owning tab) is "+
 				"set to flow_id. Other instance properties (name, x, y, wires, "+
-				"env, custom keys) are taken from the params argument verbatim, "+
-				"so callers can pass instance-level overrides without the MCP "+
-				"having to know about them.\n\n"+
+				"env, custom keys) are taken from params verbatim, so callers can "+
+				"pass overrides without the MCP knowing about them.\n\n"+
 				"The wires are validated like any other node add, and may not have "+
 				"more ports than the subflow has outputs. If flow_id does "+
 				"not exist, or subflow_id is not a known definition, the call fails "+
-				"before anything is written. Read /list_subflows first to discover "+
-				"available subflow ids, and /get_flow first to find tab ids.\n\n"+
+				"before anything is written. Read /list_subflows first for subflow "+
+				"ids, and /get_flow for tab ids.\n\n"+
 				"A backup of the current configuration is taken automatically before the "+
 				"write; restore_backup recovers the flow structure only. "+backupRecoveryWarning,
 		),

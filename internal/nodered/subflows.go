@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -868,9 +869,9 @@ type wiredInstance struct {
 // reconcileInstanceWires guards a definition that now has outputs ports: an
 // instance wired to a later port is refused with the list of instances and
 // nothing is written, unless prune is set. With prune the wire is removed
-// from every instance first: each affected tab is deployed on its own, and
-// an instance nested in another definition is rewritten in defs, which the
-// caller writes next. The caller holds writeMu.
+// from every instance first: all affected tabs are trimmed and deployed in
+// one write, and an instance nested in another definition is rewritten in
+// defs, which the caller writes next. The caller holds writeMu.
 func (c *Client) reconcileInstanceWires(ctx context.Context, id string, outputs int, prune bool, definitions SubflowList, defs []json.RawMessage) error {
 	var instances []wiredInstance
 	if err := c.eachSubflowInstance(ctx, id, definitions, func(ref SubflowReference, node map[string]json.RawMessage) error {
@@ -893,6 +894,13 @@ func (c *Client) reconcileInstanceWires(ctx context.Context, id string, outputs 
 		b.WriteString("\npass prune_wires: true to remove those wires, or rewire the instances with update_node first")
 		return errors.New(b.String())
 	}
+	return c.pruneAllInstances(ctx, instances, outputs, defs)
+}
+
+// pruneAllInstances trims the wires of every affected instance: all instance
+// tabs are pruned together in one deployment, and an instance nested in
+// another definition is rewritten in defs, which the caller writes next.
+func (c *Client) pruneAllInstances(ctx context.Context, instances []wiredInstance, outputs int, defs []json.RawMessage) error {
 	// An instance at global scope, in an owner the configuration does not
 	// name, or without a readable id has no write path: refuse before any
 	// tab is deployed. An empty id would match every node without one.
@@ -910,8 +918,19 @@ func (c *Client) reconcileInstanceWires(ctx context.Context, id string, outputs 
 			return fmt.Errorf("%s cannot be pruned automatically", in.ref.describe())
 		}
 	}
-	for tab, ids := range tabs {
-		if err := c.pruneInstancesInTab(ctx, tab, ids, outputs); err != nil {
+	// Tabs are pruned in sorted order: a map iterates in Go's randomised
+	// order, and which tab a failure names must not depend on it.
+	tabIDs := make([]string, 0, len(tabs))
+	for tab := range tabs {
+		tabIDs = append(tabIDs, tab)
+	}
+	sort.Strings(tabIDs)
+	if len(tabIDs) > 0 {
+		snap, err := c.readFlowSnapshot(ctx)
+		if err != nil {
+			return err
+		}
+		if err := c.pruneInstancesInTabs(ctx, snap, tabIDs, tabs, outputs); err != nil {
 			return err
 		}
 	}
@@ -923,20 +942,32 @@ func (c *Client) reconcileInstanceWires(ctx context.Context, id string, outputs 
 	return nil
 }
 
-// pruneInstancesInTab trims the wires of the given instances in their tab and
-// deploys the tab on a fresh snapshot. The caller holds writeMu.
-func (c *Client) pruneInstancesInTab(ctx context.Context, tabID string, instances []string, outputs int) error {
-	snap, err := c.readFlowSnapshot(ctx)
-	if err != nil {
-		return err
+// pruneInstancesInTabs trims the wires of the given instances in every tab
+// and deploys them all in one revision-checked write on the shared snapshot.
+// The caller holds writeMu.
+func (c *Client) pruneInstancesInTabs(ctx context.Context, snap *flowSnapshot, tabIDs []string, instances map[string][]string, outputs int) error {
+	updates := make([]tabUpdate, 0, len(tabIDs))
+	for _, tabID := range tabIDs {
+		current, ok := synthesizeFlowFromFlat(snap.raw, tabID)
+		if !ok {
+			return flowTabNotFound(tabID)
+		}
+		flow, err := trimInstanceWires(current, tabID, instances[tabID], outputs)
+		if err != nil {
+			return err
+		}
+		updates = append(updates, tabUpdate{id: tabID, flow: flow})
 	}
-	current, ok := synthesizeFlowFromFlat(snap.raw, tabID)
-	if !ok {
-		return flowTabNotFound(tabID)
-	}
+	return c.deployFlowUpdatesOn(ctx, snap, false, updates)
+}
+
+// trimInstanceWires cuts the given instances in one tab down to the first
+// outputs ports and returns the trimmed tab document. A tab that no longer
+// holds every instance is refused: the snapshot moved under the caller.
+func trimInstanceWires(current RawFlow, tabID string, instances []string, outputs int) (RawFlow, error) {
 	doc, err := decodeFlow(current)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	trimmed := 0
 	for _, nodes := range [][]map[string]json.RawMessage{doc.Nodes, doc.Configs} {
@@ -949,13 +980,9 @@ func (c *Client) pruneInstancesInTab(ctx context.Context, tabID string, instance
 		}
 	}
 	if trimmed != len(instances) {
-		return fmt.Errorf("tab %q no longer holds every instance that was to be pruned; retry the update", tabID)
+		return nil, fmt.Errorf("tab %q no longer holds every instance that was to be pruned; retry the update", tabID)
 	}
-	next, err := doc.encode()
-	if err != nil {
-		return err
-	}
-	return c.deployFlowUpdateOn(ctx, tabID, next, snap, false)
+	return doc.encode()
 }
 
 // pruneInstancesInDefinition trims the wires of the given instances inside

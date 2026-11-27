@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -1538,6 +1539,81 @@ func fieldOfObject(t *testing.T, raw []byte, id, field string) any {
 	return found
 }
 
+// pruneServer models the reads an update with pruning makes and records
+// every write, so a test can count deployments and backups through the
+// public interface. Successive /flows bodies are served in order; the last
+// one repeats.
+type pruneServer struct {
+	mu       sync.Mutex
+	bodies   []string
+	gets     int
+	puts     [][]byte
+	posts    []prunePost
+	failPost func([]byte) bool
+	backups  string
+	client   *Client
+}
+
+type prunePost struct {
+	body     []byte
+	backups  int
+	rejected bool
+}
+
+func newPruneServer(t *testing.T, envelope string, flows ...string) *pruneServer {
+	t.Helper()
+	s := &pruneServer{bodies: flows, backups: t.TempDir()}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/flow/global":
+			_, _ = w.Write([]byte(envelope))
+		case r.Method == "PUT" && r.URL.Path == "/flow/global":
+			body, _ := io.ReadAll(r.Body)
+			s.puts = append(s.puts, body)
+			_, _ = w.Write([]byte(`{"id":"sf_a"}`))
+		case r.Method == "GET" && r.URL.Path == "/flows":
+			body := s.bodies[len(s.bodies)-1]
+			if s.gets < len(s.bodies) {
+				body = s.bodies[s.gets]
+			}
+			s.gets++
+			_, _ = w.Write([]byte(body))
+		case r.Method == "POST" && r.URL.Path == "/flows":
+			body, _ := io.ReadAll(r.Body)
+			entries, _ := os.ReadDir(s.backups)
+			post := prunePost{body: body, backups: len(entries)}
+			if s.failPost != nil && s.failPost(body) {
+				post.rejected = true
+				s.posts = append(s.posts, post)
+				http.Error(w, "deployment refused", http.StatusInternalServerError)
+				return
+			}
+			s.posts = append(s.posts, post)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	c, err := NewClient(Options{BaseURL: srv.URL, Token: "test-token", BackupDir: s.backups})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	s.client = c
+	return s
+}
+
+func (s *pruneServer) backupCount(t *testing.T) int {
+	t.Helper()
+	entries, err := os.ReadDir(s.backups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(entries)
+}
+
 // compactJSON re-encodes a decoded value for comparison.
 func compactJSON(t *testing.T, v any) string {
 	t.Helper()
@@ -1564,6 +1640,14 @@ const (
 			{"id":"inst_t","type":"subflow:sf_a","z":"tab_x","x":200,"y":100,"wires":[["n1"],["n2"]]}]}`
 	// The runtime lists a nested instance in the flat array as well.
 	flatNestedInstance = `{"id":"inst_n","type":"subflow:sf_a","z":"sf_b","x":200,"y":100,"wires":[["n_b"],["n_b"]]}`
+	// A second tab with an instance of the same definition, for the
+	// multi-tab pruning cases of issue #474.
+	tabYWithInstance = `{"id":"tab_y","label":"Y","nodes":[
+		{"id":"m1","type":"debug","z":"tab_y","x":100,"y":100,"wires":[]},
+		{"id":"inst_u","type":"subflow:sf_a","z":"tab_y","x":200,"y":100,"wires":[["m1"],["m1"]]}]}`
+	flatTabY         = `{"id":"tab_y","type":"tab","label":"Y"}`
+	flatTabYNode     = `{"id":"m1","type":"debug","z":"tab_y","x":100,"y":100,"wires":[]}`
+	flatTabYInstance = `{"id":"inst_u","type":"subflow:sf_a","z":"tab_y","x":200,"y":100,"wires":[["m1"],["m1"]]}`
 )
 
 // TestUpdateSubflow_InstanceWiredPastOutputs covers issue #451: dropping an
@@ -1649,6 +1733,128 @@ func TestUpdateSubflow_PruneRefusesUnnameableInstance(t *testing.T) {
 	}
 	if *putBody != nil || *postBody != nil {
 		t.Errorf("a refused prune wrote to the runtime: PUT %s POST %s", *putBody, *postBody)
+	}
+}
+
+// twoTabPruneConfig is the flat configuration of the two-tab pruning cases:
+// tab_x from tabWithInstance and tab_y, one wired instance each.
+func twoTabPruneConfig(t *testing.T) string {
+	t.Helper()
+	return string(testRevisionedTabWith(t, tabWithInstance,
+		json.RawMessage(sfATwoOutputs),
+		json.RawMessage(flatTabY),
+		json.RawMessage(flatTabYNode),
+		json.RawMessage(flatTabYInstance)))
+}
+
+// TestUpdateSubflow_PruneTwoTabsOneDeployment covers issue #474: pruning
+// instances in two tabs is one backup and one deployment, not one per tab.
+func TestUpdateSubflow_PruneTwoTabsOneDeployment(t *testing.T) {
+	envelope := `{"id":"global","subflows":[` + sfATwoOutputs + `],"configs":[]}`
+	s := newPruneServer(t, envelope, twoTabPruneConfig(t))
+
+	if err := s.client.UpdateSubflow(context.Background(), "sf_a", json.RawMessage(sfAOneOutput), true); err != nil {
+		t.Fatalf("UpdateSubflow with pruning: %v", err)
+	}
+	if len(s.posts) != 1 {
+		t.Fatalf("two pruned tabs took %d deployments, want 1", len(s.posts))
+	}
+	// The backup is taken before the deployment, so the count seen by the
+	// POST handler is the backup of the pruning deployment alone. The
+	// definition write that follows takes its own, as it always did.
+	if got := s.posts[0].backups; got != 1 {
+		t.Errorf("the pruning deployment ran after %d backups, want 1", got)
+	}
+	body := s.posts[0].body
+	for id, want := range map[string]string{"inst_t": `[["n1"]]`, "inst_u": `[["m1"]]`} {
+		if got := compactJSON(t, fieldOfObject(t, body, id, "wires")); got != want {
+			t.Errorf("instance %s wires in the deployed body = %s, want %s", id, got, want)
+		}
+	}
+	for _, id := range []string{"n1", "n2", "m1"} {
+		if fieldOfObject(t, body, id, "type") != "debug" {
+			t.Errorf("node %s missing from the deployed tabs: %s", id, body)
+		}
+	}
+	if len(s.puts) != 1 {
+		t.Fatalf("definition writes = %d, want 1", len(s.puts))
+	}
+	if outs, ok := fieldOfObject(t, s.puts[0], "sf_a", "out").([]any); !ok || len(outs) != 1 {
+		t.Errorf("PUT body does not carry the one-output definition: %s", s.puts[0])
+	}
+	if got := s.backupCount(t); got != 2 {
+		t.Errorf("backups = %d, want 2 (the pruned tabs and the definition write)", got)
+	}
+}
+
+// TestUpdateSubflow_PruneDeploymentFails: a deployment of the combined
+// pruned tabs that the runtime refuses surfaces its error, leaves every tab
+// untouched and does not write the definition. One tab on its own would have
+// been accepted, so a per-tab deployment would have changed the first one.
+func TestUpdateSubflow_PruneDeploymentFails(t *testing.T) {
+	envelope := `{"id":"global","subflows":[` + sfATwoOutputs + `],"configs":[]}`
+	s := newPruneServer(t, envelope, twoTabPruneConfig(t))
+	s.failPost = func(body []byte) bool {
+		// Refuse only the combined deployment: one tab alone is accepted.
+		return strings.Contains(string(body), `"wires":[["n1"]]`) &&
+			strings.Contains(string(body), `"wires":[["m1"]]`)
+	}
+
+	err := s.client.UpdateSubflow(context.Background(), "sf_a", json.RawMessage(sfAOneOutput), true)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 500") {
+		t.Fatalf("expected the deployment error to surface, got %v", err)
+	}
+	if len(s.posts) != 1 || !s.posts[0].rejected {
+		t.Errorf("pruned tabs were deployed separately or not at all: %+v", s.posts)
+	}
+	for _, post := range s.posts {
+		if !post.rejected {
+			t.Errorf("a tab was deployed although the combined deployment failed: %s", post.body)
+		}
+	}
+	if len(s.puts) != 0 {
+		t.Errorf("the definition was written after a failed deployment: %s", s.puts)
+	}
+}
+
+// TestUpdateSubflow_PruneTabsInSortedOrder covers issue #474: the tabs are
+// pruned in sorted id order, so the error does not depend on Go's randomised
+// map iteration. The /flows read that finds the instances still holds the
+// tabs; the snapshot the prune builds on no longer does, as after a race.
+func TestUpdateSubflow_PruneTabsInSortedOrder(t *testing.T) {
+	ids := []string{"tab_e", "tab_a", "tab_d", "tab_b", "tab_c"}
+	detected := []json.RawMessage{json.RawMessage(sfATwoOutputs)}
+	for _, id := range ids {
+		detected = append(detected,
+			json.RawMessage(`{"id":"`+id+`","type":"tab","label":"`+id+`"}`),
+			json.RawMessage(`{"id":"n_`+id+`","type":"debug","z":"`+id+`","x":10,"y":10,"wires":[]}`),
+			json.RawMessage(`{"id":"inst_`+id+`","type":"subflow:sf_a","z":"`+id+`","x":50,"y":50,"wires":[["n_`+id+`"],["n_`+id+`"]]}`))
+	}
+	body, err := json.Marshal(map[string]any{"rev": "r", "flows": detected})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale, err := json.Marshal(map[string]any{"rev": "r", "flows": []json.RawMessage{json.RawMessage(sfATwoOutputs)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope := `{"id":"global","subflows":[` + sfATwoOutputs + `],"configs":[]}`
+	s := newPruneServer(t, envelope, string(body), string(stale))
+
+	err = s.client.UpdateSubflow(context.Background(), "sf_a", json.RawMessage(sfAOneOutput), true)
+	if err == nil || !strings.Contains(err.Error(), "/flow/tab_a") {
+		t.Fatalf("expected the first tab in sorted order to be reported, got %v", err)
+	}
+	for _, id := range ids {
+		if id == "tab_a" {
+			continue
+		}
+		if strings.Contains(err.Error(), "/flow/"+id) {
+			t.Errorf("the reported tab is not the first in sorted order: %v", err)
+		}
+	}
+	if len(s.posts) != 0 || len(s.puts) != 0 {
+		t.Errorf("a prune that could not build every tab wrote to the runtime: POST %d PUT %d", len(s.posts), len(s.puts))
 	}
 }
 
