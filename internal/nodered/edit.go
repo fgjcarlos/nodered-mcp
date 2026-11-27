@@ -85,6 +85,11 @@ func (c *Client) AddNode(ctx context.Context, flowID string, node json.RawMessag
 		if err := c.deniedSubflowInstance(node, flows); err != nil {
 			return nil, err
 		}
+		// Issue #473: an instance's wires are indexed by its definition's
+		// outputs, exactly as instantiate_subflow judges them.
+		if err := validateInstancePorts(node, flows); err != nil {
+			return nil, err
+		}
 		next, err := AddNodeToFlow(f, node)
 		if err != nil {
 			return nil, err
@@ -127,6 +132,11 @@ func (c *Client) UpdateNode(ctx context.Context, flowID, nodeID string, patch ma
 			}
 		}
 		if raw, found := nodeRawByID(next, nodeID); found {
+			// The node as the deployment would carry it: a patch that only
+			// touches wires is caught here too (issue #473).
+			if err := validateInstancePorts(raw, flows); err != nil {
+				return nil, err
+			}
 			return next, c.validateRegisteredNodeTypes(ctx, raw, flows)
 		}
 		return next, nil
@@ -154,6 +164,13 @@ func (c *Client) ConnectNodes(ctx context.Context, flowID, fromID string, port i
 		}
 		if err := c.deniedNodeTypeOfNode(next, fromID, flows); err != nil {
 			return nil, err
+		}
+		// A wire grown past the outputs of the source's subflow definition
+		// never fires (issue #473).
+		if raw, found := nodeRawByID(next, fromID); found {
+			if err := validateInstancePorts(raw, flows); err != nil {
+				return nil, err
+			}
 		}
 		return next, c.deniedNodeTypeOfNode(next, toID, flows)
 	})

@@ -1217,7 +1217,7 @@ func (c *Client) InstantiateSubflow(ctx context.Context, flowID, subflowID strin
 	// Issue #451: the runtime indexes an instance's wires by the outputs
 	// of its definition, so a port past them can never fire.
 	if outputs, ports := subflowOutputCount(def), instancePorts(node); ports > outputs {
-		return nil, fmt.Errorf("subflow %q has %d output(s), but the instance wires %d port(s): wires must have at most %d port(s)", subflowID, outputs, ports, outputs)
+		return nil, instanceWiresError(subflowID, outputs, ports)
 	}
 	if err := c.AddNode(ctx, flowID, built); err != nil {
 		return nil, err

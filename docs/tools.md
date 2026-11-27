@@ -414,13 +414,16 @@ reported as `invalid_subflow_port` by `create_subflow`, `update_subflow`,
 `set_flows`, `restore_backup` and `validate_flow`. The wires of an `in`
 port carry only an `id`.
 
-The number of `out` ports also bounds every instance of the subflow.
-`instantiate_subflow` refuses `wires` with more ports than the definition
-has outputs, and `update_subflow` refuses a definition that would leave an
-instance wired to an output that no longer exists, listing the instances
-and writing nothing, unless `prune_wires` is set: then those wires are
-removed first, tab by tab, and inside any other definition that nests an
-instance.
+The number of `out` ports also bounds every instance of the subflow, on
+whichever path writes one: `add_node`, `update_node` (on the node as the
+deployment would carry it), `connect_nodes` (the source instance) and
+`instantiate_subflow` all refuse `wires` with more ports than the definition
+has outputs, and none of them deploys on a refusal. A `wires` value that is
+not an array of arrays is refused on all four. `update_subflow` refuses a
+definition that would leave an instance wired to an output that no longer
+exists, listing the instances and writing nothing, unless `prune_wires` is
+set: then those wires are removed first, tab by tab, and inside any other
+definition that nests an instance.
 
 ### Semantic warnings in `validate_flow`
 

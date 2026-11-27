@@ -164,7 +164,8 @@ func (s *Server) registerTools() {
 				"Prefer this over update_flow: rewriting a whole tab means reproducing "+
 				"every node exactly, and any field not reproduced is destroyed. This "+
 				"appends and leaves the rest of the tab byte-for-byte identical. The "+
-				"wires are validated before the write.\n\n"+
+				"wires are validated before the write, a subflow instance's port count "+
+				"included.\n\n"+
 				"The node needs at least an id and a type. If you add it without any "+
 				"outgoing wires, use connect_nodes to wire it up afterwards.\n\n"+
 				"WARNING: this tool can deploy any node type, including exec/system "+
@@ -240,10 +241,11 @@ func (s *Server) registerTools() {
 				"adding to it silently drops existing connections. This appends to the "+
 				"port you name, grows the array if that port does not exist yet (a switch "+
 				"node's later outputs), and answers \"already connected\" without deploying "+
-				"or taking a backup when the wire exists. The port is a whole number from "+
-				"0 to 999. A port at or past the source's output count (a function or "+
-				"trigger node's outputs, a switch node's rules) is refused: the runtime would "+
-				"never send on it. So is a wire from a node without outputs (debug, http "+
+				"or taking a backup. The port is a whole number from 0 to 999. A port at or past the "+
+				"source's output count (a function or trigger node's outputs, a switch "+
+				"node's rules, a subflow instance's outputs) is refused: the runtime "+
+				"would never send on it. So is a wire from a node without outputs "+
+				"(debug, http "+
 				"response, link out, mqtt out) or into one without inputs (inject, catch, "+
 				"status, link in): it would never deliver.\n\n"+
 				"Both nodes must be in the same tab.\n\n"+
